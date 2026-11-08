@@ -18,8 +18,9 @@ SpaceKnife is published on the [Releases page](https://github.com/DuskXi/SpaceKn
 | Ubuntu 22.04 or later, Debian family | `SpaceKnife_<version>_amd64.deb` | Package |
 | RHEL 9 or later, Fedora family | `SpaceKnife-<version>-1.x86_64.rpm` | Package |
 | Other Linux, x64 | `SpaceKnife_<version>_amd64.AppImage` | Single file, needs FUSE 2 |
-| Linux, x64 | `SpaceKnife-<version>-linux-x64-portable.tar.gz` | Portable: extract and run, no FUSE |
-| Linux, ARM (arm64) | `SpaceKnife-<version>-linux-arm64-portable.tar.gz` | Portable, ARM |
+| Linux, x64 | `SpaceKnife-<version>-linux-x64-portable.tar.gz` | Portable: extract and run, no FUSE; glibc 2.34+, RHEL 9 too |
+| Linux, x64 | `SpaceKnife-<version>-linux-x64-tauri.tar.gz` | Portable, light: a much smaller download that uses the system's WebKitGTK 4.1 |
+| Linux, ARM (arm64) | `SpaceKnife-<version>-linux-arm64-portable.tar.gz`, `SpaceKnife-<version>-linux-arm64-tauri.tar.gz` | Portable, ARM (the same two kinds) |
 
 On ARM, Windows and Linux have the portable archives; the installers and packages are x64 only (Windows on ARM can also run the x64 installer, emulated). There is no 32-bit Windows build. The Linux builds need glibc 2.34 or later (the level of RHEL 9; Ubuntu 22.04 has 2.35) and WebKitGTK 4.1. <!-- TODO: confirm the glibc floor of the Tauri builds (it follows the CI build machine). -->
 
@@ -147,6 +148,8 @@ cd SpaceKnife-<version>-linux-x64-portable
 ```
 
 No FUSE needed. Like the Windows zip, it keeps all its data in the `data` folder next to the program ([portable mode](../data-locations/#portable-mode)).
+
+There are two Linux portable copies. `…-portable.tar.gz` brings its own browser engine and runs on any distribution with glibc 2.34 or later, RHEL 9 and its rebuilds included; it is what SpaceKnife 0.3.4's portable copies update to. `…-tauri.tar.gz` (folder `SpaceKnife-<version>-linux-x64-tauri`) is a much smaller download that uses the system's WebKitGTK 4.1 (Ubuntu 22.04+, Debian 12+, Fedora: the package `libwebkit2gtk-4.1-0` or `webkit2gtk4.1`). Each one updates to its own kind.
 
 ## Upgrading
 

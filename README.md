@@ -85,8 +85,9 @@ Installers are on the [Releases](https://github.com/DuskXi/SpaceKnife/releases) 
 | RHEL 9+ / Fedora family | `SpaceKnife-<version>-1.x86_64.rpm` |
 | Other Linux x64 | `SpaceKnife_<version>_amd64.AppImage` (needs FUSE 2, or run it with `--appimage-extract-and-run`) |
 | Windows 10+ x64, portable | `SpaceKnife-<version>-win-x64-portable.zip` (no installation: unzip anywhere and run `SpaceKnife.exe`; snapshots and settings stay in the `data` folder next to it; the first launch takes a few seconds longer while Windows checks the new files) |
-| Linux x64, portable | `SpaceKnife-<version>-linux-x64-portable.tar.gz` (extract anywhere and run `./spaceknife`, no FUSE needed; data stays in the `data` folder next to it) |
-| Windows 11 on ARM / ARM Linux, portable | `SpaceKnife-<version>-win-arm64-portable.zip` / `SpaceKnife-<version>-linux-arm64-portable.tar.gz` (the same portable copies, built for arm64; the installers are x64 only) |
+| Linux x64, portable | `SpaceKnife-<version>-linux-x64-portable.tar.gz` (extract anywhere and run `./spaceknife`, no FUSE needed; any distribution with glibc 2.34+, RHEL 9 too; data stays in the `data` folder next to it) |
+| Linux x64, portable, light | `SpaceKnife-<version>-linux-x64-tauri.tar.gz` (a much smaller download that uses the system's WebKitGTK 4.1: Ubuntu 22.04+, Debian 12+, Fedora; extract and run `./spaceknife`) |
+| Windows 11 on ARM / ARM Linux, portable | `SpaceKnife-<version>-win-arm64-portable.zip` / `SpaceKnife-<version>-linux-arm64-portable.tar.gz` or `SpaceKnife-<version>-linux-arm64-tauri.tar.gz` (the same portable copies, built for arm64; the installers are x64 only) |
 | macOS 14+, Apple Silicon | `SpaceKnife_<version>_aarch64.dmg` (preview: not notarized yet, see below) |
 | macOS 14+, Intel | `SpaceKnife_<version>_x64.dmg` (preview: not notarized yet, see below) |
 | macOS 14+, portable | `SpaceKnife-<version>-mac-<arm64 or x64>-portable.zip` (unzip anywhere and open `SpaceKnife.app`; data stays in the `data` folder next to it; allow it once as below) |

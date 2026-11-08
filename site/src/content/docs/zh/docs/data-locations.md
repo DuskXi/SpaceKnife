@@ -105,7 +105,7 @@ SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Conten
 
 ## 便携模式
 
-便携包（`SpaceKnife-<版本>-win-<架构>-portable.zip`、`SpaceKnife-<版本>-linux-<架构>-portable.tar.gz` 和 `SpaceKnife-<版本>-mac-<架构>-portable.zip`）在程序旁边带一个空的 `data` 文件夹，里面只有一份简短说明。SpaceKnife 每次启动都会找这个文件夹：可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`。快照、设置、日志、缓存和界面文件都存在里面，不写进你的用户目录。
+便携包（`SpaceKnife-<版本>-win-<架构>-portable.zip`、`SpaceKnife-<版本>-linux-<架构>-portable.tar.gz`、`SpaceKnife-<版本>-linux-<架构>-tauri.tar.gz` 和 `SpaceKnife-<版本>-mac-<架构>-portable.zip`）在程序旁边带一个空的 `data` 文件夹，里面只有一份简短说明。SpaceKnife 每次启动都会找这个文件夹：可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`。快照、设置、日志、缓存和界面文件都存在里面，不写进你的用户目录。
 
 - 手动设置的 `SPACEKNIFE_HOME` 优先于 `data` 文件夹。
 - 删掉或重命名 `data`，这份程序就改用正常的用户目录；放回去又是便携的。

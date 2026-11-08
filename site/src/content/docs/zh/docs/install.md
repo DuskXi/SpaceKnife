@@ -18,8 +18,9 @@ SpaceKnife 发布在 [Releases 页面](https://github.com/DuskXi/SpaceKnife/rele
 | Ubuntu 22.04 及以上 / Debian 系 | `SpaceKnife_<版本>_amd64.deb` | 软件包 |
 | RHEL 9 及以上 / Fedora 系 | `SpaceKnife-<版本>-1.x86_64.rpm` | 软件包 |
 | 其他 Linux，x64 | `SpaceKnife_<版本>_amd64.AppImage` | 单个文件，需要 FUSE 2 |
-| Linux，x64 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` | 便携版：解压即用，不需要 FUSE |
-| Linux，ARM（arm64） | `SpaceKnife-<版本>-linux-arm64-portable.tar.gz` | 便携版，ARM |
+| Linux，x64 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` | 便携版：解压即用，不需要 FUSE；glibc 2.34+，RHEL 9 也能用 |
+| Linux，x64 | `SpaceKnife-<版本>-linux-x64-tauri.tar.gz` | 轻量便携版：下载小得多，用系统自带的 WebKitGTK 4.1 |
+| Linux，ARM（arm64） | `SpaceKnife-<版本>-linux-arm64-portable.tar.gz`、`SpaceKnife-<版本>-linux-arm64-tauri.tar.gz` | 便携版，ARM（同样两种） |
 
 ARM 上的 Windows 和 Linux 有便携版；安装包和软件包只有 x64（ARM 版 Windows 也能模拟运行 x64 安装包）。没有 32 位 Windows 版。Linux 版需要 glibc 2.34 及以上（RHEL 9 的水平；Ubuntu 22.04 是 2.35）和 WebKitGTK 4.1。<!-- TODO: confirm the glibc floor of the Tauri builds (it follows the CI build machine). -->
 
@@ -147,6 +148,8 @@ cd SpaceKnife-<版本>-linux-x64-portable
 ```
 
 不需要 FUSE。和 Windows 的 zip 一样，所有数据都存在程序旁边的 `data` 文件夹里（[便携模式](../data-locations/#便携模式)）。
+
+Linux 有两种便携版。`…-portable.tar.gz` 自带浏览器引擎，glibc 2.34 及以上的发行版都能用，包括 RHEL 9 及其衍生版；SpaceKnife 0.3.4 的便携版就更新到它。`…-tauri.tar.gz`（文件夹 `SpaceKnife-<版本>-linux-x64-tauri`）下载小得多，用系统自带的 WebKitGTK 4.1（Ubuntu 22.04+、Debian 12+、Fedora：软件包 `libwebkit2gtk-4.1-0` 或 `webkit2gtk4.1`）。两种各自只更新到同一种。
 
 ## 升级
 
