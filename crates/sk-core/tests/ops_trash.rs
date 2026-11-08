@@ -653,6 +653,22 @@ mod windows {
         );
         assert!(!file.exists());
     }
+
+    /// Names that are not Unicode asked through a short name, as in CI's temp folder: the shell
+    /// reports the items under their long names, which are found from the exact names asked for
+    /// (U+FFFD in place of the lone surrogate names nothing). Before, they went to the bin and
+    /// were reported cancelled, without a trash reference.
+    #[test]
+    fn names_that_are_not_unicode_come_back_through_a_short_name() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let long = dir.path().join("a folder with a long name");
+        std::fs::create_dir(&long).unwrap();
+        let Some(short) = short_name(&long) else {
+            return; // no 8.3 names on this volume
+        };
+        super::odd_names_round_trip(Path::new(&short));
+    }
 }
 
 // --------------------------------------------------------------------------- freedesktop details
@@ -1550,7 +1566,12 @@ fn names_that_are_not_unicode_come_back_as_they_were() {
     }
     let (_, _g) = setup();
     let dir = tempfile::tempdir().unwrap();
-    let folder = dir.path().join(odd_os_name("folder", ""));
+    odd_names_round_trip(dir.path());
+}
+
+/// [`names_that_are_not_unicode_come_back_as_they_were`] in `dir` (an empty folder).
+fn odd_names_round_trip(dir: &Path) {
+    let folder = dir.join(odd_os_name("folder", ""));
     if std::fs::create_dir(&folder).is_err() {
         return; // a file system that refuses such names
     }
@@ -1578,7 +1599,7 @@ fn names_that_are_not_unicode_come_back_as_they_were() {
     for (i, f) in files.iter().enumerate() {
         assert_eq!(std::fs::read(f).unwrap(), [b'0' + i as u8]);
     }
-    let beside: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+    let beside: Vec<_> = std::fs::read_dir(dir).unwrap().collect();
     assert_eq!(beside.len(), 1, "{beside:?}");
     assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
 }

@@ -597,10 +597,36 @@ pub struct RecycleRun {
 /// `path` with its 8.3 short names (`RUNNER~1`) expanded to the long ones, as the shell reports
 /// items; None when it has none, or it does not exist.
 pub fn long_names(path: &str) -> Option<String> {
+    long_names_of(Path::new(path))
+}
+
+/// [`long_names`] of the exact path: a name that is not Unicode (a lone surrogate) is looked up
+/// as it is, not as the U+FFFD its text shows (no such file: no long names). The result is text,
+/// as the shell's reports are read.
+pub fn long_names_of(exact: &Path) -> Option<String> {
+    use std::os::windows::ffi::OsStrExt;
+    let shown = exact.to_string_lossy();
+    let path: &str = &shown;
     if !path.contains('~') {
         return None;
     }
-    let w = wide(&long_path(path));
+    // the exact units, behind the `\\?\` (or `\\?\UNC\`) prefix long_path puts before the text
+    let units: Vec<u16> = exact.as_os_str().encode_wide().collect();
+    let prefixed = long_path(path);
+    let mut w: Vec<u16> = if prefixed == path {
+        units
+    } else if let Some(unc) = prefixed.strip_prefix("\\\\?\\UNC\\")
+        && path.starts_with("\\\\")
+        && path.len() == unc.len() + 2
+    {
+        "\\\\?\\UNC\\"
+            .encode_utf16()
+            .chain(units[2..].iter().copied())
+            .collect()
+    } else {
+        "\\\\?\\".encode_utf16().chain(units).collect()
+    };
+    w.push(0);
     let mut buf = vec![0u16; 512];
     loop {
         // SAFETY: w is NUL-terminated; buf holds buf.len() units.
@@ -911,12 +937,12 @@ fn recycle_sta(
         })
         .collect();
     // the shell reports items by their long names: a request through a short name (`RUNNER~1`)
-    // is found under both
+    // is found under both (expanded from the exact path: a name that is not Unicode too)
     let index = shown
         .iter()
         .enumerate()
         .flat_map(|(i, p)| {
-            let long = long_names(p).map(|l| (path_key(&l), i));
+            let long = long_names_of(&paths[i]).map(|l| (path_key(&l), i));
             std::iter::once((path_key(p), i)).chain(long)
         })
         .collect();
