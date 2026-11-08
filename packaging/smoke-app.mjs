@@ -2,8 +2,8 @@
 // Was packaging/smoke_app.py (Electron, through the DevTools port).
 //
 //   node packaging/smoke-app.mjs <program>                    an installed or unpacked app
-//   node packaging/smoke-app.mjs --portable <unpacked portable folder>/spaceknife[.exe]
-//   node packaging/smoke-app.mjs --portable <unpacked macOS archive>/SpaceKnife.app/Contents/MacOS/spaceknife
+//   node packaging/smoke-app.mjs --portable <unpacked portable folder>/SpaceKnife.exe   (Linux: …/spaceknife)
+//   node packaging/smoke-app.mjs --portable <unpacked macOS archive>/SpaceKnife.app/Contents/MacOS/SpaceKnife
 //   node packaging/smoke-app.mjs SpaceKnife_<v>_amd64.AppImage  (extracted and run: no FUSE needed)
 //
 // The app starts minimized (SPACEKNIFE_START_MINIMIZED) with an isolated home (a temporary folder;
