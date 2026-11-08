@@ -159,19 +159,22 @@ identities out of pages, palette results and every frame (keys, names, branch co
 rows), which hides real differences; fixtures without ties would need hundreds of files of
 distinct block counts, and new goldens.
 
-The replayer and `parity.py check` build the fixtures, list them and compare with `listing.json`:
+The replayer and `parity.py check` replay each scenario in the system's temp folder (a folder on
+its volume, as when recorded: the basket's volumes and trash), list the fixture folders they built
+and compare with `listing.json`:
 
-| `SPACEKNIFE_PARITY_TMP` | folders listed as recorded | listed otherwise |
+| in the system's temp folder | `SPACEKNIFE_PARITY_TMP` unset | set (a folder) |
 |---|---|---|
-| unset (the system's temp folder) | compared exactly | compared; differences are not counted, with the reason (`SKIP`) |
-| a folder (the runs' folders go there) | compared exactly | a failure: the folder does not reproduce the recording |
+| folders listed as recorded, or no differences | compared exactly | compared exactly |
+| listed otherwise, and differences | not counted, with the reason (`SKIP`) | replayed again in that folder, which must list them as recorded (else a failure), and compared exactly there |
 
 CI's Linux job makes an ext4 with the recording's hash seed (`mkfs.ext4 -E hash_seed=…`,
 `.github/workflows/ci.yml`), mounts it and sets `SPACEKNIFE_PARITY_TMP` to it; Windows needs
 nothing (NTFS). On the machine the Linux goldens were recorded on (WSL's ext4) the system's temp
 folder already lists them as recorded. ext4's order is its directory hash (`debugfs` `dx_hash -h
 half_md4 -s <seed>` of each name gives the recorded order), so any ext4 made with that seed lists
-the same names alike.
+the same names alike. A scenario that needed both the recording's order and its volume (a
+basket's mount point) could not pass anywhere but there; none does.
 
 ## Known differences
 

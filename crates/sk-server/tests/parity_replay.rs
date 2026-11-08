@@ -851,9 +851,10 @@ fn build_fixture(root: &Path, name: &str) {
 
 // ============================================================================ directory order
 
-/// Where the runs' folders go instead of the system's temp folder: a file system that lists
-/// folders as the goldens' did (CI: an ext4 with the recording's hash seed). Set, a fixture folder
-/// listed otherwise is a failure, not a reason to skip (README.md, "Directory order").
+/// A folder on a file system that lists folders as the goldens' did (CI: an ext4 with the
+/// recording's hash seed): a scenario that differs where the system's temp folder lists the
+/// fixture folders otherwise is replayed there, and must find them listed as recorded (README.md,
+/// "Directory order").
 const PARITY_TMP: &str = "SPACEKNIFE_PARITY_TMP";
 
 /// How this file system lists a built fixture tree (fixtures.py `listing`): each folder ("" for
@@ -1035,12 +1036,12 @@ struct Places {
 }
 
 impl Places {
-    fn make() -> Places {
+    fn make(parent: Option<&std::ffi::OsStr>) -> Places {
         // the harness's prefix and length (Python's mkdtemp: 8 characters), in the system's temp
-        // folder or SPACEKNIFE_PARITY_TMP
+        // folder or `parent`
         let mut builder = tempfile::Builder::new();
         builder.prefix("sk-parity-").rand_bytes(8);
-        let tmp = match std::env::var_os(PARITY_TMP).filter(|v| !v.is_empty()) {
+        let tmp = match parent {
             Some(dir) => builder.tempdir_in(dir),
             None => builder.tempdir(),
         }
@@ -2100,10 +2101,63 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
     }
     let golden = read_json(&golden_path);
     let rules = load_rules(sc.get("normalize"));
+    // in the system's temp folder first: a folder on its volume, as when recorded (the basket's
+    // volumes and trash); where the fixture folders are listed otherwise and that makes
+    // differences, again in SPACEKNIFE_PARITY_TMP, which must list them as recorded (README.md,
+    // "Directory order")
+    let mut run = replay_in(name, &sc, &golden, &rules, None).await;
+    if let (Some(at), false) = (&run.other_order, run.bad.is_empty()) {
+        remove_all(&run.places.tmp);
+        let Some(parent) = std::env::var_os(PARITY_TMP).filter(|v| !v.is_empty()) else {
+            eprintln!(
+                "{name}: {} differences from the 0.3.4 golden not counted: this file system lists the fixture folders in another order than the one the goldens were recorded on ({at}), and 0.3.4 keeps that order for entries of equal size. Replay it with {PARITY_TMP} naming a folder that lists them as golden/{}/listing.json says (tests/parity/README.md, \"Directory order\").",
+                run.bad.len(),
+                platform()
+            );
+            return None;
+        };
+        eprintln!(
+            "{name}: the temp folder lists the fixture folders otherwise ({at}): replayed in {PARITY_TMP}"
+        );
+        run = replay_in(name, &sc, &golden, &rules, Some(&parent)).await;
+        if let Some(at) = &run.other_order {
+            remove_all(&run.places.tmp);
+            panic!(
+                "{name}: {PARITY_TMP} lists the fixture folders in another order than golden/{}/listing.json ({at}): it does not reproduce the file system the goldens were recorded on",
+                platform()
+            );
+        }
+    }
+    if run.bad.is_empty() {
+        remove_all(&run.places.tmp);
+    } else {
+        // kept for a look: the backend's log is there
+        eprintln!("{name}: kept {}", run.places.tmp.display());
+    }
+    Some(run.bad)
+}
+
+/// One replay of a scenario: its differences (known ones left out), the first fixture folder
+/// listed otherwise than the recording (None: as recorded), and the run's folders.
+struct Replayed {
+    bad: Vec<(String, Value, Value)>,
+    other_order: Option<String>,
+    places: Places,
+}
+
+/// The scenario replayed with its folders in `parent` (None: the system's temp folder).
+async fn replay_in(
+    name: &str,
+    sc: &Value,
+    golden: &Value,
+    rules: &Value,
+    parent: Option<&std::ffi::OsStr>,
+) -> Replayed {
+    let dir = parity_dir();
     let feed = start_feed().await;
-    let places = Places::make();
+    let places = Places::make(parent);
     // a folder this file system lists otherwise than the recording's did: entries of equal size
-    // come in another order, as with 0.3.4 itself (README.md, "Directory order")
+    // come in another order, as with 0.3.4 itself
     let recorded = recorded_listing();
     let mut other_order = None;
     for (fname, tree) in sc["fixtures"].as_object().cloned().unwrap_or_default() {
@@ -2117,14 +2171,6 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
             other_order = Some(format!("{tree}: {folder}"));
         }
     }
-    let strict = std::env::var_os(PARITY_TMP).is_some_and(|v| !v.is_empty());
-    if let (Some(at), true) = (&other_order, strict) {
-        remove_all(&places.tmp);
-        panic!(
-            "{name}: {PARITY_TMP} lists the fixture folders in another order than golden/{}/listing.json ({at}): it does not reproduce the file system the goldens were recorded on",
-            platform()
-        );
-    }
     let upgrade = sc.get("setup").is_some();
     if upgrade {
         apply_home_template(
@@ -2137,10 +2183,10 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
     }
     let mapping = places.mapping();
     let mut run = Run {
-        sc: &sc,
+        sc,
         places: &places,
         feed,
-        norm: Normalizer::new(&rules, &mapping),
+        norm: Normalizer::new(rules, &mapping),
         saved: HashMap::new(),
         last_scan: String::new(),
         view_scan: HashMap::new(),
@@ -2174,7 +2220,7 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
         .filter(|r| !live_only.contains(&int_of(&r["i"])))
         .cloned()
         .collect();
-    let diffs = compare(&keyed(&expected), &keyed(&transcript), &rules);
+    let diffs = compare(&keyed(&expected), &keyed(&transcript), rules);
     let mut known: Vec<Value> = read_json(&dir.join("known_diffs.json"))["known"]
         .as_array()
         .cloned()
@@ -2188,23 +2234,11 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
                 .any(|k| glob_match(k["path"].as_str().unwrap(), p))
         })
         .collect();
-    if let (Some(at), false) = (&other_order, bad.is_empty()) {
-        // not comparable here; CI replays where the folders are listed as recorded
-        eprintln!(
-            "{name}: {} differences from the 0.3.4 golden not counted: this file system lists the fixture folders in another order than the one the goldens were recorded on ({at}), and 0.3.4 keeps that order for entries of equal size. Replay it with {PARITY_TMP} naming a folder that lists them as golden/{}/listing.json says (tests/parity/README.md, \"Directory order\").",
-            bad.len(),
-            platform()
-        );
-        remove_all(&places.tmp);
-        return None;
+    Replayed {
+        bad,
+        other_order,
+        places,
     }
-    if bad.is_empty() {
-        remove_all(&places.tmp);
-    } else {
-        // kept for a look: the backend's log is there
-        eprintln!("{name}: kept {}", places.tmp.display());
-    }
-    Some(bad)
 }
 
 fn report(name: &str, bad: &[(String, Value, Value)]) -> String {

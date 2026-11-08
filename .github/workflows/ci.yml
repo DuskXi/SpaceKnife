@@ -114,9 +114,10 @@ jobs:
       # The parity replay's Linux goldens (tests/parity/README.md, "Directory order") were recorded
       # on an ext4, which lists each folder by a hash of the names with its own seed; 0.3.4 keeps
       # that order for entries of equal size, so the replay compares exactly only where folders are
-      # listed alike. The runner's ext4 has another seed: the replay runs in an ext4 made with the
-      # recording's (golden/linux/listing.json), where it must find the fixture folders listed as
-      # recorded (SPACEKNIFE_PARITY_TMP).
+      # listed alike. The runner's ext4 has another seed: a scenario that differs in the runner's
+      # temp folder while it lists the fixture folders otherwise is replayed again in an ext4 made
+      # with the recording's seed (golden/linux/listing.json, SPACEKNIFE_PARITY_TMP), where it
+      # must find them listed as recorded.
       - name: An ext4 that lists folders as the Linux goldens' did
         if: runner.os == 'Linux'
         run: |

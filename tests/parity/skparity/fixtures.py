@@ -120,7 +120,8 @@ def build(root: Path, name: str, now: float | None = None) -> None:
 
 
 def temp_parent() -> str | None:
-    """The folder the runs' folders go in: SPACEKNIFE_PARITY_TMP, else the system's temp folder."""
+    """SPACEKNIFE_PARITY_TMP: a folder on a file system that lists folders as the goldens' did,
+    where `check` replays what differs where the system's temp folder lists them otherwise."""
     return os.environ.get(PARITY_TMP) or None
 
 
@@ -141,10 +142,11 @@ def listing(root: Path) -> dict[str, list[str]]:
     return dict(sorted(out.items()))
 
 
-def listings(names: Iterable[str]) -> dict[str, dict[str, list[str]]]:
-    """`listing` of each tree, built in a temporary folder (where the runs' folders go) and removed."""
+def listings(names: Iterable[str], parent: str | None) -> dict[str, dict[str, list[str]]]:
+    """`listing` of each tree, built in a temporary folder in `parent` (None: the system's temp
+    folder) and removed."""
     out: dict[str, dict[str, list[str]]] = {}
-    tmp = Path(tempfile.mkdtemp(prefix="sk-parity-listing-", dir=temp_parent()))
+    tmp = Path(tempfile.mkdtemp(prefix="sk-parity-listing-", dir=parent))
     try:
         for name in names:
             build(tmp / name, name)
