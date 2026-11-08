@@ -148,10 +148,8 @@ pub fn scan_with(args: &ScanArgs, out: &mut Console) -> i32 {
     let roots = scanner.roots();
     let mut snap = None;
     if result.state == ScanState::Done && !args.no_snapshot {
-        let keys: Vec<String> = roots
-            .iter()
-            .map(|r| r.path.to_string_lossy().into_owned())
-            .collect();
+        // the system's own strings: the folder 0.3.x named for these roots
+        let keys: Vec<&std::path::Path> = roots.iter().map(|r| r.path.as_path()).collect();
         let path = snapshot::auto_path(&keys, None, &sk_core::paths::snapshots_dir());
         if save(&scanner, &path, &method) {
             if let Some(folder) = path.parent() {

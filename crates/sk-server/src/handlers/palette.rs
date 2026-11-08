@@ -51,7 +51,7 @@ pub fn looks_like_filter(text: &str) -> bool {
 }
 
 fn target_of(h: Option<&ScanHandle>) -> Option<String> {
-    h.map(|h| sk_store::snapshot::root_key(&h.root_paths()))
+    h.map(|h| sk_store::snapshot::root_key(&h.root_os_paths()))
 }
 
 /// Saved snapshots of one scan target: the files in its auto-save folder.

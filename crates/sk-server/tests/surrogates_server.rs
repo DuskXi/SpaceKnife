@@ -165,6 +165,92 @@ async fn scan_of_undecodable_names_over_the_protocol() {
     srv.shutdown();
 }
 
+/// The first root of `root_keys_os.json` (a lone surrogate on Windows, a byte that is not UTF-8 on
+/// POSIX) and the key 0.3.4 gave it.
+fn odd_root_and_key() -> (OsString, String) {
+    let platform = if cfg!(windows) { "windows" } else { "posix" };
+    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../sk-core/tests/data/v034")
+        .join(platform)
+        .join("root_keys_os.json");
+    let cases: Value = serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+    let case = &cases[0];
+    let hex = case["roots_hex"][0].as_str().unwrap();
+    let raw: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect();
+    #[cfg(windows)]
+    let root = {
+        use std::os::windows::ffi::OsStringExt;
+        let units: Vec<u16> = raw
+            .chunks(2)
+            .map(|p| u16::from_le_bytes([p[0], p[1]]))
+            .collect();
+        OsString::from_wide(&units)
+    };
+    #[cfg(unix)]
+    let root = {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(raw)
+    };
+    assert!(root.to_str().is_none(), "{root:?}");
+    (root, case["key"].as_str().unwrap().to_owned())
+}
+
+/// 0.3.4 made snapshots of roots no text can hold (its roots came from the system as
+/// `os.fsdecode` text), and named their tag file and auto-save folder with the key of that text.
+/// Opened here, such a snapshot's root is the system's string itself, so the tag file and the
+/// folder a save goes to are 0.3.4's, not those of a lossy string of the root.
+#[tokio::test]
+async fn a_snapshot_root_no_text_can_hold_keeps_its_0_3_4_key() {
+    use sk_store::{Flags, Kind, Times};
+    let (root, key) = odd_root_and_key();
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let store = sk_store::Store::new();
+    {
+        let mut app = store.appender();
+        app.add_root(
+            sk_store::names::encode_name(&root),
+            Kind::Dir,
+            Flags::NONE,
+            Times::default(),
+        )
+        .unwrap();
+    }
+    let file = tmp.path().join("odd.sks");
+    let mut stats = serde_json::Map::new();
+    stats.insert("state".into(), json!("done"));
+    let opts = sk_store::snapshot::SaveOptions {
+        roots: vec![root.to_string_lossy().into_owned()],
+        stats,
+        ..Default::default()
+    };
+    sk_store::snapshot::save(&store.read(), &file, &opts).unwrap();
+
+    let loaded = c
+        .ok("snapshot.load", json!({"path": file.to_string_lossy()}))
+        .await;
+    let id = loaded["scan_id"].as_str().unwrap().to_owned();
+    let h = srv.server.scans.get(&id).unwrap();
+    assert_eq!(h.roots.read()[0].path.as_os_str(), root.as_os_str());
+    let tags = h.ctx.tags.lock().file.clone().expect("tags.remember is on");
+    assert_eq!(
+        tags.file_name().and_then(OsStr::to_str),
+        Some(format!("{key}.json").as_str())
+    );
+    let saved = c.ok("snapshot.save", json!({"scan_id": id})).await;
+    let folder = Path::new(saved["path"].as_str().unwrap())
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(OsStr::to_str)
+        .map(str::to_owned);
+    assert_eq!(folder.as_deref(), Some(key.as_str()), "{saved}");
+    srv.shutdown();
+}
+
 /// A snapshot (format 3) of a scan holding names that are not valid Unicode: loaded back, the
 /// names and the paths built from them are the same. (0.3.4's test also put one in the root's
 /// own path; a root reaches the backend as protocol text, which cannot name such a folder.)

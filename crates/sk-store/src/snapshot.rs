@@ -668,7 +668,11 @@ pub fn load_with(
 /// SpaceKnife 0.3.x gave them (the first 12 hex digits of a SHA-1 of the normalised roots, see
 /// [`rootkey`]): the auto-save folders, tag files, palette jumps and volume histories it wrote
 /// are found under it.
-pub fn root_key(roots: &[String]) -> String {
+///
+/// The roots are the system's own strings (`Path`, `OsStr`; a `String` is one too): a root no
+/// UTF-8 text can hold (a lone surrogate on Windows, bytes that are not UTF-8 on POSIX) gets the
+/// key 0.3.x gave it, which a lossy `String` of it does not.
+pub fn root_key<S: AsRef<std::ffi::OsStr>>(roots: &[S]) -> String {
     rootkey::root_key(roots)
 }
 
@@ -747,7 +751,11 @@ fn iso_week(days: i64) -> (i64, i64) {
 /// `<base>/<root key>/<stamp>.sks`; a snapshot of the same second there already (a manual save
 /// right after the auto-save) makes it `<stamp>_001.sks`, `_002` … — later names sort after
 /// earlier ones ([`parse_stamp`] reads them, [`prune`] and the newest-first listings follow).
-pub fn auto_path(roots: &[String], when: Option<u64>, base: &Path) -> PathBuf {
+pub fn auto_path<S: AsRef<std::ffi::OsStr>>(
+    roots: &[S],
+    when: Option<u64>,
+    base: &Path,
+) -> PathBuf {
     let folder = base.join(root_key(roots));
     let stamp = stamp(when.unwrap_or_else(now_secs));
     let first = folder.join(format!("{stamp}.{SUFFIX}"));
@@ -840,10 +848,7 @@ mod tests {
         let k = root_key(&["C:\\".to_string()]);
         assert!(k.starts_with("C-"), "{k}");
         let tail = |k: String| k.rsplit('-').next().unwrap().to_string();
-        assert_eq!(
-            tail(root_key(&["/a".into(), "/b".into()])),
-            tail(root_key(&["/b".into(), "/a".into()]))
-        );
-        assert!(root_key(&["/".into()]).starts_with("root-"));
+        assert_eq!(tail(root_key(&["/a", "/b"])), tail(root_key(&["/b", "/a"])));
+        assert!(root_key(&["/"]).starts_with("root-"));
     }
 }
