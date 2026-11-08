@@ -6,11 +6,13 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 pub mod backend;
+pub mod cli;
 pub mod commands;
 pub mod events;
 pub mod files;
 pub mod install;
 pub mod links;
+pub mod navigation;
 pub mod portable;
 pub mod terminal;
 pub mod text;
@@ -29,7 +31,9 @@ pub fn portable_dir() -> Option<&'static Path> {
 /// A portable copy keeps its data next to the executable (on macOS next to the app bundle, also
 /// when macOS runs a translocated copy of it): everything the process writes goes there, the
 /// backend included (`sk_core::paths::set_home`, as SPACEKNIFE_HOME would; the environment is left
-/// alone). Call first thing in main.
+/// alone). The backend in this process needs no SPACEKNIFE_SHELL: unset is this shell, the Tauri
+/// app (`sk_core::update::shell`; only the Electron shell passes `electron` to its backend).
+/// Call first thing in main.
 pub fn prepare_environment() {
     let Ok(exe) = std::env::current_exe() else {
         return;

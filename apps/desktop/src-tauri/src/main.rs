@@ -25,5 +25,10 @@ fn main() {
         _ => {}
     }
     spaceknife_desktop::prepare_environment();
+    // 0.3.4's `SpaceKnife --headless` / `--listen <address>` (anywhere among the arguments): headless
+    // mode in this terminal, no window (cli.rs)
+    if spaceknife_desktop::cli::wants_headless(args.get(1..).unwrap_or(&[])) {
+        std::process::exit(spaceknife_desktop::cli::run_headless(&args));
+    }
     spaceknife_desktop::run();
 }

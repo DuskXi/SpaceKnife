@@ -1,5 +1,6 @@
-// The host API the interface calls as `window.sk`: in the app, lib/tauriHost.ts implements it with
-// Tauri commands (src-tauri/src/commands.rs); in a browser, shim.ts. (Was Electron's preload contract.)
+// The host API the interface calls as `window.sk`: in the Tauri shell lib/tauriHost.ts implements it
+// with Tauri commands (src-tauri/src/commands.rs), in the Electron shell lib/electronHost.ts with the
+// IPC channels of apps/electron-shell; in a browser, shim.ts. lib/installHost.ts picks one.
 
 import type { InstallHow } from "./install";
 import type { ThemeSetting } from "./theme";
@@ -42,8 +43,9 @@ export interface SkApi {
   remote: RemoteInfo | null;
   /** started by 「无缝更新」: the window says once that the update is done */
   justUpdated: boolean;
-  /** the runtime's versions, for 「关于与更新」 ("" where unknown, e.g. browser mode) */
-  versions: { tauri: string; webview: string };
+  /** the shell the window runs in, for 「关于与更新」: "Tauri" or "Electron" with its version, and its
+   *  web view ("" where unknown, e.g. browser mode) */
+  versions: { runtime: string; runtimeVersion: string; webview: string };
   backend(): Promise<BackendState>;
   /** The interface language changed (M7.5): the main process's own texts follow. */
   setLanguage(lang: "zh-CN" | "en"): void;
@@ -92,11 +94,11 @@ export interface SkApi {
      *  File objects carry no path, use onDropPaths there; browser mode). */
     pathOf(file: File): string;
     /** Files and folders dropped on the window, with their absolute paths (the app: Tauri's drag-drop
-     *  event; nothing in browser mode). Returns the unsubscribe. */
+     *  event, or the page's drop event and pathOf in Electron; nothing in browser mode). Returns the unsubscribe. */
     onDropPaths(cb: (paths: string[]) => void): () => void;
     /** Files are being dragged over the window (true: entered or moving over it; false: left it or
-     *  were dropped), for the start page's drop overlay (the app: Tauri's drag-drop events; nothing in
-     *  browser mode, where the page's own dragover / dragleave do it). Returns the unsubscribe. */
+     *  were dropped), for the start page's drop overlay (the app: Tauri's drag-drop events, the page's drag events
+     *  in Electron; nothing in browser mode, where the page's own dragover / dragleave do it). Returns the unsubscribe. */
     onDragState(cb: (over: boolean) => void): () => void;
   };
 }

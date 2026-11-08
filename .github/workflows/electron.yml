@@ -10,10 +10,10 @@ name: Electron shell build
 #
 # What the shell's own build has to leave, by contract with this workflow: `pnpm run package` in
 # apps/electron-shell (after the interface and spaceknife-cli are built, below) puts those files in
-# dist/electron/; the app it packs starts its spaceknife-cli serve with SPACEKNIFE_SHELL=electron
+# target/electron-shell/dist/ (electron-builder.yml directories.output); the app it packs starts its spaceknife-cli serve with SPACEKNIFE_SHELL=electron
 # (the backend then picks the Electron shell's files) and, when SPACEKNIFE_READY_FILE is set (the
 # tests), with --ready-file "$SPACEKNIFE_READY_FILE"; the rpm carries
-# packaging/linux/rpm-posttrans.sh as its %posttrans (electron-builder rpm.fpm: --rpm-posttrans),
+# apps/electron-shell/build/linux/rpm-posttrans.sh as its %posttrans (electron-builder rpm.fpm: --rpm-posttrans),
 # which puts back the /usr/bin/spaceknife link 0.3.4's %postun takes away on an upgrade.
 # This workflow then writes the AppImage's update information and .zsync (tools/appimage.mjs),
 # checks the files (no build-machine home folder; glibc ≤ 2.34 for every ELF file on Linux),
@@ -126,8 +126,8 @@ jobs:
             want=("SpaceKnife-$version-x86_64.AppImage" "spaceknife-${version/-/\~}.x86_64.rpm")
           fi
           for f in "${want[@]}"; do
-            [ -f "dist/electron/$f" ] || { echo "::error::the shell's build left no dist/electron/$f: $(ls dist/electron)"; exit 1; }
-            cp "dist/electron/$f" target/electron/
+            [ -f "target/electron-shell/dist/$f" ] || { echo "::error::the shell's build left no target/electron-shell/dist/$f: $(ls target/electron-shell/dist)"; exit 1; }
+            cp "target/electron-shell/dist/$f" target/electron/
           done
           echo "version=$version" >> "$GITHUB_ENV"
           ls -l target/electron

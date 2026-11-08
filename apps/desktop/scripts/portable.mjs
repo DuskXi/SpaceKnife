@@ -60,7 +60,8 @@ if (os === "mac") {
     if (!existsSync(join(folder, inside))) throw new Error(`the app bundle has no ${inside} (tauri.macos.conf.json mainBinaryName, tauri.bundle.macos.json)`);
   }
 } else {
-  // the cargo binary under the program's name (Windows: SpaceKnife.exe, as 0.3.x checks it, case and all)
+  // the cargo binary under the program's name (Windows: SpaceKnife.exe, as 0.3.x checks it, case
+  // and all; tauri.windows.conf.json's mainBinaryName names the build so too, the same file there)
   copyFileSync(join(release, `spaceknife${exe}`), join(folder, PROGRAM[os]));
   copyFileSync(join(release, `spaceknife-cli${exe}`), join(folder, `spaceknife-cli${exe}`));
   // Windows: `SpaceKnife --headless …` in a terminal (prepare-bundle.mjs builds it)

@@ -84,7 +84,7 @@ export function browserApi(cfg: BrowserApiConfig, env: BrowserEnv): SkApi {
     host: cfg.host,
     remote: cfg.remote,
     justUpdated: !!cfg.justUpdated,
-    versions: { tauri: "", webview: "" },
+    versions: { runtime: "", runtimeVersion: "", webview: "" },
     backend: async () => cfg.state,
     onBackend: () => noop,
     window: {

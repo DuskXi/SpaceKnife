@@ -1,5 +1,5 @@
-<!-- The versions of the parts, as a settings group; one button copies them all. The runtime is Tauri
-     and the system's webview (window.sk.versions). -->
+<!-- The versions of the parts, as a settings group; one button copies them all. The shell is Tauri or
+     Electron, with its web view (window.sk.versions); a browser tab has neither. -->
 <script setup lang="ts">
 import { computed, shallowRef, watch } from "vue";
 
@@ -32,7 +32,7 @@ const rows = computed((): [string, string][] => {
   return [
     ["SpaceKnife", window.sk.version],
     [t("安装方式"), installKindName(kind.value)],
-    ["Tauri", v.tauri || "—"],
+    [v.runtime || t("外壳"), v.runtimeVersion || "—"],
     ["WebView", v.webview || "—"],
     ["Rust", s?.server.rust ?? "—"],
     [t("协议"), PROTOCOL_VERSION],

@@ -8,9 +8,10 @@
 //
 // The app starts minimized (SPACEKNIFE_START_MINIMIZED) with an isolated home (a temporary folder;
 // with --portable the data folder next to the program, which the app has to find by itself) and
-// writes its backend's address and token to SPACEKNIFE_READY_FILE (src-tauri/src/backend.rs). The
-// test waits for that, checks the backend runs in the app's own process, says session.hello with
-// the token and lists the drives (volume.list), then closes the app the way the system does
+// writes its backend's address and token to SPACEKNIFE_READY_FILE (the Tauri shell's backend in
+// src-tauri/src/backend.rs, the Electron shell's spaceknife-cli serve --ready-file). The test waits
+// for that, says session.hello with the token and lists the drives (volume.list), then closes the
+// app the way the system does
 // (WM_CLOSE / SIGTERM) and checks that it exits and its address closes. With --kind (implied by
 // --portable) the app must take itself for that kind of install (update.status). With --portable the data
 // folder must hold what the app wrote. The window itself is not looked at: the system WebView has
@@ -30,6 +31,18 @@ const wantKind = kindAt >= 0 ? args[kindAt + 1] : portable ? "portable" : null;
 const target = args.find((a, i) => a !== "--portable" && a !== "--kind" && i !== kindAt + 1);
 if (!target) fail("usage: node packaging/smoke-app.mjs [--portable] [--kind nsis|appimage|deb|rpm|dmg] <program>");
 const app = resolve(target);
+
+/** The app's own process on Linux, from its backend's: the Tauri shell runs the backend in the app
+ *  (the same process), the Electron shell runs spaceknife-cli as its child (the parent). */
+function appProcess(backendPid) {
+  try {
+    if (readFileSync(`/proc/${backendPid}/comm`, "utf8").trim() !== "spaceknife-cli") return backendPid;
+    const stat = readFileSync(`/proc/${backendPid}/stat`, "utf8");
+    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]); // the field after the state: ppid
+  } catch {
+    return backendPid;
+  }
+}
 
 /** The portable data folder of a program: next to it, on macOS next to its app bundle. */
 function dataFolder(program) {
@@ -73,9 +86,9 @@ async function smoke(home) {
     console.log(`install kind: ${kind}`);
     if (wantKind && kind !== wantKind) throw new Error(`the app takes itself for a ${kind} install, not ${wantKind}`);
     session.close();
-    // an AppImage started by its runtime: the program is the runtime's child (info.pid, the
-    // backend runs in it), and SIGTERM to the runtime would not reach it; the runtime exits with it
-    const program = app.endsWith(".AppImage") ? info.pid : proc.pid;
+    // an AppImage started by its runtime: the program is the runtime's child, and SIGTERM to the
+    // runtime would not reach it; the runtime exits with it
+    const program = app.endsWith(".AppImage") ? appProcess(info.pid) : proc.pid;
     stop(program);
     await until("the app to exit", () => exited, 15_000).catch(() => {
       console.log("the app did not close on request: ending it");

@@ -6,11 +6,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use tauri::webview::NewWindowResponse;
 use tauri::window::Color;
 use tauri::{
     AppHandle, Emitter, Manager, Theme, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
 };
+use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::Themes;
 use crate::events::MAXIMIZED;
@@ -119,7 +121,32 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         crate::theme::WINDOW_BG_LIGHT
     };
 
+    // only the interface's own pages (navigation.rs); a new window never opens, a page of the
+    // project goes to the browser (the help page sends its links to open_external; this catches
+    // what slips past it)
+    let dev = tauri::is_dev()
+        .then(|| app.config().build.dev_url.clone())
+        .flatten();
+    let opener = app.clone();
     let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
+        .on_navigation(move |url| {
+            let own = crate::navigation::is_own_page(url, dev.as_ref());
+            if !own {
+                eprintln!("[window] not going to {url}: not a page of the interface");
+            }
+            own
+        })
+        .on_new_window(move |url, _features| {
+            match crate::links::project_page(url.as_str()) {
+                Some(page) => {
+                    if let Err(err) = opener.opener().open_url(page, None::<&str>) {
+                        eprintln!("[shell] could not open {url}: {err}");
+                    }
+                }
+                None => eprintln!("[window] no window for {url}"),
+            }
+            NewWindowResponse::Deny
+        })
         .title("SpaceKnife")
         .inner_size(1440.0, 900.0)
         .min_inner_size(1024.0, 640.0)

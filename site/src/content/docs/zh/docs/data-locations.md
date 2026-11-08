@@ -80,7 +80,7 @@ Windows，在 PowerShell 里只对这一次启动生效：
 
 ```powershell
 $env:SPACEKNIFE_HOME = "D:\SpaceKnife-data"
-& "<安装目录>\spaceknife.exe"
+& "<安装目录>\SpaceKnife.exe"
 ```
 
 Windows，对之后启动的所有程序生效（要撤销，在 Windows 的环境变量设置里删掉它）：
@@ -98,7 +98,7 @@ SPACEKNIFE_HOME=/home/lenny/spaceknife-data spaceknife
 macOS：
 
 ```bash
-SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/spaceknife
+SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife
 ```
 
 [命令行](../command-line/)也认这个变量：设了 `SPACEKNIFE_HOME` 后，`spaceknife-cli snapshot list` 列出的就是那个文件夹里的快照。

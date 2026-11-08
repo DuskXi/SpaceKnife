@@ -9,6 +9,7 @@ import { nextTick } from "vue";
 import type { SkApi } from "@/shared/api";
 import { activeTab, get, resetState, set, startFormOf } from "@/state/store";
 
+import AboutComponents from "./AboutComponents.vue";
 import MachinePage from "./MachinePage.vue";
 import SettingsPage from "./SettingsPage.vue";
 import StartPage from "./StartPage.vue";
@@ -24,7 +25,7 @@ beforeEach(() => {
     platform: "win32",
     host: "app",
     version: "0.0.0",
-    versions: { tauri: "2", webview: "1" },
+    versions: { runtime: "Tauri", runtimeVersion: "2", webview: "1" },
     shell: { openPath: vi.fn(), openExternal: vi.fn(), copyText: vi.fn() },
     dialog: { openFolders: vi.fn(async () => []), openSnapshot: vi.fn(async () => null) },
     files: { pathOf: () => "", onDropPaths: (cb: (p: string[]) => void) => ((drop = cb), () => (drop = null)),
@@ -65,6 +66,22 @@ describe("pages", () => {
     const w = mount(MachinePage);
     expect(w.find("h1").text()).toBe("本机磁盘");
     w.unmount();
+  });
+
+  it("names the shell the window runs in and its web view on the About page, Tauri or Electron", () => {
+    for (const [versions, row, view] of [
+      [{ runtime: "Tauri", runtimeVersion: "2.12.4", webview: "142.0.3595.80" }, "Tauri2.12.4", "WebView142.0.3595.80"],
+      [{ runtime: "Electron", runtimeVersion: "44.9.3", webview: "Chromium 146.0" }, "Electron44.9.3", "WebViewChromium 146.0"],
+      [{ runtime: "", runtimeVersion: "", webview: "" }, "外壳—", "WebView—"],
+    ] as const) {
+      window.sk.versions = versions;
+      const w = mount(AboutComponents);
+      const rows = w.findAll(".about-version-row").map((r) => r.text());
+      expect(rows).toContain(row);
+      expect(rows).toContain(view);
+      expect(rows.join()).not.toContain(versions.runtime === "Electron" ? "Tauri" : "Electron");
+      w.unmount();
+    }
   });
 
   it("shows the settings nav and waits for the settings", () => {

@@ -84,7 +84,7 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 | Ubuntu 22.04+ / Debian 系 | `SpaceKnife_<版本>_amd64.deb` |
 | RHEL 9+ / Fedora 系 | `SpaceKnife-<版本>-1.x86_64.rpm` |
 | 其他 Linux x64 | `SpaceKnife_<版本>_amd64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
-| Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `spaceknife.exe`；快照和设置都存在旁边的 `data` 文件夹里；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |
+| Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `SpaceKnife.exe`；快照和设置都存在旁边的 `data` 文件夹里；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |
 | Linux x64 便携版 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz`（解压后运行 `./spaceknife`，不需要 FUSE；数据存在旁边的 `data` 文件夹里） |
 | ARM 版 Windows 11 / ARM Linux 便携版 | `SpaceKnife-<版本>-win-arm64-portable.zip` / `SpaceKnife-<版本>-linux-arm64-portable.tar.gz`（同样的便携版，为 arm64 构建；安装包只有 x64） |
 | macOS 14+，Apple Silicon | `SpaceKnife_<版本>_aarch64.dmg`（预览版：还没经过苹果公证，见下文） |

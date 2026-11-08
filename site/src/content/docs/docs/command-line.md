@@ -12,7 +12,7 @@ SpaceKnife comes with a command-line program, `spaceknife-cli`, built from the s
 | How you installed SpaceKnife | The command line |
 |---|---|
 | Windows installer | `%LOCALAPPDATA%\SpaceKnife\spaceknife-cli.exe` (the default folder) |
-| Windows portable | `spaceknife-cli.exe` next to `spaceknife.exe` |
+| Windows portable | `spaceknife-cli.exe` next to `SpaceKnife.exe` |
 | deb / rpm | `spaceknife-cli` (`/usr/bin/spaceknife-cli`) |
 | Linux portable | `spaceknife-cli` next to `spaceknife` |
 | AppImage | inside the image: `./SpaceKnife_<version>_amd64.AppImage --appimage-extract` unpacks it to `squashfs-root/`, then use `squashfs-root/usr/bin/spaceknife-cli` |

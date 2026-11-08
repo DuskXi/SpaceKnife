@@ -57,6 +57,7 @@
  "源码运行": "Run from source",
  "版本": "Version",
  "组件版本": "Components",
+ "外壳": "Shell",
  "自动检查已关闭": "Automatic checks are off",
  "还有扫描在进行，更新会中断它（已扫描的部分不会保存）": "A scan is still running. Updating stops it (what it has read so far isn't saved).",
  "还没有发布记录：检查一次更新后，这里会列出最近的版本和它们的更新内容": "No releases yet. After a check for updates, the recent releases and their notes are listed here.",

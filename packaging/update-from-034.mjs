@@ -557,7 +557,7 @@ async function packaged(kind) {
   // the deb is the Tauri app now (/usr/bin/spaceknife a file of its own, 0.3.4's /opt/SpaceKnife
   // and its alternative gone); the rpm is the Electron shell, laid out as 0.3.4's (/opt/SpaceKnife,
   // /usr/bin/spaceknife an alternative of it, which 0.3.4's %postun must not have taken away:
-  // packaging/linux/rpm-posttrans.sh)
+  // apps/electron-shell/build/linux/rpm-posttrans.sh)
   const bin = "/usr/bin/spaceknife";
   if (!existsSync(bin)) throw new Error(`no ${bin} after the upgrade (the old package's scripts took it?)`);
   const real = realpathSync(bin);

@@ -65,9 +65,9 @@ shasum -a 256 SpaceKnife_<版本>_aarch64.dmg
 
 ### 便携版 zip
 
-把 `SpaceKnife-<版本>-win-x64-portable.zip` 解压到自己能写入的位置（用户目录、U 盘；不要放进 Program Files），运行 `spaceknife.exe`。它需要 Microsoft Edge WebView2，Windows 11 自带。解压后第一次启动会慢几秒，Windows 要先检查这些新文件。
+把 `SpaceKnife-<版本>-win-x64-portable.zip` 解压到自己能写入的位置（用户目录、U 盘；不要放进 Program Files），运行 `SpaceKnife.exe`。它需要 Microsoft Edge WebView2，Windows 11 自带。解压后第一次启动会慢几秒，Windows 要先检查这些新文件。
 
-`spaceknife.exe` 旁边有一个 `data` 文件夹。只要它在，SpaceKnife 就把所有东西（快照、设置、日志、缓存）都存在里面，不写进你的用户目录。见[便携模式](../data-locations/#便携模式)。
+`SpaceKnife.exe` 旁边有一个 `data` 文件夹。只要它在，SpaceKnife 就把所有东西（快照、设置、日志、缓存）都存在里面，不写进你的用户目录。见[便携模式](../data-locations/#便携模式)。
 
 ## macOS
 

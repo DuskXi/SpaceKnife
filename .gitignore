@@ -13,6 +13,9 @@ dist/
 .output/
 apps/desktop/src-tauri/gen/
 
+# Electron shell (apps/electron-shell): electron-vite's build
+apps/electron-shell/out/
+
 # OS / editors
 .DS_Store
 Thumbs.db

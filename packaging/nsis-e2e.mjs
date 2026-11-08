@@ -6,7 +6,7 @@
 // "Uninstall SpaceKnife.exe", the uninstall entry under electron-builder's GUID for the appId. The
 // update from the real 0.3.4 installer is packaging/update-from-034.mjs nsis.
 //
-//   node packaging/nsis-e2e.mjs dist/electron/SpaceKnife-<v>-Setup-x64.exe [--previous <older Setup-x64.exe>]
+//   node packaging/nsis-e2e.mjs target/electron-shell/dist/SpaceKnife-<v>-Setup-x64.exe [--previous <older Setup-x64.exe>]
 //
 // --previous installs that one first and upgrades it with this one, as an update does (0.3.x's
 // update.ts nsisUpdateArgs: --updated /S --force-run /currentuser). It installs into this user's
