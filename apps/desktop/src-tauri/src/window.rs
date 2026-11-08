@@ -20,21 +20,32 @@ use crate::theme::{ThemeHost, ThemeKeeper, ThemeSetting};
 
 pub const MAIN: &str = "main";
 
+/// An isolated home: SPACEKNIFE_HOME (demos, tests), else a portable copy's data folder.
+fn isolated_home() -> Option<PathBuf> {
+    std::env::var_os("SPACEKNIFE_HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| crate::portable_dir().map(std::path::Path::to_path_buf))
+}
+
 /// Where the shell keeps its own files (theme.json, the webview's profile): `<SPACEKNIFE_HOME>/desktop`
 /// for an isolated home (demos, tests, portable copies), else the app's local data folder; apart
 /// from the backend's files.
 pub fn ui_dir(app: &AppHandle) -> PathBuf {
-    let home = std::env::var_os("SPACEKNIFE_HOME")
-        .filter(|h| !h.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| crate::portable_dir().map(std::path::Path::to_path_buf));
-    match home {
+    match isolated_home() {
         Some(home) => home.join("desktop"),
         None => app
             .path()
             .app_local_data_dir()
             .unwrap_or_else(|_| std::env::temp_dir().join("SpaceKnife")),
     }
+}
+
+/// 0.3.4's Electron app's theme.json for this home (theme.rs electron_theme_file): the same home
+/// 0.3.4 used, as 0.3.4 set SPACEKNIFE_HOME to a portable copy's data folder.
+fn electron_theme_file(app: &AppHandle) -> Option<PathBuf> {
+    let config = app.path().config_dir().ok();
+    crate::theme::electron_theme_file(isolated_home().as_deref(), config.as_deref())
 }
 
 /// "#RRGGBB" as a colour; None for anything else.
@@ -101,17 +112,24 @@ fn write_whole(file: &Path, text: &str) -> std::io::Result<()> {
     std::fs::rename(&tmp, file)
 }
 
-/// Create the window, with the theme theme.json kept, and manage the theme keeper.
+/// Create the window, with the theme theme.json kept (on the first start after 0.3.4, the theme
+/// its Electron app kept), and manage the theme keeper.
 pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let dir = ui_dir(app);
     let file = dir.join("theme.json");
     let text = std::fs::read_to_string(&file).ok();
-    let keeper = ThemeKeeper::new(
+    let earlier = if text.is_none() {
+        electron_theme_file(app).and_then(|f| std::fs::read_to_string(f).ok())
+    } else {
+        None
+    };
+    let keeper = ThemeKeeper::restore(
         TauriThemeHost {
             app: app.clone(),
             file,
         },
         text.as_deref(),
+        earlier.as_deref(),
     );
     let setting = keeper.setting();
     // light where nothing tells yet (「跟随系统」): the system's once the window exists, below
