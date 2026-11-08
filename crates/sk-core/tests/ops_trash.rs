@@ -502,6 +502,69 @@ mod windows {
         assert!(held.exists());
     }
 
+    /// The junction only (never what it points to).
+    struct Unmount(PathBuf);
+    impl Drop for Unmount {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
+
+    /// `link` mounting the volume that holds `near` (what `mountvol` writes: a junction to
+    /// `\\?\Volume{…}\`; made with `mklink /J`, it needs no privilege). None: the volume has no
+    /// GUID.
+    fn mount_volume_at(link: &Path, near: &Path) -> Option<Unmount> {
+        let root = sk_core::ops::win::volume_root(&s(near)).unwrap();
+        let guid = sk_core::ops::win::volume_guid(&root);
+        if guid.is_empty() {
+            return None;
+        }
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(format!("\\\\?\\Volume{guid}\\"))
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "mklink /J to the volume");
+        Some(Unmount(link.to_path_buf()))
+    }
+
+    /// A folder that mounts a volume is never removed: not as an item (protected), not inside a
+    /// deleted folder (`mount_inside`): either would quietly unmount the volume from it. Nothing
+    /// on the mounted volume is touched.
+    #[test]
+    fn folder_mount_points_are_never_removed() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let holder = dir.path().join("holder");
+        std::fs::create_dir(&holder).unwrap();
+        std::fs::write(holder.join("x.txt"), b"x").unwrap();
+        let mnt = holder.join("mnt");
+        let Some(_mounted) = mount_volume_at(&mnt, dir.path()) else {
+            return;
+        };
+        assert!(sk_core::ops::paths::is_mount(&mnt));
+        assert_eq!(sk_core::ops::paths::protected_key(&s(&mnt)), Some("mount"));
+        let r = delete_permanently(&[s(&mnt)], OpOptions::default()).remove(0);
+        assert_eq!(r.code, OpCode::Protected, "{r:?}");
+        let r = trash_all(&[s(&mnt)]).remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(r.code, OpCode::Protected, "{r:?}");
+        assert!(std::fs::symlink_metadata(&mnt).is_ok());
+        let r = delete_permanently(&[s(&holder)], OpOptions::default()).remove(0);
+        assert_eq!(r.code, OpCode::Error, "{r:?}");
+        assert!(r.message.contains("挂载点"), "{r:?}");
+        assert!(sk_core::ops::paths::is_mount(&mnt), "still mounted");
+        assert!(!holder.join("x.txt").exists()); // the rest went
+        // a junction to a plain folder is only a name: it may go
+        let plain = dir.path().join("plain");
+        make_link(&holder, &plain);
+        assert!(!sk_core::ops::paths::is_mount(&plain));
+        assert_eq!(sk_core::ops::paths::protected_key(&s(&plain)), None);
+    }
+
     /// The 8.3 short name of an existing path (cmd's `%~sI`), None when the volume has none.
     fn short_name(p: &Path) -> Option<String> {
         use std::os::windows::process::CommandExt;

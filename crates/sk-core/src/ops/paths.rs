@@ -806,10 +806,26 @@ pub fn is_mount(path: &Path) -> bool {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return false;
     };
-    if !meta.is_dir() {
+    if !is_folder_entry(&meta) {
         return false;
     }
     is_mount_dir(path)
+}
+
+/// A folder as the entry itself is (links not followed). On Windows a folder mount point is a
+/// directory reparse point, which Rust reports as a symlink and not as a directory: the
+/// directory attribute tells.
+fn is_folder_entry(meta: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        meta.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0
+    }
+    #[cfg(not(windows))]
+    {
+        meta.is_dir()
+    }
 }
 
 #[cfg(windows)]
