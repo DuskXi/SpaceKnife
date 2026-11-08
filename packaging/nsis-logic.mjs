@@ -13,9 +13,12 @@
 // nothing outside the folder), 0.3.4's own files (SkRemove034Files) and when its uninstaller may
 // run (SkOldUninstallerUse), the WebView2 minimum (SkWebView2Minimum, with stand-ins for reading
 // and updating the runtime), shortcuts (.lnk files in the sandbox: SkMigrateShortcut's target and
-// AppUserModelID) — and that the app the installer starts gets its environment (cmd.exe stands in
-// for it: on your own desktop run this from packaging/hidden-desktop.ps1, so its console window
-// stays out of sight). Windows only; it writes in a temporary folder only, never the registry.
+// AppUserModelID), closing what runs from a folder (SkCloseIn, on copies of the test program in the
+// sandbox standing in for SpaceKnife's programs and for other ones: only SpaceKnife's go, one that
+// can't be ended stops it) and the files an update in place replaces (SkCheckReplaceable) — and
+// that the app the installer starts gets its environment (cmd.exe stands in for it: on your own
+// desktop run this from packaging/hidden-desktop.ps1, so its console window and the stand-ins'
+// window stay out of sight). Windows only; it writes in a temporary folder only, never the registry.
 //
 //   node packaging/nsis-logic.mjs [--makensis PATH] [--utils PATH] [--helpers PATH]
 //
@@ -24,7 +27,7 @@
 // rendered installer (target/release/nsis/x64). Exit status 1 when a case says something else.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,15 +83,24 @@ try {
   const temp = join(sandbox, "temp");
   mkdirSync(temp);
   let n = 0;
-  /** One run: the case, its command line (as the process gets it, verbatim) -> Map key -> value. */
-  function run(kind, cmdline = "", extra = {}) {
+  /**
+   * One run: the case, its command line (as the process gets it, verbatim) -> Map key -> value.
+   * `exeAt`: the test program runs from a copy at this path in the case's folder.
+   */
+  function run(kind, cmdline = "", extra = {}, { exeAt = null, timeout = 60_000 } = {}) {
     const out = join(sandbox, `out-${++n}.txt`);
     const box = join(sandbox, `box-${n}`);
     mkdirSync(box);
-    const r = spawnSync(exe, cmdline ? [cmdline] : [], {
+    let program = exe;
+    if (exeAt) {
+      program = join(box, exeAt);
+      mkdirSync(dirname(program), { recursive: true });
+      copyFileSync(exe, program);
+    }
+    const r = spawnSync(program, cmdline ? [cmdline] : [], {
       windowsVerbatimArguments: true,
       encoding: "utf8",
-      timeout: 60_000,
+      timeout,
       env: { ...process.env, TMP: temp, TEMP: temp, SK_LOGIC_CASE: kind, SK_LOGIC_OUT: out, SK_LOGIC_SANDBOX: box, ...extra },
     });
     if (!existsSync(out)) throw new Error(`${kind} ${cmdline}: no output (exit ${r.status} ${r.error ?? ""})`);
@@ -290,6 +302,37 @@ try {
   {
     const { got } = run("dropguard");
     expect("SkDropStage leaves a folder it did not make", got, { kept: "1" });
+  }
+  {
+    // SkCloseIn (installer.nsi step 2, the uninstaller), on copies of the test program standing in
+    // for programs: SpaceKnife's that run from the folder go — asked first (the one with a window
+    // closes it and quits), then ended (by the path, as 0.3.4's installer did) — and nothing else
+    // does: the user's own program in that folder, a SpaceKnife.exe in a folder whose name starts
+    // the same, a program that holds one of the folder's files (0.3.4's uninstaller and
+    // SkCheckReplaceable find that one), another copy of the installer, and the installer itself:
+    // this case runs from the folder (an installer in 0.3.4's data folder, an uninstaller in place)
+    const { got, box } = run("close", "", {}, { exeAt: "Programs\\SpaceKnife\\SpaceKnife-Setup.exe", timeout: 120_000 });
+    const ready = Object.fromEntries(["polite", "backend", "user", "other", "holder", "twin"].map((k) => [`ready_${k}`, "1"]));
+    expect(
+      "SkCloseIn: SpaceKnife's programs in the folder, and nothing else",
+      got,
+      { ...ready, exedir: `${box}\\Programs\\SpaceKnife`, result: "", polite: "ended 10", backend: "ended 1", user: "running", other: "running", holder: "running", twin: "running" },
+      ["given"],
+    );
+  }
+  {
+    // one it can't end (as an elevated SpaceKnife is to an installer that is not): the rest is
+    // ended, and SkCloseIn says so (the installer stops with nothing changed) and logs why
+    const { got } = run("close-busy", "", {}, { timeout: 120_000 });
+    const logFile = join(temp, "SpaceKnife-install.log");
+    const log = existsSync(logFile) ? readFileSync(logFile).toString("utf16le") : "";
+    const logged = /could not end: SpaceKnife\.exe \(\d+\): error 5\b/.test(log) ? "1" : "0";
+    expect(
+      "SkCloseIn: one that can't be ended",
+      new Map([...got, ["logged", logged]]),
+      { ready_stubborn: "1", ready_backend: "1", result: "busy", stubborn: "running", backend: "ended 1", logged: "1" },
+      ["debug_off", "given"],
+    );
   }
   {
     // an update in place (installer.nsi step 2): no file it replaces may be held by a program that
