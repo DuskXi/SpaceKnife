@@ -141,7 +141,6 @@ comparison (`steps/<step index>/…`; `*` within a segment, `**` any segments) w
 
 | bug | where | what |
 |---|---|---|
-| `import-change-order` | `settings_classes` | `settings.import` lists changes A→Z by key instead of the settings' own order |
 | `io-topic-before-registry` | `system` | an `io` subscription made right after start never delivers `io.load` |
 | `linux-root-ctime` | `scan_tree`, `system` | Linux: the scan root gets a creation time (std's `created()`, statx) while every other entry has none, as in 0.3.4 |
 

@@ -205,8 +205,8 @@ pub fn stored_language(file: &std::path::Path) -> Option<String> {
     if value.as_str() == Some("system") {
         return None;
     }
-    let language = sk_core::settings::SettingsStore::new(Some(file.to_path_buf()))
-        .get_str("general.language");
+    let language =
+        sk_core::settings::SettingsStore::new(Some(file.to_path_buf())).get_str("general.language");
     (language != "system").then_some(language)
 }
 
