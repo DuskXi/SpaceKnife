@@ -254,13 +254,26 @@ function Wait-App([string]$Dir, [int]$Seconds = 60) {
   }
   return @()
 }
-# an NSIS uninstaller copies itself away and goes on after the one started has exited: wait for
-# the file to go (at most $Seconds), then a moment for the keys
-function Wait-Gone([string]$Path, [int]$Seconds = 120) {
+# an NSIS uninstaller started without _?= (as Windows starts it) copies itself to
+# %TEMP%\~nsu*.tmp\Au_.exe, starts the copy with _?=<its folder>\ and exits before the copy has done
+# anything: wait (at most $Seconds) until no process runs from $Dir or has it on its command line
+# (the copy), as packaging/lib.mjs untilUninstalled does; a copy whose command line cannot be read
+# (elevated, seen from a script that is not) counts by its name. $true when it has ended.
+function Wait-Uninstaller([string]$Dir, [int]$Seconds = 180) {
+  $d = [IO.Path]::GetFullPath($Dir).TrimEnd('\')
   $sw = [Diagnostics.Stopwatch]::StartNew()
-  while ((Test-Path -LiteralPath $Path) -and $sw.Elapsed.TotalSeconds -lt $Seconds) { Start-Sleep -Milliseconds 500 }
-  Start-Sleep -Seconds 2
-  return -not (Test-Path -LiteralPath $Path)
+  do {
+    $busy = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.ProcessId -ne $PID -and (
+          ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($d + '\', [StringComparison]::OrdinalIgnoreCase)) -or
+          ($_.CommandLine -and $_.CommandLine.IndexOf($d, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+          (-not $_.CommandLine -and $_.Name -match '^[A-Z]u_\.exe$'))
+      })
+    if ($busy.Count -eq 0) { return $true }
+    Start-Sleep -Milliseconds 500
+  } while ($sw.Elapsed.TotalSeconds -lt $Seconds)
+  Note ("still at work: " + (($busy | ForEach-Object { "$($_.ProcessId) $($_.Name) $($_.CommandLine)" }) -join '; '))
+  return $false
 }
 function Sha([string]$Path) { return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLower() }
 function Is-Under([string]$Path, [string]$Dir) { $p = [IO.Path]::GetFullPath($Path).TrimEnd('\'); $d = [IO.Path]::GetFullPath($Dir).TrimEnd('\'); return $p.Equals($d, 'OrdinalIgnoreCase') -or $p.StartsWith($d + '\', 'OrdinalIgnoreCase') }
@@ -292,7 +305,10 @@ function Reset-SpaceKnife {
     if ($e.quiet -or $e.uninstall) {
       $cmd = if ($e.quiet) { $e.quiet } else { "$($e.uninstall) /S" }
       if ($cmd -match '^"([^"]+)"\s*(.*)$') { $exe = $Matches[1]; $rest = $Matches[2] } else { $exe = $cmd; $rest = '/S' }
-      if (Test-Path -LiteralPath $exe) { [void](Run-Wait $exe "$rest --delete-app-data" -Elevated:($e.hive -eq 'HKLM') -Timeout 300) }
+      if (Test-Path -LiteralPath $exe) {
+        [void](Run-Wait $exe "$rest --delete-app-data" -Elevated:($e.hive -eq 'HKLM') -Timeout 300)
+        [void](Wait-Uninstaller (Split-Path $exe) 300)
+      }
     }
   }
   Start-Sleep -Seconds 3
@@ -441,7 +457,8 @@ if (Want 'S1') {
     Start-Scenario 'S1U' 'uninstall: data kept by default, gone with --delete-app-data'
     Stop-SpaceKnife
     Assert 'uninstall /S /currentuser exits 0' ((Run-Wait (Join-Path $USERDIR 'uninstall.exe') '/S /currentuser') -eq 0) ''
-    Assert 'program gone' (Wait-Gone (Join-Path $USERDIR 'SpaceKnife.exe')) ''
+    Assert '  its copy in %TEMP% has ended' (Wait-Uninstaller $USERDIR) ''
+    Assert 'program gone' (-not (Test-Path -LiteralPath (Join-Path $USERDIR 'SpaceKnife.exe'))) ''
     Assert 'entry gone' (@(Get-Entries).Count -eq 0) (Get-Entries | ConvertTo-Json -Compress)
     Assert 'Start menu and desktop shortcuts gone' (-not (Test-Path $SM_USER) -and -not (Test-Path $DT_USER)) ''
     Assert-Seeded $seed @('data') 'after uninstalling'
@@ -451,8 +468,8 @@ if (Want 'S1') {
     Assert '  Start menu shortcut with AUMID' ((Get-Lnk $SM_USER).aumid -eq $AUMID) ''
     Stop-SpaceKnife
     Assert 'uninstall --delete-app-data' ((Run-Wait (Join-Path $USERDIR 'uninstall.exe') '/S /currentuser --delete-app-data') -eq 0) ''
-    [void](Wait-Gone (Join-Path $USERDIR 'SpaceKnife.exe'))
-    Assert 'data folder gone' (Wait-Gone $DATA 60) ''
+    Assert '  its copy in %TEMP% has ended' (Wait-Uninstaller $USERDIR) ''
+    Assert 'data folder gone' (-not (Test-Path -LiteralPath $DATA)) ''
     End-Scenario
   }
 }

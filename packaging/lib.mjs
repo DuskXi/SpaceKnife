@@ -1,7 +1,8 @@
 // What the packaging tests share: waiting, the backend's JSON-RPC over its WebSocket (Node's own
 // WebSocket, no dependencies), ending a process tree, an archive's unpacking; following a portable
-// copy's swap, comparing an updated folder with the candidate, and finding and ending what a test
-// left running in its folders (unit tests: tools/tests/packaging_lib.test.mjs).
+// copy's swap, comparing an updated folder with the candidate, finding and ending what a test left
+// running in its folders, waiting for an NSIS uninstaller's own copy (unit tests:
+// tools/tests/packaging_lib.test.mjs).
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -354,6 +355,19 @@ export function processesUnder(roots) {
     }
   }
   return out;
+}
+
+/** Until the NSIS uninstaller of the folder `dir` has done its work. Started as Windows starts it
+ * (no `_?=`), an NSIS uninstaller copies itself to %TEMP%\~nsu*.tmp\Au_.exe, starts the copy with
+ * `_?=<dir>\` and exits before the copy has done anything (NSIS exehead/Main.c), so the exit of
+ * the one started says nothing: this waits until no process runs from `dir` or has it on its
+ * command line (the copy, and what it starts), at most `timeout` ms. `list`: processesUnder. */
+export async function untilUninstalled(dir, { timeout = 180_000, every = 1000, list = processesUnder } = {}) {
+  let left = [];
+  await until(`the uninstaller of ${dir} to finish`, () => (left = list([dir])).length === 0, timeout, every).catch((e) => {
+    if (!left.length) throw e;
+    throw new Error(`the uninstaller of ${dir} is still at work after ${Math.round(timeout / 1000)} s: ${left.map((p) => `${p.pid} ${p.cmd}`).join("; ")}`);
+  });
 }
 
 /** End every process in `roots` (processesUnder), and their children, at once; again while some

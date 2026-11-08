@@ -5,12 +5,12 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { test } from "node:test";
 
-import { alternativesGroup, isElectron, notOwned, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, treeOf, uiIn, watchSwap } from "../../packaging/lib.mjs";
+import { alternativesGroup, isElectron, notOwned, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, treeOf, uiIn, untilUninstalled, watchSwap } from "../../packaging/lib.mjs";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sk-packaging-lib-"));
 const line = (msg) => `2026-11-08 10:00:00 ${msg}\n`;
@@ -210,4 +210,29 @@ test("the processes a test leaves in its folders are found and ended", async () 
       // gone
     }
   }
+});
+
+test("an NSIS uninstaller is done when its own copy has ended, not when the one started exits", async () => {
+  const t = realpathSync.native(tmp());
+  const dir = join(t, "Programs", "SpaceKnife");
+  mkdirSync(dir, { recursive: true });
+  const done = join(t, "done.txt");
+  // the copy as NSIS starts it: from elsewhere (%TEMP%\~nsuA.tmp\Au_.exe), the folder only on its
+  // command line (`_?=<dir>\`), and its work done at the very end
+  const copy = spawn(process.execPath, ["-e", "setTimeout(() => require('node:fs').writeFileSync(process.argv[1], 'done'), 1500)", done, `_?=${dir}${sep}`], { stdio: "ignore" });
+  try {
+    await sleep(300);
+    await untilUninstalled(dir, { every: 100 });
+    assert.ok(existsSync(done), "it came back while the copy was at work");
+  } finally {
+    try {
+      process.kill(copy.pid, "SIGKILL");
+    } catch {
+      // gone
+    }
+    rmSync(t, { recursive: true, force: true });
+  }
+  // one that never ends: named in the timeout's message
+  const stuck = [{ pid: 7, cmd: `${String.raw`C:\Temp\~nsuA.tmp\Au_.exe /S _?=C:\Programs\SpaceKnife`}\\` }];
+  await assert.rejects(untilUninstalled(String.raw`C:\Programs\SpaceKnife`, { timeout: 200, every: 50, list: () => stuck }), /still at work after 0 s: 7 C:\\Temp\\~nsuA\.tmp\\Au_\.exe/);
 });

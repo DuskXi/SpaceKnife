@@ -28,12 +28,14 @@
 // before it could be read — it removes the log as it starts; the folder holds exactly the
 // candidate's files, byte for byte, and the data folder: nothing of 0.3.4 is left, and whatever the
 // candidate has — SpaceKnife.com on Windows, the Electron shell's own files in its Linux portable
-// copy — is the candidate's), nsis (one uninstall entry, the same folder, the shortcuts, data kept
-// on uninstall), appimage (the file is the candidate, no .new), deb / rpm (one package, the old
-// /opt/SpaceKnife gone, /usr/bin/spaceknife is the new program, one desktop entry; the rpm: all
-// that is in /opt/SpaceKnife is the package's, its folders too, after each transaction and while
-// the app runs; the app quit as a user quits it, then a clean removal, whatever is left listed),
-// dmg (bundle id, version, executable, signature).
+// copy — is the candidate's), nsis (one uninstall entry, the same folder, the shortcuts; after a
+// silent uninstall, once the uninstaller's own copy has ended: the folder, the entry, the shortcuts,
+// the cache and the updates gone, the data kept, as 0.3.4's uninstaller left them), appimage (the
+// file is the candidate, no .new), deb / rpm (one package, the old /opt/SpaceKnife gone,
+// /usr/bin/spaceknife is the new program, one desktop entry; the rpm: all that is in
+// /opt/SpaceKnife is the package's, its folders too, after each transaction and while the app
+// runs; the app quit as a user quits it, then a clean removal, whatever is left listed), dmg
+// (bundle id, version, executable, signature).
 //
 // On a failure or a timeout it prints what there is to know (the swap's log as last read, its
 // plan, the updates and app folders, the processes still running from the test's folders, the new
@@ -53,7 +55,7 @@ import http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { MAC, WIN, alternativesGroup, appProcessOf, fail, hello, helperIn, isElectron, notOwned, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, treeOf, uiIn, unpack, until, watchSwap } from "./lib.mjs";
+import { MAC, WIN, alternativesGroup, appProcessOf, fail, hello, helperIn, isElectron, notOwned, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, treeOf, uiIn, unpack, until, untilUninstalled, watchSwap } from "./lib.mjs";
 
 const OLD = "0.3.4";
 /** Where the deb and the rpm put the program (0.3.4's and the new ones). */
@@ -517,7 +519,10 @@ async function nsis() {
   seen.folder = dir;
   seen.data = dataDir;
   seen.updates = join(dataDir, "updates");
-  const seeded = seed({ data: dataDir, cache: join(dataDir, "Cache") });
+  // the data (snapshots, settings, logs), the backend's cache, the downloaded updates: an update
+  // keeps all three, an uninstall only the data (as 0.3.4's uninstaller did)
+  const cacheDir = join(dataDir, "Cache");
+  const seeded = seed({ data: dataDir, cache: cacheDir, updates: seen.updates });
   const { server, feed } = await serveFeed(newPath);
   try {
     step("start 0.3.4 and click 「无缝更新」");
@@ -546,7 +551,8 @@ async function nsis() {
     console.log(`${dir}: ${readdirSync(dir).join(", ")}`);
     const startMenu = allUsers ? join(process.env.ProgramData, "Microsoft", "Windows", "Start Menu", "Programs") : join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs");
     const desktop = allUsers ? join(process.env.PUBLIC, "Desktop") : join(process.env.USERPROFILE, "Desktop");
-    for (const lnk of [join(startMenu, "SpaceKnife.lnk"), join(desktop, "SpaceKnife.lnk")]) {
+    const shortcuts = [join(startMenu, "SpaceKnife.lnk"), join(desktop, "SpaceKnife.lnk")];
+    for (const lnk of shortcuts) {
       const target = existsSync(lnk) ? shortcutTarget(lnk) : "";
       if (resolve(target || ".").toLowerCase() !== resolve(program).toLowerCase()) throw new Error(`${lnk} points at ${target || "(missing)"}`);
     }
@@ -555,12 +561,21 @@ async function nsis() {
     back.session.close();
     stop(back.info.pid, true);
 
-    step(`uninstall ${NEW_VERSION} silently: the program goes, the data stays`);
+    step(`uninstall ${NEW_VERSION} silently: the program, its shortcuts, the cache and the updates go, the data stays`);
     const uninstaller = join(dir, NEW_UNINSTALLER);
     run(uninstaller, ["/S", scope], "uninstalling");
-    await until("the program to be removed", () => !existsSync(program), 120_000);
-    if (uninstallEntries().length) throw new Error("an uninstall entry is left");
-    expectSeeded(seeded);
+    // the one started has copied itself away and exited: the copy does the work
+    await untilUninstalled(dir);
+    if (existsSync(dir)) throw new Error(`${dir} is left after uninstalling: ${readdirSync(dir).join(", ") || "(empty)"}`);
+    const left = uninstallEntries();
+    if (left.length) throw new Error(`an uninstall entry is left: ${JSON.stringify(left)}`);
+    if (installLocation(before.hive)) throw new Error(`${before.hive}\\Software\\${UNINSTALL_GUID} is left`);
+    for (const lnk of shortcuts) if (existsSync(lnk)) throw new Error(`${lnk} is left after uninstalling`);
+    // what 0.3.4's uninstaller did without --updated: the cache and the downloaded updates go, the
+    // data stays unless "your data" is ticked or --delete-app-data given
+    for (const gone of [cacheDir, seen.updates]) if (existsSync(gone)) throw new Error(`${gone} is left after uninstalling: ${readdirSync(gone).join(", ") || "(empty)"}`);
+    expectSeeded(new Map([...seeded].filter(([file]) => dirname(file) === dataDir)));
+    console.log(`${dir}, the uninstall entry, the shortcuts, ${cacheDir} and ${seen.updates} are gone`);
   } finally {
     server.close();
   }

@@ -1,8 +1,9 @@
 // The Windows installer end to end, on a CI runner only: install silently for this user, run the
 // installed app (smoke-app.mjs --kind nsis: it must take itself for an installer copy, whose updates
 // are the next setup.exe), update it in place the way the app does (install.rs nsis_update_args,
-// 0.3.4's arguments: --updated /S --force-run /currentuser), uninstall silently and check the
-// program is gone and the data stays. The installer is Tauri's with the forked NSIS template
+// 0.3.4's arguments: --updated /S --force-run /currentuser), uninstall silently and, once the
+// uninstaller's own copy has ended, check the program, its entry and shortcuts, the cache and the
+// updates are gone and the data stays. The installer is Tauri's with the forked NSIS template
 // (apps/desktop/src-tauri/windows; windows-installer.yml), laid out as 0.3.4's was:
 // %LOCALAPPDATA%\Programs\SpaceKnife\SpaceKnife.exe with spaceknife-cli.exe and SpaceKnife.com next
 // to it, the uninstaller uninstall.exe, the keys under electron-builder's GUID for the appId
@@ -24,7 +25,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { WIN, fail, pidAlive, sleep, stop, until } from "./lib.mjs";
+import { WIN, fail, pidAlive, stop, until, untilUninstalled } from "./lib.mjs";
 
 if (!WIN) fail("the installer test runs on Windows");
 if (process.env.GITHUB_ACTIONS !== "true") fail("this installs and uninstalls SpaceKnife in your profile: it runs on a CI runner only");
@@ -44,6 +45,7 @@ const uninstaller = join(dir, "uninstall.exe");
 const MANIFEST = "installed-files.txt"; // spaceknife.nsh SK_MANIFEST: what the installer put in the folder
 const data = join(process.env.LOCALAPPDATA, "SpaceKnife"); // the backend's data (paths.rs), not the program's folder
 const startMenu = join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs", "SpaceKnife.lnk");
+const desktop = join(process.env.USERPROFILE, "Desktop", "SpaceKnife.lnk");
 const here = fileURLToPath(new URL(".", import.meta.url));
 
 function run(file, argv, what, env = process.env) {
@@ -144,18 +146,25 @@ if (smoke.status !== 0) fail("the installed app's smoke test failed");
   rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
 }
 
-// what the user keeps: a marker in the data folder survives a silent uninstall
+// what a silent uninstall keeps and takes, as 0.3.4's did: the data folder stays (snapshots,
+// settings, logs), the backend's cache and the downloaded updates go
 mkdirSync(data, { recursive: true });
 const marker = join(data, "nsis-e2e-keep.txt");
 writeFileSync(marker, "kept\n");
+const caches = [join(data, "Cache"), join(data, "updates")];
+for (const c of caches) {
+  mkdirSync(c, { recursive: true });
+  writeFileSync(join(c, "nsis-e2e-gone.txt"), "removed by the uninstaller\n");
+}
 run(uninstaller, ["/S", "/currentuser"], "uninstalling");
-// the uninstaller copies itself away and goes on in the background
-await until("the program to be removed", () => !existsSync(exe) && !existsSync(join(dir, "spaceknife-cli.exe")), 120_000).catch((e) => fail(e.message));
-await sleep(2000);
+// the one started has copied itself away and exited: the copy does the work
+await untilUninstalled(dir).catch((e) => fail(`${e.message}${log()}`));
+for (const f of [exe, join(dir, "spaceknife-cli.exe"), join(dir, MANIFEST)]) if (existsSync(f)) fail(`the uninstaller left ${f}`);
 if (entry()) fail("the uninstall entry is left");
 if (location()) fail(`HKCU\\Software\\${GUID} is left`);
-if (existsSync(join(dir, MANIFEST))) fail(`the uninstaller left ${join(dir, MANIFEST)}`);
-if (existsSync(startMenu)) fail(`${startMenu} is left`);
+for (const lnk of [startMenu, desktop]) if (existsSync(lnk)) fail(`${lnk} is left`);
 if (!existsSync(marker)) fail(`a silent uninstall took ${data}`);
-console.log(`after uninstalling, ${dir} ${existsSync(dir) ? `holds: ${readdirSync(dir).join(", ") || "(nothing)"}` : "is gone"}; the data folder stays`);
+for (const c of caches) if (existsSync(c)) fail(`a silent uninstall left ${c}: ${readdirSync(c).join(", ") || "(empty)"}`);
+rmSync(marker, { force: true });
+console.log(`after uninstalling, ${dir} ${existsSync(dir) ? `holds: ${readdirSync(dir).join(", ") || "(nothing)"}` : "is gone"}; the data folder stays, its cache and updates are gone`);
 console.log("installer: ok");
