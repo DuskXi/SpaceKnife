@@ -677,8 +677,12 @@ Section Install
       Abort "$(skOldUninstallFailed)"
     ${EndIf}
     StrCpy $SkOldGone 1
+    ; its entry in Apps & features goes (its uninstaller is gone); the record of its folder stays
+    ; until this version's keys replace it after the placement: should that fail, a run of the
+    ; installer again finds the folder (SkFindPrevious), installs there and points the kept
+    ; shortcuts here. 0.3.4's uninstaller removes both keys itself: the folder is written again.
     DeleteRegKey SHCTX "${SK_UNINSTKEY}"
-    DeleteRegKey SHCTX "${SK_INSTKEY}"
+    WriteRegStr SHCTX "${SK_INSTKEY}" "InstallLocation" "$SkOldDir"
   ${EndIf}
   ; a forked installation in a folder that is no longer used (relocated): its uninstaller, as an update
   ${If} $SkOldKind == "fork"
