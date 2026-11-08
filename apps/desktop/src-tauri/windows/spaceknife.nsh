@@ -773,6 +773,14 @@ FunctionEnd
 ; the same command line electron-builder's own installer runs (installUtil.nsh uninstallOldVersion),
 ; from a copy (its RMDir /r "$INSTDIR" also takes the uninstaller). $R0 = "" on success.
 Function SkRemoveElectronBuilder
+  ; what runs from its folder first (it may be another folder than $INSTDIR: a relocated one)
+  StrCpy $R0 $SkOldDir
+  Call SkCloseIn
+  ${If} $R0 != ""
+    ${SkLog} "files in $SkOldDir are in use"
+    StrCpy $R0 "failed"
+    Return
+  ${EndIf}
   StrCpy $R0 $SkOldDir
   Call SkUnsafeDir
   ${If} $R0 != ""
