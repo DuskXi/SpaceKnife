@@ -1229,10 +1229,14 @@ mod tests {
         assert!(w.inner.state.is_poisoned() && w.inner.emitter.sink.is_poisoned());
         let _ = w.status();
         w.add_dirs(vec![tmp.path().to_path_buf()], None, 0);
-        std::fs::write(tmp.path().join("new.txt"), b"x").unwrap();
+        // a folder's mtime moves on in clock ticks (a few ms on Linux): a file made in the tick the
+        // folder was made in leaves the mtime the baseline saw, so add files until one is reported
         let end = Instant::now() + Duration::from_secs(10);
+        let mut n = 0;
         while *got.lock().unwrap() == 0 && Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(10));
+            std::fs::write(tmp.path().join(format!("new-{n}.txt")), b"x").unwrap();
+            n += 1;
+            std::thread::sleep(Duration::from_millis(50));
         }
         assert!(*got.lock().unwrap() > 0, "the watcher stopped reporting");
         w.stop();
