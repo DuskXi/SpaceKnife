@@ -13,8 +13,8 @@ What is already done for the next version, **0.3.5**, and not in a release yet. 
 - **Headless mode is `spaceknife-cli headless`** `[--listen <address>] [--yes] [--tls-cert FILE --tls-key FILE] [--ui DIR]`; the pages and the WebSocket share one address. `--headless` and `--listen <address>` are still accepted, by `spaceknife-cli`.
 - **New release file names** (Tauri's): `SpaceKnife_<version>_x64-setup.exe`, `SpaceKnife_<version>_amd64.AppImage`, `SpaceKnife_<version>_amd64.deb`, `SpaceKnife-<version>-1.x86_64.rpm`, `SpaceKnife_<version>_aarch64.dmg` / `SpaceKnife_<version>_x64.dmg`; the portable archives keep their names. The update check of 0.3.x does not find the files with new names; it does find the portable archives, but their **Seamless update** stops without changing anything. Users of 0.3.x download 0.3.5 once by hand.
 - **The Windows installer installs for the current user only**; deb and rpm put `spaceknife` and `spaceknife-cli` in `/usr/bin` instead of `/opt/SpaceKnife`.
-- **Settings and data stay where they were**: settings, file classes, classified folders and logs are read from the same folders. Tags remembered by 0.3.x and the palette's recent entries for a scanned folder are not found by 0.3.5 (they are filed under a key of the scanned folders that 0.3.5 computes differently); their files stay on disk. The window's own files (theme, WebView data) moved out of Electron's profile folder.
-- **Snapshots have a new format (3).** Snapshots saved by 0.3.x are not opened by 0.3.5 and do not show in the lists; the files stay on disk.
+- **Settings and data stay where they were**: settings, file classes, classified folders, remembered tags, the palette's recent entries, the update state and logs are read from the same folders; on macOS `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` are followed as 0.3.x followed them. The old logs 0.3.x rotated (`logs/spaceknife.<time>.log`) are deleted on the first start. A `classes.json` or `class_folders.json` that cannot be read is never written over: the next save renames it and leaves it beside the new one (`classes.unreadable-<time>.json`). The window's own files (theme, WebView data) moved out of Electron's profile folder.
+- **Snapshots of 0.3.x still open.** Snapshots saved by 0.3.x (format 2) open and compare as they are, with no conversion, and show in the lists; 0.3.5 saves format 3. The auto-save retention (the newest 10, then one a week) counts 0.3.x's snapshots too; a snapshot file that cannot be read (damaged, or of a newer format) is never deleted.
 
 ### Fixes
 
@@ -35,8 +35,8 @@ What is already done for the next version, **0.3.5**, and not in a release yet. 
 - **无头模式改成 `spaceknife-cli headless`** `[--listen <地址>] [--yes] [--tls-cert 证书 --tls-key 私钥] [--ui 目录]`，页面和 WebSocket 用同一个地址。`--headless`、`--listen <地址>` 的写法仍然认，但要交给 `spaceknife-cli`。
 - **发布文件换成 Tauri 的命名**：`SpaceKnife_<版本>_x64-setup.exe`、`SpaceKnife_<版本>_amd64.AppImage`、`SpaceKnife_<版本>_amd64.deb`、`SpaceKnife-<版本>-1.x86_64.rpm`、`SpaceKnife_<版本>_aarch64.dmg` / `SpaceKnife_<版本>_x64.dmg`；便携版的文件名不变。0.3.x 的更新检查找不到换了名字的文件；便携版它找得到，但「无缝更新」会中途停下、什么也不改。0.3.x 的用户要手动下载一次 0.3.5。
 - **Windows 安装程序只装到当前用户**；deb / rpm 把 `spaceknife` 和 `spaceknife-cli` 装到 `/usr/bin`，不再放在 `/opt/SpaceKnife`。
-- **设置和数据还在原来的位置**：设置、文件类别、归类的文件夹和日志都从原来的文件夹读取。0.3.x 记住的标签、命令面板里按扫描文件夹记的最近记录 0.3.5 找不到（它们按扫描文件夹算出的键存放，0.3.5 的算法不同），文件仍留在磁盘上。窗口自己的文件（主题、WebView 的数据）不再放在 Electron 的配置文件夹里。
-- **快照换了新格式（第 3 版）**：0.3.x 存的快照 0.3.5 打不开，也不会出现在列表里；旧文件仍留在磁盘上。
+- **设置和数据还在原来的位置**：设置、文件类别、归类的文件夹、记住的标签、命令面板的最近记录、更新记录和日志都从原来的文件夹读取；macOS 上的 `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` 和 0.3.x 一样照用。0.3.x 轮转下来的旧日志（`logs/spaceknife.<时间>.log`）在第一次启动时删掉。读不了的 `classes.json` / `class_folders.json` 不会被覆盖：下次保存时改名留在原处（`classes.unreadable-<时间>.json`）。窗口自己的文件（主题、WebView 的数据）不再放在 Electron 的配置文件夹里。
+- **0.3.x 的快照照样能用**：0.3.x 存的快照（第 2 版）不用转换就能打开、对比，也出现在列表里；0.3.5 存的是第 3 版。自动保存的保留规则（最近 10 份，更早的每周留一份）也算上 0.3.x 的快照；读不了的快照文件（损坏的、更新版本的）从不删除。
 
 ### 修复
 
