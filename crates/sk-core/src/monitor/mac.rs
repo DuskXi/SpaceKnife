@@ -133,9 +133,11 @@ mod imp {
     use std::ffi::{CStr, CString, c_char, c_void};
     use std::os::unix::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    use crate::monitor::LockExt;
 
     use super::super::poll::{Emitter, Worker, stat_file};
     use super::super::{Change, Sink, WatchState, WatchStatus, Watcher, t};
@@ -159,6 +161,7 @@ mod imp {
         static kCFRunLoopDefaultMode: CFRef;
         static kCFTypeArrayCallBacks: c_void;
         fn CFRelease(cf: CFRef);
+        fn CFRetain(cf: CFRef) -> CFRef;
         fn CFStringCreateWithFileSystemRepresentation(alloc: CFRef, buffer: *const c_char)
         -> CFRef;
         fn CFArrayCreate(
@@ -202,7 +205,10 @@ mod imp {
         twins: Vec<String>,
         emitter: Emitter,
         state: Mutex<(WatchState, String)>,
-        run_loop: AtomicUsize,
+        /// The watcher thread's run loop, retained (0: none). The thread releases it under this
+        /// lock as it ends, and stop() uses it under the lock: never a run loop already freed
+        /// with its thread.
+        run_loop: Mutex<usize>,
     }
 
     impl Shared {
@@ -258,7 +264,7 @@ mod imp {
             );
             sh.emitter.emit(changes);
             if lost {
-                *sh.state.lock().unwrap() = (
+                *sh.state.locked() = (
                     WatchState::Failed,
                     t("扫描根目录已被删除或移走，实时监控已停止"),
                 );
@@ -294,7 +300,7 @@ mod imp {
                     twins,
                     emitter: Emitter::new(),
                     state: Mutex::new((WatchState::Starting, String::new())),
-                    run_loop: AtomicUsize::new(0),
+                    run_loop: Mutex::new(0),
                 }),
                 worker: Worker::new(),
             })
@@ -343,11 +349,11 @@ mod imp {
                 return Err(t("FSEventStreamStart 失败"));
             }
             started = true;
-            sh.run_loop.store(rl as usize, Ordering::SeqCst);
-            *sh.state.lock().unwrap() = (WatchState::Running, String::new());
+            *sh.run_loop.locked() = CFRetain(rl) as usize;
+            *sh.state.locked() = (WatchState::Running, String::new());
             let _ = ready.send(());
             while !sh.emitter.stopping.load(Ordering::SeqCst)
-                && sh.state.lock().unwrap().0 == WatchState::Running
+                && sh.state.locked().0 == WatchState::Running
             {
                 if CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, 0) == RUN_FINISHED {
                     return Err(t("CFRunLoop 没有可运行的源"));
@@ -364,7 +370,7 @@ mod imp {
                     error = e.clone()
                 )
             );
-            *sh.state.lock().unwrap() = (
+            *sh.state.locked() = (
                 WatchState::Failed,
                 crate::tr!("FSEvents 不可用（{error}），实时监控已停止", error = e),
             );
@@ -372,7 +378,12 @@ mod imp {
                 sh.emitter.emit(vec![Change::overflow(sh.root.clone())]);
             }
         }
-        sh.run_loop.store(0, Ordering::SeqCst);
+        let rl = std::mem::take(&mut *sh.run_loop.locked());
+        if rl != 0 {
+            // SAFETY: the reference retained above; stop() cannot be using it (it holds the lock
+            // while it does, and finds 0 from now on).
+            unsafe { CFRelease(rl as CFRef) };
+        }
         if !stream.is_null() {
             // SAFETY: the stream we created.
             unsafe {
@@ -395,7 +406,7 @@ mod imp {
             if self.worker.started() {
                 return Err(std::io::Error::other(t("监视器已经启动")));
             }
-            *self.sh.emitter.sink.lock().unwrap() = Some(sink);
+            *self.sh.emitter.sink.locked() = Some(sink);
             let (tx, rx) = std::sync::mpsc::channel();
             let sh = self.sh.clone();
             self.worker.spawn("sk-fsevents", move || run(sh, tx))?;
@@ -409,23 +420,26 @@ mod imp {
             if self.sh.emitter.stopping.swap(true, Ordering::SeqCst) {
                 return;
             }
-            let rl = self.sh.run_loop.load(Ordering::SeqCst);
-            if rl != 0 {
-                // SAFETY: the run loop of our thread (alive while the slot is set).
-                unsafe {
-                    CFRunLoopStop(rl as CFRef);
-                    CFRunLoopWakeUp(rl as CFRef);
+            {
+                let rl = self.sh.run_loop.locked();
+                if *rl != 0 {
+                    // SAFETY: a run loop we retained, released only under this lock; stopping the
+                    // run loop of a thread that is ending is harmless.
+                    unsafe {
+                        CFRunLoopStop(*rl as CFRef);
+                        CFRunLoopWakeUp(*rl as CFRef);
+                    }
                 }
             }
             self.worker.finish(Duration::from_millis(900));
-            let mut s = self.sh.state.lock().unwrap();
+            let mut s = self.sh.state.locked();
             if s.0 != WatchState::Failed {
                 s.0 = WatchState::Stopped;
             }
         }
 
         fn status(&self) -> WatchStatus {
-            let (state, detail) = self.sh.state.lock().unwrap().clone();
+            let (state, detail) = self.sh.state.locked().clone();
             WatchStatus {
                 watched_dirs: if state == WatchState::Running { -1 } else { 0 },
                 polled_dirs: 0,
@@ -513,5 +527,27 @@ mod tests {
     #[test]
     fn fsevents_constructor_fails_cleanly() {
         assert!(FsEventsWatcher::new(Path::new("/")).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn stopping_streams_whose_thread_ends_by_itself() {
+        // the root deleted: the stream reports it, its thread stops its run loop and ends while
+        // stop() is called. stop() must only ever touch a run loop it still holds a reference to
+        // (the thread's own goes with the thread); no crash, every watcher ends
+        use crate::monitor::{WatchState, Watcher};
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..40 {
+            let root = tmp.path().join(format!("r{i}"));
+            std::fs::create_dir(&root).unwrap();
+            let w = FsEventsWatcher::new(&root).unwrap();
+            w.start(std::sync::Arc::new(|_| {})).unwrap();
+            let _ = std::fs::remove_dir(&root);
+            if i % 2 == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(60)); // the thread may end first
+            }
+            w.stop();
+            assert_ne!(w.status().state, WatchState::Running);
+        }
     }
 }

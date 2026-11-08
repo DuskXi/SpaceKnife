@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use super::{Change, ChangeKind, Sink, WatchState, WatchStatus, Watcher, t};
+use super::{Change, ChangeKind, LockExt, Sink, WatchState, WatchStatus, Watcher, t, unpoison};
 
 const PENDING: i64 = i64::MIN; // baseline not taken yet
 const UNKNOWN: i64 = i64::MIN + 1; // the stat failed for another reason than "gone": retried
@@ -521,7 +521,7 @@ impl Emitter {
         if changes.is_empty() || self.stopping.load(Ordering::SeqCst) {
             return;
         }
-        let sink = self.sink.lock().unwrap().clone();
+        let sink = self.sink.locked().clone();
         let Some(sink) = sink else { return };
         self.events
             .fetch_add(changes.len() as i64, Ordering::Relaxed);
@@ -549,7 +549,7 @@ impl Worker {
     }
 
     pub fn started(&self) -> bool {
-        self.done.lock().unwrap().is_some()
+        self.done.locked().is_some()
     }
 
     pub fn spawn(&self, name: &str, f: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
@@ -560,12 +560,12 @@ impl Worker {
                 f();
                 let _ = tx.send(());
             })?;
-        *self.done.lock().unwrap() = Some((rx, h.thread().id()));
+        *self.done.locked() = Some((rx, h.thread().id()));
         Ok(())
     }
 
     pub fn finish(&self, wait: Duration) {
-        let done = self.done.lock().unwrap().take();
+        let done = self.done.locked().take();
         if let Some((rx, id)) = done
             && id != std::thread::current().id()
         {
@@ -588,13 +588,13 @@ impl Wake {
         }
     }
     pub fn set(&self) {
-        *self.flag.lock().unwrap() = true;
+        *self.flag.locked() = true;
         self.cv.notify_all();
     }
     /// Waits up to `d` for a wake-up; true when woken (the flag is cleared).
     pub fn wait(&self, d: Duration) -> bool {
-        let g = self.flag.lock().unwrap();
-        let (mut g, _) = self.cv.wait_timeout_while(g, d, |f| !*f).unwrap();
+        let g = self.flag.locked();
+        let (mut g, _) = unpoison(self.cv.wait_timeout_while(g, d, |f| !*f));
         std::mem::replace(&mut *g, false)
     }
 }
@@ -641,9 +641,9 @@ impl PollWatcher {
         let body = || {
             while !inner.emitter.stopping.load(Ordering::SeqCst) {
                 let (changes, lost, wake) = {
-                    let mut poller = inner.poller.lock().unwrap();
+                    let mut poller = inner.poller.locked();
                     {
-                        let mut inc = inner.incoming.lock().unwrap();
+                        let mut inc = inner.incoming.locked();
                         let fed = inc.peek(4096);
                         let n = fed.len();
                         for (path, listed, since) in fed {
@@ -657,11 +657,11 @@ impl PollWatcher {
                 };
                 inner.emitter.emit(changes);
                 if lost {
-                    *inner.state.lock().unwrap() =
+                    *inner.state.locked() =
                         (WatchState::Failed, t("扫描根目录已不存在，实时监控已停止"));
                     return;
                 }
-                if !inner.incoming.lock().unwrap().is_empty() {
+                if !inner.incoming.locked().is_empty() {
                     continue;
                 }
                 let delay = wake.map_or(Duration::from_secs(1), |w| {
@@ -680,7 +680,7 @@ impl PollWatcher {
                     path = inner.root.display().to_string()
                 )
             );
-            *inner.state.lock().unwrap() = (WatchState::Failed, t("实时监控出错，已停止"));
+            *inner.state.locked() = (WatchState::Failed, t("实时监控出错，已停止"));
             inner
                 .emitter
                 .emit(vec![Change::overflow(inner.root.clone())]);
@@ -689,7 +689,7 @@ impl PollWatcher {
 
     /// Stat calls so far (tests).
     pub fn stats(&self) -> u64 {
-        self.inner.poller.lock().unwrap().stats
+        self.inner.poller.locked().stats
     }
 }
 
@@ -702,20 +702,16 @@ impl Watcher for PollWatcher {
         if self.worker.started() {
             return Err(std::io::Error::other(t("监视器已经启动")));
         }
-        *self.inner.emitter.sink.lock().unwrap() = Some(sink);
+        *self.inner.emitter.sink.locked() = Some(sink);
         // degraded: polling instead of notifications (the detail is written when read)
-        self.inner.state.lock().unwrap().0 = WatchState::Degraded;
+        self.inner.state.locked().0 = WatchState::Degraded;
         let inner = self.inner.clone();
         self.worker
             .spawn("sk-poll", move || PollWatcher::run(inner))
     }
 
     fn add_dirs(&self, dirs: Vec<PathBuf>, mtimes: Option<Vec<u32>>, since_ns: i64) {
-        self.inner
-            .incoming
-            .lock()
-            .unwrap()
-            .add(dirs, mtimes, since_ns);
+        self.inner.incoming.locked().add(dirs, mtimes, since_ns);
         self.inner.wake.set();
     }
 
@@ -725,16 +721,16 @@ impl Watcher for PollWatcher {
         }
         self.inner.wake.set();
         self.worker.finish(Duration::from_millis(900));
-        let mut st = self.inner.state.lock().unwrap();
+        let mut st = self.inner.state.locked();
         if st.0 != WatchState::Failed {
             st.0 = WatchState::Stopped;
         }
     }
 
     fn status(&self) -> WatchStatus {
-        let (state, mut detail) = self.inner.state.lock().unwrap().clone();
+        let (state, mut detail) = self.inner.state.locked().clone();
         if detail.is_empty() && state != WatchState::Starting {
-            let secs = self.inner.poller.lock().unwrap().interval.as_secs_f64();
+            let secs = self.inner.poller.locked().interval.as_secs_f64();
             detail = crate::tr!(
                 "未使用系统的文件变化通知，改为每 {interval} 秒轮询一次文件夹；文件大小的变化发现不了",
                 interval = format!("{secs}")
@@ -1208,5 +1204,38 @@ mod tests {
             assert!(stat_file(&f).is_none());
         }
         assert!(stat_file(&tmp.path().join("missing")).is_none());
+    }
+
+    #[test]
+    fn a_poisoned_lock_does_not_turn_every_later_call_into_a_panic() {
+        // a panic while one of the watcher's locks was held (a bug; the thread that had it caught
+        // it and reported the watch as failed): status, add_dirs, the sink and stop go on
+        let tmp = tempfile::tempdir().unwrap();
+        let w = PollWatcher::new(tmp.path(), 0.05, 2000);
+        let got = Arc::new(Mutex::new(0usize));
+        let seen = got.clone();
+        w.start(Arc::new(move |b| *seen.lock().unwrap() += b.len()))
+            .unwrap();
+        let inner = w.inner.clone();
+        let poisoned = std::thread::spawn(move || {
+            let _state = inner.state.lock().unwrap();
+            let _incoming = inner.incoming.lock().unwrap();
+            let _sink = inner.emitter.sink.lock().unwrap();
+            let _flag = inner.wake.flag.lock().unwrap();
+            panic!("injected: a bug while holding the watcher's locks");
+        })
+        .join();
+        assert!(poisoned.is_err());
+        assert!(w.inner.state.is_poisoned() && w.inner.emitter.sink.is_poisoned());
+        let _ = w.status();
+        w.add_dirs(vec![tmp.path().to_path_buf()], None, 0);
+        std::fs::write(tmp.path().join("new.txt"), b"x").unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        while *got.lock().unwrap() == 0 && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(*got.lock().unwrap() > 0, "the watcher stopped reporting");
+        w.stop();
+        assert_eq!(w.status().state, WatchState::Stopped);
     }
 }

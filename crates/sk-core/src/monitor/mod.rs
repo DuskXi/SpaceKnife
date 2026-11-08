@@ -21,6 +21,25 @@ pub mod win;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// [`std::sync::Mutex::lock`] that shrugs off poisoning. A watcher catches a panic of its own
+/// thread (and of the sink it calls) and reports the watch as failed; a lock it held at that
+/// moment must not turn every later call (`status`, `stop`, the next batch) into another panic.
+pub(crate) trait LockExt<T> {
+    fn locked(&self) -> std::sync::MutexGuard<'_, T>;
+}
+
+impl<T> LockExt<T> for std::sync::Mutex<T> {
+    fn locked(&self) -> std::sync::MutexGuard<'_, T> {
+        self.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// What a condition variable's wait gives back, poisoned or not (see [`LockExt`]).
+pub(crate) fn unpoison<G>(r: std::sync::LockResult<G>) -> G {
+    r.unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// What a [`Change`] says happened.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ChangeKind {

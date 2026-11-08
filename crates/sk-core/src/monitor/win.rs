@@ -266,6 +266,7 @@ mod imp {
     use super::super::{Change, Sink, WatchState, WatchStatus, Watcher, t};
     use super::NotifyDecoder;
     use crate::helper::win32::{Handle, io_pending, wait_io};
+    use crate::monitor::LockExt;
 
     // file name, folder name, attributes, size, last write, creation
     const NOTIFY_FILTER: u32 = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x40;
@@ -386,7 +387,7 @@ mod imp {
             if self.stopping() {
                 return; // stopping: an aborted read is not a failure
             }
-            *self.state.lock().unwrap() = (WatchState::Failed, detail.clone());
+            *self.state.locked() = (WatchState::Failed, detail.clone());
             tracing::warn!(
                 "{}",
                 crate::tr!(
@@ -553,7 +554,7 @@ mod imp {
                 } else {
                     t("此卷不提供扩展变化信息，文件大小变化需重新列出目录")
                 };
-                *self.sh.state.lock().unwrap() = (WatchState::Running, detail);
+                *self.sh.state.locked() = (WatchState::Running, detail);
             }
             tracing::debug!(
                 "watching {} ({}, buffer {} KiB)",
@@ -797,7 +798,7 @@ mod imp {
                 self.handle = std::ptr::null_mut();
             }
             self.pending = false;
-            let mut st = self.sh.state.lock().unwrap();
+            let mut st = self.sh.state.locked();
             if matches!(st.0, WatchState::Starting | WatchState::Running) {
                 *st = (WatchState::Stopped, String::new());
             }
@@ -839,7 +840,7 @@ mod imp {
             if io_event.is_null() {
                 return Err(std::io::Error::last_os_error());
             }
-            *self.shared.emitter.sink.lock().unwrap() = Some(sink);
+            *self.shared.emitter.sink.locked() = Some(sink);
             let sh = self.shared.clone();
             let explicit = self.buffer_size;
             let ext_ok = self.use_extended.load(Ordering::SeqCst);
@@ -901,14 +902,14 @@ mod imp {
                 unsafe { SetEvent(ev.0) };
             }
             self.worker.finish(Duration::from_millis(1000));
-            let mut st = self.shared.state.lock().unwrap();
+            let mut st = self.shared.state.locked();
             if st.0 != WatchState::Failed {
                 *st = (WatchState::Stopped, String::new());
             }
         }
 
         fn status(&self) -> WatchStatus {
-            let (state, detail) = self.shared.state.lock().unwrap().clone();
+            let (state, detail) = self.shared.state.locked().clone();
             WatchStatus {
                 watched_dirs: if state == WatchState::Running { -1 } else { 0 },
                 polled_dirs: 0,
