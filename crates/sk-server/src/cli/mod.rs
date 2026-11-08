@@ -193,12 +193,21 @@ pub fn apply_language() {
     sk_core::i18n::set_language(sk_core::i18n::resolve(setting.as_deref()));
 }
 
-/// `general.language` of a settings file, unless missing, unreadable or "system".
+/// `general.language` as the settings store reads it from `file`, unless that is "system" (0.3.4's
+/// `stored_language`). The store validates the whole file and keeps the defaults when anything in
+/// it is invalid (another value out of range, a version that is not a number), so a language other
+/// than the default needs the store itself; without a file, with one that cannot be read or
+/// parsed, or one that sets no other language, the answer is "system" without loading it.
 pub fn stored_language(file: &std::path::Path) -> Option<String> {
     let text = std::fs::read_to_string(file).ok()?;
     let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let value = doc.get("values")?.get("general.language")?.as_str()?;
-    (value != "system" && matches!(value, "zh-CN" | "en")).then(|| value.to_owned())
+    let value = doc.get("values")?.get("general.language")?;
+    if value.as_str() == Some("system") {
+        return None;
+    }
+    let language = sk_core::settings::SettingsStore::new(Some(file.to_path_buf()))
+        .get_str("general.language");
+    (language != "system").then_some(language)
 }
 
 /// Warnings and errors of the core on stderr (as `setup_logging("WARNING")`); nothing else.
