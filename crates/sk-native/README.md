@@ -11,6 +11,10 @@ Pure-Rust scanning core of SpaceKnife (formerly the PyO3 extension `packages/nat
 Features: `hardscan` and `mft`, both on by default. Nothing here touches the node store: results are
 plain column vectors meant to be appended to it.
 
+Layering: this crate is the performance layer with its own API and tests; the backend crates
+(sk-core, sk-store, sk-server) use it only through that API, and it depends on no other crate of the
+workspace and on nothing by path (`tests/layering.rs` checks the manifest, in `cargo test`).
+
 ## `hardscan`
 
 ```rust

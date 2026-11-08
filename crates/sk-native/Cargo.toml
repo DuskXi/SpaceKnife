@@ -25,6 +25,8 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Stora
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# tests/layering.rs reads the manifests
+toml = { workspace = true }
 
 [[test]]
 name = "hardscan"
