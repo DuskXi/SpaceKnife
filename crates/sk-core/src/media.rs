@@ -121,60 +121,29 @@ pub fn bus_name(bus_type: u32) -> &'static str {
 
 #[cfg(windows)]
 fn win_media(root: &str) -> Media {
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::Storage::FileSystem::{CreateFileW, OPEN_EXISTING};
-    use windows_sys::Win32::System::IO::DeviceIoControl;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
 
     let drive = root.trim_end_matches('\\');
     if drive.len() != 2 || drive.as_bytes()[1] != b':' {
         return Media::Unknown;
     }
-    let path: Vec<u16> = format!("\\\\.\\{drive}")
-        .encode_utf16()
-        .chain([0])
-        .collect();
-    // access 0: the storage property queries work without read rights (no elevation)
-    // SAFETY: NUL-terminated path; share read|write, OPEN_EXISTING.
-    let h = unsafe {
-        CreateFileW(
-            path.as_ptr(),
-            0,
-            3,
-            std::ptr::null(),
-            OPEN_EXISTING,
-            0,
-            std::ptr::null_mut(),
-        )
-    };
-    if h.is_null() || h == INVALID_HANDLE_VALUE {
+    // access 0: the storage property queries work without read rights (no elevation); the
+    // handle is closed when dropped
+    let Some(h) = crate::helper::win32::Handle::open(
+        &format!("\\\\.\\{drive}"),
+        0,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        0,
+    ) else {
         return Media::Unknown;
-    }
+    };
     let query = |prop: u32, size: usize| -> Option<Vec<u8>> {
-        let q: [u32; 3] = [prop, 0, 0]; // STORAGE_PROPERTY_QUERY: id, PropertyStandardQuery
-        let mut out = vec![0u8; size];
-        let mut got = 0u32;
-        // SAFETY: buffers of the stated sizes.
-        let ok = unsafe {
-            DeviceIoControl(
-                h,
-                0x2D1400, // IOCTL_STORAGE_QUERY_PROPERTY
-                q.as_ptr().cast(),
-                12,
-                out.as_mut_ptr().cast(),
-                size as u32,
-                &mut got,
-                std::ptr::null_mut(),
-            )
-        };
-        (ok != 0).then(|| {
-            out.truncate(got as usize);
-            out
-        })
+        let q: Vec<u8> = [prop, 0, 0].iter().flat_map(|x| x.to_le_bytes()).collect(); // STORAGE_PROPERTY_QUERY: id, PropertyStandardQuery
+        h.ioctl(0x2D1400, &q, size).ok() // IOCTL_STORAGE_QUERY_PROPERTY
     };
     let device = query(0, 1024); // StorageDeviceProperty -> STORAGE_DEVICE_DESCRIPTOR
     let seek = query(7, 12); // StorageDeviceSeekPenaltyProperty
-    // SAFETY: a handle we opened.
-    unsafe { CloseHandle(h) };
+    drop(h);
     let bus_type = device
         .as_ref()
         .filter(|d| d.len() >= 32)
