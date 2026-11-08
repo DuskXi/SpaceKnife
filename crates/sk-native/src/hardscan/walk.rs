@@ -32,6 +32,7 @@ use super::common::{Arena, NativePath, RootOpts};
 use super::slots::{self, Slots};
 use super::{Entries, Error, ListingError, Ref, SliceResult, Task, native_to_path, pace, sys};
 use crate::util::FxHashMap;
+pub use crate::util::lower_ext;
 
 pub struct Node {
     pub path: NativePath,
@@ -697,25 +698,6 @@ impl<'a> ExtIds<'a> {
         };
         self.last = Some((raw, id));
         Ok(id)
-    }
-}
-
-/// `ext.lower()` as Python computes it on a name decoded with surrogatepass (Windows) or
-/// surrogateescape (POSIX): bytes that are not UTF-8 (lone surrogates, foreign encodings) stay.
-pub fn lower_ext(raw: &[u8]) -> Vec<u8> {
-    if raw.is_ascii() {
-        return raw.to_ascii_lowercase();
-    }
-    match std::str::from_utf8(raw) {
-        Ok(s) => s.to_lowercase().into_bytes(),
-        Err(_) => {
-            let mut out = Vec::with_capacity(raw.len());
-            for chunk in raw.utf8_chunks() {
-                out.extend_from_slice(chunk.valid().to_lowercase().as_bytes());
-                out.extend_from_slice(chunk.invalid());
-            }
-            out
-        }
     }
 }
 

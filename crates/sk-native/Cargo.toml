@@ -35,3 +35,7 @@ required-features = ["hardscan"]
 [[test]]
 name = "mft"
 required-features = ["mft"]
+
+[[test]]
+name = "mft_build"
+required-features = ["mft", "hardscan"]
