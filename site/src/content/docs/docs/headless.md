@@ -37,7 +37,7 @@ While it runs, the terminal shows when a browser connects or goes away (`14:02:1
 | AppImage | `./SpaceKnife-<version>-x86_64.AppImage --headless` |
 | macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli headless` |
 
-It is a console program: the terminal waits for it, and <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. The pages it serves are the built interface that comes with the app: the `ui` folder next to `spaceknife-cli`, or `resources/ui` beside it (Windows, the portable copies, the rpm, the AppImage), `/usr/lib/SpaceKnife/ui` for the deb, and `SpaceKnife.app/Contents/Resources/ui` on macOS. `--ui` names another folder.
+It is a console program: the terminal waits for it, and <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. The pages it serves are the built interface that comes with the app: the `ui` folder next to `spaceknife-cli` (the Windows installer, the Windows portable and the small Linux portable), `resources/ui` beside it (the rpm, the AppImage and the Linux portable that brings its own engine), `/usr/lib/SpaceKnife/ui` for the deb, and `SpaceKnife.app/Contents/Resources/ui` on macOS. `--ui` names another folder.
 
 In a portable copy, headless mode keeps its data in the copy's `data` folder, as the app does ([Data locations](../data-locations/)); `SPACEKNIFE_HOME` still wins.
 

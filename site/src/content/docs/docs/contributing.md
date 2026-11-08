@@ -7,7 +7,7 @@ SpaceKnife is an MIT-licensed project on GitHub: [DuskXi/SpaceKnife](https://git
 
 ## What you need
 
-- A stable [Rust](https://rustup.rs/) toolchain (edition 2024) for the backend, the command line and the app's native side.
+- [rustup](https://rustup.rs/), for the backend, the command line and the app's native side: the first time cargo runs in the repository, it installs the Rust version that `rust-toolchain.toml` pins (edition 2024, with clippy and rustfmt), the same one CI uses.
 - Node.js 24 with pnpm 10, for the app's interface (Nuxt 4 + Vue 3) and its two shells, Tauri 2 and Electron. The website needs Node.js 22.12 or later.
 - On Linux, the libraries Tauri builds against: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libssl-dev` and `patchelf` (Ubuntu and Debian package names). On Windows, Microsoft Edge WebView2 (Windows 11 has it) and the MSVC build tools; on macOS, the Xcode command line tools.
 

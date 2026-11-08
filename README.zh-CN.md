@@ -128,7 +128,7 @@ macOS 版还没有经过苹果公证，第一次打开会被系统拦下，需�
 
 ## 开发环境
 
-需要 stable 版 [Rust](https://rustup.rs/) 工具链（edition 2024）、Node.js 24 和 pnpm 10。Linux 上 Tauri 还需要系统 WebView 和几个库：
+需要 [rustup](https://rustup.rs/)（第一次在仓库里运行 cargo 时，它会装上 `rust-toolchain.toml` 固定的 Rust 版本，edition 2024；CI 用的是同一个）、Node.js 24 和 pnpm 10。Linux 上 Tauri 还需要系统 WebView 和几个库：
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf

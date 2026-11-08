@@ -37,7 +37,7 @@ SpaceKnife 无头模式 · 0.3.5
 | AppImage | `./SpaceKnife-<版本>-x86_64.AppImage --headless` |
 | macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli headless` |
 
-它是控制台程序：终端会等它结束，<kbd>Ctrl</kbd>+<kbd>C</kbd> 就能停止。它提供的页面是随应用一起装好的界面：`spaceknife-cli` 旁边的 `ui` 文件夹，或者旁边的 `resources/ui`（Windows、便携版、rpm、AppImage），deb 是 `/usr/lib/SpaceKnife/ui`，macOS 是 `SpaceKnife.app/Contents/Resources/ui`。用 `--ui` 可以指定别的文件夹。
+它是控制台程序：终端会等它结束，<kbd>Ctrl</kbd>+<kbd>C</kbd> 就能停止。它提供的页面是随应用一起装好的界面：`spaceknife-cli` 旁边的 `ui` 文件夹（Windows 安装版、Windows 便携版和小巧的 Linux 便携版），旁边的 `resources/ui`（rpm、AppImage 和自带引擎的 Linux 便携版），deb 是 `/usr/lib/SpaceKnife/ui`，macOS 是 `SpaceKnife.app/Contents/Resources/ui`。用 `--ui` 可以指定别的文件夹。
 
 在便携版里，无头模式和应用一样把数据存在便携版的 `data` 文件夹里（[数据位置](../data-locations/)）；设了 `SPACEKNIFE_HOME` 时仍以它为准。
 

@@ -130,7 +130,7 @@ The design documents are in Chinese:
 
 ## Development
 
-Requires a stable [Rust](https://rustup.rs/) toolchain (edition 2024), Node.js 24 and pnpm 10. On Linux, Tauri also needs the system WebView and a few libraries:
+Requires [rustup](https://rustup.rs/) (the first time cargo runs in the repository it installs the Rust version `rust-toolchain.toml` pins, edition 2024; CI uses the same one), Node.js 24 and pnpm 10. On Linux, Tauri also needs the system WebView and a few libraries:
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf

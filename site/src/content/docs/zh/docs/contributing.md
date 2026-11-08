@@ -7,7 +7,7 @@ SpaceKnife 是 GitHub 上一个使用 MIT 许可证的项目：[DuskXi/SpaceKnif
 
 ## 需要什么
 
-- 稳定版 [Rust](https://rustup.rs/) 工具链（edition 2024），用于后端、命令行和应用的原生部分。
+- [rustup](https://rustup.rs/)，用于后端、命令行和应用的原生部分：第一次在仓库里运行 cargo 时，它会装上 `rust-toolchain.toml` 固定的 Rust 版本（edition 2024，带 clippy 和 rustfmt），和 CI 用的是同一个。
 - Node.js 24 和 pnpm 10，用于应用的界面（Nuxt 4 + Vue 3）和它的两个外壳：Tauri 2 与 Electron；官网需要 Node.js 22.12 或更新的版本。
 - Linux 上还要 Tauri 编译时用到的库：`libwebkit2gtk-4.1-dev`、`libgtk-3-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev`、`libssl-dev` 和 `patchelf`（Ubuntu / Debian 的包名）。Windows 上需要 Microsoft Edge WebView2（Windows 11 自带）和 MSVC 生成工具；macOS 上需要 Xcode 命令行工具。
 
