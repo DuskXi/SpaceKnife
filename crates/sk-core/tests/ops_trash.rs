@@ -21,13 +21,16 @@ use sk_core::ops::trash::{
 const WIN: bool = cfg!(windows);
 const MAC: bool = cfg!(target_os = "macos");
 
-/// One SpaceKnife home (and on Linux, one XDG data home) for this binary; tests that change the
-/// process-wide seams run one at a time.
+mod exit_cleanup;
+
+/// One SpaceKnife home (and on Linux, one XDG data home) for this binary, removed when it exits;
+/// tests that change the process-wide seams run one at a time.
 fn setup() -> (&'static Path, MutexGuard<'static, ()>) {
     static BASE: OnceLock<PathBuf> = OnceLock::new();
     static LOCK: Mutex<()> = Mutex::new(());
     let base = BASE.get_or_init(|| {
         let dir = tempfile::tempdir().unwrap().keep();
+        exit_cleanup::remove_at_exit(dir.clone());
         // SAFETY: set once, before the tests of this binary read the environment
         unsafe {
             std::env::set_var("SPACEKNIFE_HOME", dir.join("skhome"));
