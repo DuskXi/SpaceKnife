@@ -1,9 +1,11 @@
 // What the packaging tests share: waiting, the backend's JSON-RPC over its WebSocket (Node's own
-// WebSocket, no dependencies), ending a process tree, an archive's unpacking.
+// WebSocket, no dependencies), ending a process tree, an archive's unpacking; following a portable
+// copy's swap, comparing an updated folder with the candidate, and finding and ending what a test
+// left running in its folders (unit tests: tools/tests/packaging_lib.test.mjs).
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
 
@@ -142,4 +144,183 @@ export function helperIn(folder) {
 export function cliIn(folder) {
   if (MAC) return join(folder, "SpaceKnife.app", "Contents", "MacOS", "spaceknife-cli");
   return join(folder, WIN ? "spaceknife-cli.exe" : "spaceknife-cli");
+}
+
+// ------------------------------------------------------------------ the swap of a portable copy
+
+/** How the swap's log (sk_core::update::swap, one timestamped line per step) says it ended, from
+ * its last line: "updated" (then the new version starts), "kept" (the old files back, the old
+ * version starts), "refused" (the plan, or the new version can't start here: nothing was touched),
+ * "start-failed" (the files are in place but the program could not be started); null while it goes
+ * on. */
+export function swapEnding(text) {
+  const last = (text ?? "").trim().split(/\r?\n/).at(-1) ?? "";
+  if (/ updated$/.test(last)) return "updated";
+  if (last.includes("kept the old version")) return "kept";
+  if (last.includes("not started: ")) return "refused";
+  if (last.includes("could not start SpaceKnife")) return "start-failed";
+  return null;
+}
+
+/** Follow the swap of a portable copy until it says how it ended: its log, read every `every` ms
+ * (what was read last is kept: the new version removes the log with the rest of its update from the
+ * updates folder as soon as it starts, often before a slower poll would see its last line), and
+ * the new version's ready file. A ready file with a pid that is none of `oldPids` means the new
+ * version runs, which the swap starts only after "updated" (0.3.4, the old version, writes none).
+ * Resolves {how, text, ready}; `how` as swapEnding, or "updated" when only the ready file showed it
+ * (`cleaned`: the log was gone by then). Rejects after `timeout` ms with what the log said. */
+export async function watchSwap({ log, ready, oldPids = [], timeout = 180_000, every = 100 }) {
+  let text = "";
+  let cleaned = false;
+  const readyInfo = () => {
+    if (!ready) return null;
+    try {
+      const r = JSON.parse(readFileSync(ready, "utf8"));
+      return r && !oldPids.includes(r.pid) ? r : null;
+    } catch {
+      return null;
+    }
+  };
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    try {
+      text = readFileSync(log, "utf8");
+    } catch {
+      if (text) cleaned = true; // read before, gone now
+    }
+    const how = swapEnding(text);
+    if (how) return { how, text, ready: readyInfo(), cleaned };
+    const back = readyInfo();
+    if (back) return { how: "updated", text, ready: back, cleaned };
+    if (Date.now() > deadline) {
+      const e = new Error(`timed out after ${Math.round(timeout / 1000)} s waiting for the swap's log to say how it ended (${log}): ${text.trim() ? `it says\n${text.trim()}` : "it is empty or was never written"}`);
+      e.swapLog = text;
+      throw e;
+    }
+    await sleep(every);
+  }
+}
+
+/** The differences between an expected folder (a candidate's unpacked files) and an actual one:
+ * entries missing, different (a file's bytes, a link's target, a file where a folder belongs) or
+ * not expected at all. `skip`: top-level names left out of the comparison (the data folder). */
+export function treeDiff(want, have, skip = []) {
+  const out = { missing: [], different: [], extra: [] };
+  const kind = (p) => {
+    try {
+      const s = lstatSync(p);
+      return s.isSymbolicLink() ? "link" : s.isDirectory() ? "dir" : "file";
+    } catch {
+      return null;
+    }
+  };
+  const walk = (rel) => {
+    const a = join(want, rel);
+    const b = join(have, rel);
+    const ka = kind(a);
+    const kb = kind(b);
+    if (!kb) return out.missing.push(rel);
+    if (ka !== kb) return out.different.push(`${rel} (${kb}, want ${ka})`);
+    if (ka === "link") {
+      if (readlinkSync(a) !== readlinkSync(b)) out.different.push(`${rel} (link to ${readlinkSync(b)}, want ${readlinkSync(a)})`);
+    } else if (ka === "file") {
+      if (sha256(a) !== sha256(b)) out.different.push(rel);
+    } else {
+      const names = new Set(readdirSync(a));
+      for (const n of readdirSync(b)) if (!names.has(n) && !(rel === "" && skip.includes(n))) out.extra.push(join(rel, n));
+      for (const n of [...names].sort()) if (!(rel === "" && skip.includes(n))) walk(join(rel, n));
+    }
+  };
+  walk("");
+  return out;
+}
+
+/** The built interface in an unpacked portable folder, wherever its kind keeps it: next to the
+ * program (the Tauri app on Windows and Linux), in resources/ (the Electron shell) or in the app
+ * bundle (macOS); null when there is none. */
+export function uiIn(folder) {
+  for (const rel of [["ui"], ["resources", "ui"], ["SpaceKnife.app", "Contents", "Resources", "ui"]]) {
+    const index = join(folder, ...rel, "index.html");
+    if (existsSync(index)) return index;
+  }
+  return null;
+}
+
+/** The app's own process from its backend's (the pid in its ready file): the Tauri app runs the
+ * backend in its process, the Electron shell runs spaceknife-cli as its child (then the parent; told
+ * apart on Linux, where the Electron shell is built). */
+export function appProcessOf(backendPid) {
+  if (WIN || MAC) return backendPid;
+  try {
+    if (readFileSync(`/proc/${backendPid}/comm`, "utf8").trim() !== "spaceknife-cli") return backendPid;
+    const stat = readFileSync(`/proc/${backendPid}/stat`, "utf8");
+    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]); // the field after the state: ppid
+  } catch {
+    return backendPid;
+  }
+}
+
+/** The Electron shell's files in an unpacked portable folder (resources/app.asar; on macOS in the
+ * app bundle): the copy is the Electron shell, not the Tauri app. */
+export function isElectron(folder) {
+  return existsSync(join(folder, "resources", "app.asar")) || existsSync(join(folder, "SpaceKnife.app", "Contents", "Resources", "app.asar"));
+}
+
+/** The processes whose program or command line lies in one of `roots` (the test's folders: what
+ * it unpacked, installed and started, and whatever those started in turn, the swap helper and the
+ * new version among them, in a session of their own): [{pid, cmd}]. This process is never one. */
+export function processesUnder(roots) {
+  const norm = (p) => (WIN ? p.toLowerCase().replaceAll("/", "\\") : p);
+  const inside = roots.filter(Boolean).map(norm);
+  const hit = (s) => !!s && inside.some((r) => norm(s).includes(r));
+  const out = [];
+  if (WIN) {
+    const script = "Get-CimInstance Win32_Process | ForEach-Object { '{0}\t{1}\t{2}' -f $_.ProcessId, $_.ExecutablePath, $_.CommandLine }";
+    const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", maxBuffer: 64 << 20 });
+    for (const line of (r.stdout ?? "").split(/\r?\n/)) {
+      const [pid, exe, cmd] = line.split("\t");
+      if (Number(pid) && Number(pid) !== process.pid && (hit(exe) || hit(cmd))) out.push({ pid: Number(pid), cmd: cmd || exe });
+    }
+  } else if (MAC) {
+    const r = spawnSync("ps", ["-axww", "-o", "pid=,stat=,command="], { encoding: "utf8", maxBuffer: 64 << 20 });
+    for (const line of (r.stdout ?? "").split("\n")) {
+      const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(line);
+      if (m && Number(m[1]) !== process.pid && hit(m[3])) out.push({ pid: Number(m[1]), cmd: `[${m[2]}] ${m[3]}` });
+    }
+  } else {
+    for (const d of readdirSync("/proc")) {
+      const pid = Number(d);
+      if (!pid || pid === process.pid) continue;
+      let exe = "";
+      let cmd = "";
+      let state = "?";
+      try {
+        exe = readlinkSync(`/proc/${pid}/exe`);
+      } catch {
+        // another user's, or gone
+      }
+      try {
+        cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim();
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        state = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0];
+      } catch {
+        continue;
+      }
+      if (hit(exe) || hit(cmd)) out.push({ pid, cmd: `[${state}] ${cmd || exe}` });
+    }
+  }
+  return out;
+}
+
+/** End every process in `roots` (processesUnder), and their children, at once; again while some
+ * are left (a parent may start one as it goes). Returns what was found the first time. */
+export async function stopUnder(roots, { tries = 5 } = {}) {
+  const first = processesUnder(roots);
+  let left = first;
+  for (let i = 0; i < tries && left.length; i++) {
+    for (const p of left) stop(p.pid, true);
+    await sleep(500);
+    left = processesUnder(roots).filter((p) => !p.cmd.startsWith("[Z]"));
+  }
+  return first;
 }

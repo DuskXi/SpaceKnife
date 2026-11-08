@@ -24,11 +24,21 @@
 // backend, a new process, its ready file) and says it is the candidate's version and the same kind
 // of install; the setting changed through 0.3.4's backend and the marker files in the data, config
 // and cache folders are still there, byte for byte; nothing of the update is left in the updates
-// folder. Then per kind: portable (no Electron files left, the data folder kept, the log ends with
-// "updated"), nsis (one uninstall entry, the same folder, the shortcuts, data kept on uninstall),
-// appimage (the file is the candidate, no .new), deb / rpm (one package, the old /opt/SpaceKnife
-// gone, /usr/bin/spaceknife is the new program, one desktop entry, a clean removal), dmg (bundle id,
-// version, executable, signature).
+// folder. Then per kind: portable (the swap's log says "updated", or the new version came back
+// before it could be read — it removes the log as it starts; the folder holds exactly the
+// candidate's files, byte for byte, and the data folder: nothing of 0.3.4 is left, and whatever the
+// candidate has — SpaceKnife.com on Windows, the Electron shell's own files in its Linux portable
+// copy — is the candidate's), nsis (one uninstall entry, the same folder, the shortcuts, data kept
+// on uninstall), appimage (the file is the candidate, no .new), deb / rpm (one package, the old
+// /opt/SpaceKnife gone, /usr/bin/spaceknife is the new program, one desktop entry, a clean
+// removal), dmg (bundle id, version, executable, signature).
+//
+// On a failure or a timeout it prints what there is to know (the swap's log as last read, its
+// plan, the updates and app folders, the processes still running from the test's folders, the new
+// version's own logs), then ends every process it started or that runs from its folders — the swap
+// helper and the new version run in sessions of their own — and every leg has a deadline
+// (SK_E2E_DEADLINE_S, default 1200), after which the same happens: no step waits for a runner's
+// timeout.
 //
 // It starts windows (minimized) and, for the installers, installs into this user's profile or the
 // system: everything but the portable leg runs on a CI runner only. On Windows, run the portable
@@ -41,7 +51,7 @@ import http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { MAC, WIN, fail, hello, helperIn, pidAlive, programIn, sha256, sleep, stop, unpack, until } from "./lib.mjs";
+import { MAC, WIN, appProcessOf, fail, hello, helperIn, isElectron, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, uiIn, unpack, until, watchSwap } from "./lib.mjs";
 
 const OLD = "0.3.4";
 const args = process.argv.slice(2);
@@ -66,14 +76,20 @@ const output = [];
 const procs = new Set();
 // the new version's processes, started by 0.3.4 or the system, not by this test: ended on the way out
 const started = new Set();
-// resolved: macOS reports /var/folders/… as /private/var/folders/… in paths it hands out
-const work = realpathSync(mkdtempSync(join(tmpdir(), "sk-from-034-")));
+// resolved: macOS reports /var/folders/… as /private/var/folders/… in paths it hands out, and Windows
+// the long names of RUNNER~1-like short ones (the processes found by path on the way out)
+const work = realpathSync.native(mkdtempSync(join(tmpdir(), "sk-from-034-")));
+// the folders whose processes are ended on the way out (the work folder; an installer's folder)
+const roots = new Set([work]);
+// what a failure report shows: the leg's folders as it learns them, the swap's log as last read
+const seen = { folder: null, updates: null, data: null, swapLog: "" };
 
 /** The version in a release file name (0.3.4's names). */
 function versionOf(name) {
   const v = String.raw`(\d+\.\d+\.\d+(?:[-~][0-9A-Za-z.]+)?)`;
   for (const re of [
     new RegExp(`^SpaceKnife-${v}-(?:win|linux|mac)-(?:x64|arm64)-portable\\.(?:zip|tar\\.gz)$`),
+    new RegExp(`^SpaceKnife-${v}-linux-(?:x64|arm64)-tauri\\.tar\\.gz$`), // the Tauri app's Linux portable copy (0.3.5)
     new RegExp(`^SpaceKnife-${v}-Setup-x64\\.exe$`),
     new RegExp(`^SpaceKnife-${v}-x86_64\\.AppImage$`),
     new RegExp(`^spaceknife_${v}_amd64\\.deb$`),
@@ -104,6 +120,8 @@ function machineOf(file) {
 function sumsName(name) {
   let m = /-((?:win|linux)-(?:x64|arm64))-portable\./.exec(name);
   if (m) return `SHA256SUMS-portable-${m[1]}.txt`;
+  m = /-(linux-(?:x64|arm64))-tauri\.tar\.gz$/.exec(name);
+  if (m) return `SHA256SUMS-tauri-${m[1]}.txt`;
   m = /-mac-(x64|arm64)(?:-portable\.zip|\.dmg)$/.exec(name);
   if (m) return `SHA256SUMS-mac-${m[1]}.txt`;
   return "SHA256SUMS.txt";
@@ -326,6 +344,7 @@ async function newVersion(ready, oldPids, kind) {
     }
   }, 180_000);
   started.add(info.pid);
+  started.add(appProcessOf(info.pid));
   const s = await hello(info.url, info.token);
   const status = await s.call("update.status");
   if (status.current !== NEW_VERSION) throw new Error(`the running version says ${status.current}, not ${NEW_VERSION}`);
@@ -359,7 +378,19 @@ async function portable() {
   const program = programIn(folder); // what 0.3.4 runs, and what the swap starts again
   if (!existsSync(program)) throw new Error(`no ${program}`);
   const data = join(folder, "data");
+  seen.folder = folder;
+  seen.data = data;
   const seeded = seed({ data: join(data, "data"), config: join(data, "config"), cache: join(data, "cache"), top: data });
+  // the candidate's files, unpacked as the release has them: what the folder must hold afterwards
+  mkdirSync(join(work, "candidate"));
+  unpack(newPath, join(work, "candidate"));
+  const candTops = readdirSync(join(work, "candidate")).filter((n) => n !== "__MACOSX");
+  if (candTops.length !== 1) throw new Error(`the candidate has ${candTops.join(", ")} at the top`);
+  const candidate = join(work, "candidate", candTops[0]);
+  const shell = isElectron(candidate) ? "the Electron shell" : "the Tauri app";
+  console.log(`the candidate is ${shell} (${basename(newPath)})`);
+  for (const f of [programIn(candidate), helperIn(candidate)]) if (!existsSync(f)) throw new Error(`the candidate has no ${f}`);
+  if (!uiIn(candidate)) throw new Error(`the candidate has no interface (ui/index.html where its kind keeps it) in ${candidate}`);
 
   const { server, feed } = await serveFeed(newPath);
   try {
@@ -374,41 +405,47 @@ async function portable() {
 
     step("the swap");
     const updates = join(data, "data", "updates");
+    seen.updates = updates;
     const log = join(updates, `update-${NEW_VERSION}.log`);
-    let text = "";
-    await until("the swap's log to say how it ended", () => {
-      try {
-        text = readFileSync(log, "utf8"); // read before the new version clears the updates folder
-      } catch {
-        return false;
-      }
-      const last = text.trim().split(/\r?\n/).at(-1) ?? "";
-      // "not started: …": the helper refused the plan or found that the new version can't start here
-      return / updated$/.test(last) || last.includes("kept the old version") || last.includes("did not quit") || last.includes("not started: ");
-    }, 180_000);
-    console.log(text.trim());
-    if (!/ updated$/.test(text.trim().split(/\r?\n/).at(-1))) throw new Error("the swap did not end with 'updated'");
+    // read often and kept: the new version removes the log with the rest of its update as soon as
+    // it starts; its ready file says it came back when the log's last line was missed
+    const swap = await watchSwap({ log, ready, oldPids: [app.pid], timeout: 180_000 }).catch((e) => {
+      seen.swapLog = e.swapLog ?? seen.swapLog;
+      throw e;
+    });
+    seen.swapLog = swap.text;
+    console.log(swap.text.trim() || "(the log was gone before it could be read)");
+    if (swap.cleaned) console.log("(the new version removed the log as it started: its ready file says how the swap ended)");
+    if (swap.how !== "updated") throw new Error(`the swap ended ${swap.how}, not with "updated"`);
 
     step(`${NEW_VERSION} comes back`);
     const back = await newVersion(ready, [app.pid], "portable");
-    const cmd = commandLine(back.info.pid);
+    const appPid = appProcessOf(back.info.pid);
+    const cmd = commandLine(appPid);
     if (cmd && !cmd.includes("--updated")) throw new Error(`started without --updated: ${cmd}`);
     // an x64 copy on an ARM computer moves to the arm64 build (--expect-machine arm64)
     const machine = option("--expect-machine");
     if (machine && machineOf(program) !== machine) throw new Error(`${program} is built for ${machineOf(program)}, not ${machine}`);
     console.log(`${basename(program)} is built for ${machineOf(program)}`);
-    // the candidate's files, none of the Electron app's
-    for (const f of [helperIn(folder), join(folder, "ui", "index.html")]) if (!existsSync(f)) throw new Error(`no ${f} after the update`);
-    const electron = MAC
-      ? ["SpaceKnife.app/Contents/Resources/app.asar", "SpaceKnife.app/Contents/Frameworks/Electron Framework.framework"]
-      : ["resources/app.asar", "locales", "chrome-sandbox", "SpaceKnife.com", "resources.pak", "chrome_100_percent.pak", "icudtl.dat", "libffmpeg.so", "ffmpeg.dll", "v8_context_snapshot.bin"];
-    const leftovers = electron.filter((f) => existsSync(join(folder, f)));
-    if (leftovers.length) throw new Error(`the Electron app's files are still there: ${leftovers.join(", ")}`);
+    // exactly the candidate's files (and the data folder): nothing of 0.3.4 left, and what the
+    // candidate has is the candidate's, byte for byte
+    const diff = treeDiff(candidate, folder, ["data"]);
+    const problems = [
+      ...diff.missing.map((f) => `missing: ${f}`),
+      ...diff.different.map((f) => `not the candidate's: ${f}`),
+      ...diff.extra.map((f) => `not in the candidate (left by ${OLD}?): ${f}`),
+    ];
+    if (problems.length) throw new Error(`the folder is not the candidate after the update:\n  ${problems.slice(0, 40).join("\n  ")}${problems.length > 40 ? `\n  … ${problems.length - 40} more` : ""}`);
+    if (isElectron(folder) !== isElectron(candidate)) throw new Error(`the folder is ${isElectron(folder) ? "" : "not "}the Electron shell, the candidate is ${shell}`);
+    console.log(`the folder holds exactly the candidate's files (${shell}) and its data folder`);
     expectSeeded(seeded);
     await expectCleanUpdates(updates);
     back.session.close();
-    stop(back.info.pid);
-    await until("the updated app to quit", () => !pidAlive(back.info.pid), 30_000).catch(() => stop(back.info.pid, true));
+    stop(appPid);
+    await until("the updated app to quit", () => !pidAlive(appPid) && !pidAlive(back.info.pid), 30_000).catch(() => {
+      stop(appPid, true);
+      stop(back.info.pid, true);
+    });
   } finally {
     server.close();
   }
@@ -455,10 +492,14 @@ async function nsis() {
   run(oldPath, ["/S", scope], "installing 0.3.4");
   const before = await until("0.3.4's uninstall entry", () => uninstallEntries().find((e) => e.version === OLD), 60_000);
   const dir = before.location;
+  roots.add(dir);
   const program = join(dir, "SpaceKnife.exe");
   console.log(`0.3.4 in ${dir} (${before.hive})`);
   const local = process.env.LOCALAPPDATA;
   const dataDir = join(local, "SpaceKnife");
+  seen.folder = dir;
+  seen.data = dataDir;
+  seen.updates = join(dataDir, "updates");
   const seeded = seed({ data: dataDir, cache: join(dataDir, "Cache") });
   const { server, feed } = await serveFeed(newPath);
   try {
@@ -542,6 +583,7 @@ async function packaged(kind) {
   };
   const tool = kind === "deb" ? ["apt-get", "install", "-y"] : ["dnf", "install", "-y"];
   step(`install 0.3.4's ${kind}`);
+  for (const r of ["/opt/SpaceKnife", "/usr/bin/spaceknife", "/usr/lib/spaceknife"]) roots.add(r);
   sh([...sudo, ...tool, oldPath], `installing 0.3.4's ${kind}`);
   const query = () =>
     kind === "deb"
@@ -684,20 +726,94 @@ async function dmg() {
   console.log(`\ndmg ${OLD} -> ${NEW_VERSION}: ok`);
 }
 
-try {
-  console.log(`${mode}: ${basename(oldPath)} -> ${basename(newPath)} (${NEW_VERSION}), work folder ${work}`);
-  if (mode === "portable") await portable();
-  else if (mode === "nsis") await nsis();
-  else if (mode === "appimage") await appimage();
-  else if (mode === "dmg") await dmg();
-  else await packaged(mode);
-} catch (e) {
+// ------------------------------------------------------------------ on the way out
+
+/** The last `n` lines of a text file, or null. */
+function tail(file, n = 40) {
+  try {
+    return readFileSync(file, "utf8").trimEnd().split(/\r?\n/).slice(-n).join("\n");
+  } catch {
+    return null;
+  }
+}
+
+/** The files below `dir` whose name matches `re` (at most `depth` folders down). */
+function find(dir, re, depth = 4) {
+  const out = [];
+  const walk = (d, left) => {
+    let names = [];
+    try {
+      names = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of names) {
+      const p = join(d, e.name);
+      if (e.isDirectory() && left > 0) walk(p, left - 1);
+      else if (e.isFile() && re.test(e.name)) out.push(p);
+    }
+  };
+  walk(dir, depth);
+  return out;
+}
+
+const listing = (dir) => {
+  try {
+    return readdirSync(dir).sort().join(", ") || "(empty)";
+  } catch (e) {
+    return `(${e.code})`;
+  }
+};
+
+/** What there is to know when a leg fails: the swap's log as last read (and as it is now), its
+ * plan, the folders, the processes still running from the test's folders, the new version's logs. */
+function diagnose() {
+  const lines = ["---- diagnosis"];
+  const say = (title, body) => body != null && lines.push(`-- ${title}`, String(body).trimEnd() || "(empty)");
+  if (seen.updates) {
+    const log = join(seen.updates, `update-${NEW_VERSION}.log`);
+    say(`the swap's log as last read (${log})`, seen.swapLog || "(never read)");
+    say("the swap's log now", tail(log, 80) ?? "(gone)");
+    say(`the swap's plan (update-${NEW_VERSION}.json)`, tail(join(seen.updates, `update-${NEW_VERSION}.json`), 40) ?? "(gone)");
+    say(`the updates folder ${seen.updates}`, listing(seen.updates));
+  }
+  if (seen.folder) say(`the app folder ${seen.folder}`, listing(seen.folder));
+  const running = processesUnder([...roots]);
+  say("processes running from the test's folders", running.map((p) => `${p.pid} ${p.cmd}`).join("\n") || "(none)");
+  // the new version's own logs (the backend's, the shell's): the newest few, their ends
+  const logs = seen.data ? find(seen.data, /\.log$/i).filter((f) => !/[\\/]updates[\\/]/.test(f)) : [];
+  logs.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  for (const f of logs.slice(0, 3)) say(`log ${f}`, tail(f, 40));
+  lines.push("----");
+  console.error(lines.join("\n"));
+}
+
+/** End what the test started, and what still runs from its folders (the swap helper and the new
+ * version are in sessions of their own). */
+async function cleanup() {
   for (const p of procs) if (!p.exited) stop(p.pid, true);
   for (const pid of started) if (pidAlive(pid)) stop(pid, true);
-  fail(e.stack ?? e.message, output);
-} finally {
-  for (const p of procs) if (!p.exited) stop(p.pid, true);
-  for (const pid of started) if (pidAlive(pid)) stop(pid, true);
+  const left = await stopUnder([...roots]);
+  if (left.length) console.log(`ended what still ran from the test's folders: ${left.map((p) => `${p.pid} ${p.cmd}`).join("; ")}`);
+}
+
+let leaving = false;
+/** Report, clean up and exit (once). */
+async function leave(code, message) {
+  if (leaving) return;
+  leaving = true;
+  if (code !== 0) {
+    try {
+      diagnose();
+    } catch (e) {
+      console.error(`(the diagnosis failed: ${e.message})`);
+    }
+  }
+  try {
+    await cleanup();
+  } catch (e) {
+    console.error(`(cleaning up failed: ${e.message})`);
+  }
   await sleep(1500);
   if (!process.env.SK_KEEP) {
     try {
@@ -707,5 +823,24 @@ try {
       console.log(`(${work} stays behind: ${e.code} ${e.path ?? ""})`);
     }
   }
+  if (code !== 0) fail(message, output);
+  process.exit(0);
 }
-process.exit(0);
+
+const deadline = Number(process.env.SK_E2E_DEADLINE_S || 1200);
+const watchdog = setTimeout(() => void leave(1, `the ${mode} leg did not finish within ${deadline} s`), deadline * 1000);
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => void leave(1, `ended by ${signal}`));
+
+try {
+  console.log(`${mode}: ${basename(oldPath)} -> ${basename(newPath)} (${NEW_VERSION}), work folder ${work}`);
+  if (mode === "portable") await portable();
+  else if (mode === "nsis") await nsis();
+  else if (mode === "appimage") await appimage();
+  else if (mode === "dmg") await dmg();
+  else await packaged(mode);
+  clearTimeout(watchdog);
+  await leave(0);
+} catch (e) {
+  clearTimeout(watchdog);
+  await leave(1, e.stack ?? e.message);
+}
