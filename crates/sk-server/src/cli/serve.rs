@@ -138,9 +138,32 @@ fn python_value(v: &Value) -> String {
 
 /// Connection info, the token included, readable by the current user only; written before the
 /// ready line, removed on exit.
+///
+/// Whole or not at all (a temporary file renamed over it), and never through a link: the
+/// temporary file is always a new one (create-new: no existing file and no symbolic link passes,
+/// and on Unix O_NOFOLLOW besides), after whatever had its name is removed (a link itself, not what
+/// it points at); when something takes the name meanwhile, nothing is written. The rename replaces
+/// a link at `path` instead of following it. On Unix a folder that belongs to another user is
+/// refused, and a missing one is made for this user only (0700).
 pub fn write_ready_file(path: &Path, ready: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        let mut dirs = std::fs::DirBuilder::new();
+        dirs.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut dirs, 0o700);
+        dirs.create(parent)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            // SAFETY: geteuid has no preconditions.
+            let me = unsafe { libc::geteuid() };
+            if owned_by_another_user(std::fs::metadata(parent)?.uid(), me) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("{} belongs to another user", parent.display()),
+                ));
+            }
+        }
     }
     let tmp = path.with_file_name(format!(
         "{}.tmp",
@@ -148,18 +171,32 @@ pub fn write_ready_file(path: &Path, ready: &str) -> std::io::Result<()> {
             .map(|n| n.to_string_lossy())
             .unwrap_or_default()
     ));
-    {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp)?;
-        f.write_all(ready.as_bytes())?;
+    match std::fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
     }
-    std::fs::rename(&tmp, path)
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut f = opts.open(&tmp)?;
+    let written = f.write_all(ready.as_bytes());
+    drop(f);
+    let done = written.and_then(|()| std::fs::rename(&tmp, path));
+    if done.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    done
+}
+
+/// A folder of `owner` is someone else's for the user `me` (root's are not: /tmp).
+#[cfg_attr(not(unix), allow(dead_code))]
+fn owned_by_another_user(owner: u32, me: u32) -> bool {
+    owner != me && owner != 0
 }
 
 /// `spaceknife-cli serve`: returns the exit code.
@@ -439,6 +476,71 @@ mod tests {
         );
         let v: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(v["dir"], "C:\\Ü");
+    }
+
+    #[test]
+    fn the_ready_file_is_written_whole_and_replaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("ready.json");
+        write_ready_file(&file, "{\"a\": 1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{\"a\": 1}");
+        write_ready_file(&file, "{\"a\": 2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{\"a\": 2}");
+        // a stale temporary file of a run that died is no obstacle
+        std::fs::write(tmp.path().join("ready.json.tmp"), "half").unwrap();
+        write_ready_file(&file, "{\"a\": 3}").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{\"a\": 3}");
+        assert!(!tmp.path().join("ready.json.tmp").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn the_ready_file_never_writes_through_a_link_planted_beside_it() {
+        // someone who could make files in the ready file's folder links its temporary name to a
+        // file of ours: the token must not land in that file, nor the file be cut short
+        let tmp = tempfile::tempdir().unwrap();
+        let victim = tmp.path().join("victim.txt");
+        std::fs::write(&victim, "precious").unwrap();
+        let file = tmp.path().join("ready.json");
+        std::fs::hard_link(&victim, tmp.path().join("ready.json.tmp")).unwrap();
+        write_ready_file(&file, "{\"token\": \"secret\"}").unwrap();
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "precious");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "{\"token\": \"secret\"}"
+        );
+        #[cfg(unix)]
+        {
+            let elsewhere = tmp.path().join("elsewhere.txt");
+            std::fs::write(&elsewhere, "mine").unwrap();
+            let _ = std::fs::remove_file(tmp.path().join("ready.json.tmp"));
+            std::os::unix::fs::symlink(&elsewhere, tmp.path().join("ready.json.tmp")).unwrap();
+            write_ready_file(&file, "{\"token\": \"again\"}").unwrap();
+            assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "mine");
+            assert_eq!(
+                std::fs::read_to_string(&file).unwrap(),
+                "{\"token\": \"again\"}"
+            );
+            // the ready file itself a link: replaced, not followed
+            let _ = std::fs::remove_file(&file);
+            std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
+            write_ready_file(&file, "{\"token\": \"third\"}").unwrap();
+            assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), "mine");
+            assert!(!std::fs::symlink_metadata(&file).unwrap().is_symlink());
+        }
+    }
+
+    #[test]
+    fn a_folder_of_another_user_takes_no_ready_file() {
+        assert!(!owned_by_another_user(1000, 1000));
+        assert!(!owned_by_another_user(0, 1000), "root's /tmp");
+        assert!(owned_by_another_user(1001, 1000));
+        assert!(!owned_by_another_user(0, 0));
     }
 
     #[test]
