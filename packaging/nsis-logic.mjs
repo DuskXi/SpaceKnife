@@ -24,7 +24,7 @@
 // rendered installer (target/release/nsis/x64). Exit status 1 when a case says something else.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,7 +60,11 @@ function fail(message) {
   process.exit(1);
 }
 
-const sandbox = mkdtempSync(join(tmpdir(), "sk-nsis-logic-"));
+// by its long path: a CI runner's %TEMP% is C:\Users\RUNNER~1\…, and a shell link names its target
+// by the long path whatever form it was made with (IShellLink::GetPath), while IsShortcutTarget
+// compares the strings. The installer's own paths are long ones: $INSTDIR from the shell's folders
+// or the uninstall entry, the shortcuts' targets as 0.3.4 made them from that same $INSTDIR.
+const sandbox = realpathSync.native(mkdtempSync(join(tmpdir(), "sk-nsis-logic-")));
 const exe = join(sandbox, "logic-test.exe");
 let failures = 0;
 try {
@@ -96,12 +100,14 @@ try {
     }
     return { got, box };
   }
-  function expect(what, got, want) {
+  /** `why`: keys of `got` that say why (HRESULTs and the like), printed when the case fails. */
+  function expect(what, got, want, why = []) {
     const wrong = Object.entries(want).filter(([k, v]) => (v instanceof RegExp ? !v.test(got.get(k) ?? "") : got.get(k) !== v));
     if (wrong.length) {
       failures++;
       console.log(`not ok - ${what}`);
       for (const [k, v] of wrong) console.log(`    ${k}: ${JSON.stringify(got.get(k))}, wanted ${v instanceof RegExp ? v : JSON.stringify(v)}`);
+      for (const k of why) console.log(`    ${k}: ${got.get(k) ?? "(not reported)"}`);
     } else console.log(`ok - ${what}`);
   }
 
@@ -188,15 +194,20 @@ try {
     // here gets it, another program's is left alone, a missing one is not made
     const { got, box } = run("shortcuts");
     const aumid = (lnk) => (readFileSync(join(box, lnk)).includes(Buffer.from("io.github.duskxi.spaceknife", "utf16le")) ? "1" : "0");
-    expect("SkMigrateShortcut", new Map([...got, ["moved_aumid", aumid("moved.lnk")], ["here_aumid", aumid("here.lnk")], ["other_aumid", aumid("other.lnk")]]), {
-      moved: "1",
-      moved_aumid: "1",
-      here: "1",
-      here_aumid: "1",
-      other: "1",
-      other_aumid: "0",
-      gone: "0",
-    });
+    expect(
+      "SkMigrateShortcut",
+      new Map([...got, ["moved_aumid", aumid("moved.lnk")], ["here_aumid", aumid("here.lnk")], ["other_aumid", aumid("other.lnk")]]),
+      {
+        moved: "1",
+        moved_aumid: "1",
+        here: "1",
+        here_aumid: "1",
+        other: "1",
+        other_aumid: "0",
+        gone: "0",
+      },
+      ["moved", "here", "other"].flatMap((lnk) => [`${lnk}_why`, `${lnk}_want`]),
+    );
   }
   {
     // 0.3.4 in a folder it shared (its uninstaller can't be used there): exactly the files the

@@ -125,6 +125,51 @@ SectionEnd
   ${EndIf}
 !macroend
 
+; Why IsShortcutTarget says what it says of LNK and WANT (the runner prints it when the case
+; fails): KEY_why = the HRESULT of each COM call it makes and the target IShellLink::GetPath gives,
+; raw (what it compares, as a string, with WANT) and plain; KEY_want = WANT and its long form
+; (GetLongPathNameW: its length, 0 when that fails). $0-$4 are kept.
+!macro LNK_WHY KEY LNK WANT
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  StrCpy $0 0
+  StrCpy $1 0
+  !insertmacro ComHlpr_CreateInProcInstance ${CLSID_ShellLink} ${IID_IShellLink} r0 ".r3"
+  IntFmt $4 "CoCreateInstance 0x%08X" $3
+  ${If} $0 P<> 0
+    ${IUnknown::QueryInterface} $0 '("${IID_IPersistFile}", .r1).r3'
+    IntFmt $3 "0x%08X" $3
+    StrCpy $4 "$4, QueryInterface(IPersistFile) $3"
+    ${If} $1 P<> 0
+      ${IPersistFile::Load} $1 '("${LNK}", ${STGM_READ}).r3'
+      IntFmt $3 "0x%08X" $3
+      StrCpy $4 "$4, Load $3"
+      StrCpy $2 ""
+      ${IShellLink::GetPath} $0 '(.r2, ${NSIS_MAX_STRLEN}, 0, ${SLGP_RAWPATH}).r3'
+      IntFmt $3 "0x%08X" $3
+      StrCpy $4 "$4, GetPath(SLGP_RAWPATH) $3 [$2]"
+      StrCpy $2 ""
+      ${IShellLink::GetPath} $0 '(.r2, ${NSIS_MAX_STRLEN}, 0, 0).r3'
+      IntFmt $3 "0x%08X" $3
+      StrCpy $4 "$4, GetPath $3 [$2]"
+      ${IUnknown::Release} $1 ""
+    ${EndIf}
+    ${IUnknown::Release} $0 ""
+  ${EndIf}
+  !insertmacro OUT "${KEY}_why=$4"
+  StrCpy $2 ""
+  System::Call 'kernel32::GetLongPathNameW(w "${WANT}", w .r2, i ${NSIS_MAX_STRLEN}) i .r3'
+  !insertmacro OUT "${KEY}_want=[${WANT}], long form [$2] ($3)"
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+!macroend
+
 ; the new version's files into the staging folder, as the installer's File lines do (but the one
 ; named in SK_LOGIC_SKIP)
 !macro SK_STAGE_ONE REL
@@ -306,12 +351,15 @@ Function Shortcuts
   !insertmacro IsShortcutTarget "$R8\moved.lnk" "$R8\new\${MAINBINARYNAME}.exe"
   Pop $0
   !insertmacro OUT "moved=$0"
+  !insertmacro LNK_WHY "moved" "$R8\moved.lnk" "$R8\new\${MAINBINARYNAME}.exe"
   !insertmacro IsShortcutTarget "$R8\here.lnk" "$R8\new\${MAINBINARYNAME}.exe"
   Pop $0
   !insertmacro OUT "here=$0"
+  !insertmacro LNK_WHY "here" "$R8\here.lnk" "$R8\new\${MAINBINARYNAME}.exe"
   !insertmacro IsShortcutTarget "$R8\other.lnk" "$R8\mine\Mine.exe"
   Pop $0
   !insertmacro OUT "other=$0"
+  !insertmacro LNK_WHY "other" "$R8\other.lnk" "$R8\mine\Mine.exe"
   !insertmacro EXISTS "gone" "$R8\gone.lnk"
 FunctionEnd
 
