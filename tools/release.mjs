@@ -9,9 +9,16 @@
 // actions/download-artifact and `gh run download` write them), checks every checksum file against
 // the files next to it, checks that exactly the release's files are there (the names the update
 // check looks for: crates/sk-core/src/update `asset_templates`), copies them into OUT with the
-// checksum files the release publishes (the two installer lists merged into SHA256SUMS.txt), and
-// fills the notes' placeholders: {{version}}, {{size:FILE}} (MiB, rounded, written "N MB" as in
-// every release so far) and {{build_runs}} (links to the runs that built the files).
+// checksum files the release publishes (the installer lists, SHA256SUMS-installers-*.txt of
+// whichever builds made the installers, merged into SHA256SUMS.txt), and fills the notes'
+// placeholders: {{version}}, {{size:FILE}} (MiB, rounded, written "N MB" as in every release so
+// far) and {{build_runs}} (links to the runs that built the files).
+//
+// The file names are 0.3.4's and stay so for every later release: an installed 0.3.x takes the
+// newest release by its version and only then looks for its file under these names (v0.3.4
+// tools/release.py `expected`); one renamed file strands every copy of that kind of install. The
+// Release workflow also runs 0.3.4's own update code against the assembled files
+// (tools/compat034.mjs).
 
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -19,27 +26,32 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const SUMS = "SHA256SUMS.txt";
-export const INSTALLER_SUMS = ["SHA256SUMS-installers-win-x64.txt", "SHA256SUMS-installers-linux-x64.txt"];
+/** The installer builds' checksum lists (any number, one per build job): merged into SUMS. */
+export const INSTALLER_SUMS = /^SHA256SUMS-installers-[0-9A-Za-z._-]+\.txt$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 
 export class ReleaseError extends Error {}
 
-/** Every file of a release: {template, sums} — the checksum file it is published in (null: none). */
+/** Every file of a release: {template, sums} — the checksum file it is published in (null: none),
+ * and the shell that builds it (crates/sk-core update `Shell`). */
 export function expected() {
   const out = [
-    // Tauri's installers (x64 only), listed in SHA256SUMS.txt
-    { template: "SpaceKnife_{v}_x64-setup.exe", sums: SUMS },
-    { template: "SpaceKnife_{v}_amd64.AppImage", sums: SUMS },
-    { template: "SpaceKnife_{v}_amd64.deb", sums: SUMS },
-    { template: "SpaceKnife-{v}-1.x86_64.rpm", sums: SUMS },
+    // the installers (x64 only), listed in SHA256SUMS.txt: the Windows installer, the AppImage and
+    // the rpm (for RHEL 9, which has no WebKitGTK 4.1) from the Electron shell, the deb from Tauri
+    { template: "SpaceKnife-{v}-Setup-x64.exe", sums: SUMS, shell: "electron" },
+    { template: "SpaceKnife-{v}-x86_64.AppImage", sums: SUMS, shell: "electron" },
+    { template: "spaceknife_{v}_amd64.deb", sums: SUMS, shell: "tauri" },
+    { template: "spaceknife-{v}.x86_64.rpm", sums: SUMS, shell: "electron" },
+    // what AppImageUpdate reads (the AppImage's update information points at it), in no list
+    { template: "SpaceKnife-{v}-x86_64.AppImage.zsync", sums: null, shell: "electron" },
   ];
   for (const [target, ext] of [["win-x64", "zip"], ["win-arm64", "zip"], ["linux-x64", "tar.gz"], ["linux-arm64", "tar.gz"]]) {
-    out.push({ template: `SpaceKnife-{v}-${target}-portable.${ext}`, sums: `SHA256SUMS-portable-${target}.txt` });
+    out.push({ template: `SpaceKnife-{v}-${target}-portable.${ext}`, sums: `SHA256SUMS-portable-${target}.txt`, shell: "tauri" });
   }
-  for (const [a, dmg] of [["arm64", "aarch64"], ["x64", "x64"]]) {
-    out.push({ template: `SpaceKnife_{v}_${dmg}.dmg`, sums: `SHA256SUMS-mac-${a}.txt` });
-    out.push({ template: `SpaceKnife-{v}-mac-${a}-portable.zip`, sums: `SHA256SUMS-mac-${a}.txt` });
+  for (const a of ["arm64", "x64"]) {
+    out.push({ template: `SpaceKnife-{v}-mac-${a}.dmg`, sums: `SHA256SUMS-mac-${a}.txt`, shell: "tauri" });
+    out.push({ template: `SpaceKnife-{v}-mac-${a}-portable.zip`, sums: `SHA256SUMS-mac-${a}.txt`, shell: "tauri" });
   }
   return out;
 }
@@ -124,13 +136,25 @@ export function assemble(version, artifacts, out) {
 
   const names = [...found.keys()];
   const want = expected().map((e) => ({ ...e, name: pick(e.template, version, names) }));
+  const installerSums = names.filter((n) => INSTALLER_SUMS.test(n)).sort();
+  // the installer lists, merged: what SHA256SUMS.txt will say (the files published in it only)
+  const merged = new Map();
+  for (const s of installerSums) {
+    try {
+      for (const [n, digest] of parseSums(readFileSync(found.get(s)[0], "utf8"))) merged.set(n, digest);
+    } catch {
+      // said above
+    }
+  }
   for (const e of want) {
     if (!e.name) problems.push(`missing: ${e.template.replace("{v}", version)}`);
     else if (e.sums && !hashes.has(e.name)) problems.push(`${e.name} is in no checksum file`);
+    else if (e.sums === SUMS && !merged.has(e.name)) problems.push(`${e.name} is in no SHA256SUMS-installers-*.txt`);
   }
-  const allowed = new Set([...want.map((e) => e.name).filter(Boolean), ...INSTALLER_SUMS, ...publishedSums()]);
+  const allowed = new Set([...want.map((e) => e.name).filter(Boolean), ...installerSums, ...publishedSums()]);
   for (const name of names.sort()) if (!allowed.has(name)) problems.push(`not part of a release: ${name}`);
-  for (const name of [...INSTALLER_SUMS, ...publishedSums().filter((s) => s !== SUMS)]) {
+  if (!installerSums.length) problems.push("missing checksum files: SHA256SUMS-installers-*.txt");
+  for (const name of publishedSums().filter((s) => s !== SUMS)) {
     if (!found.has(name)) problems.push(`missing checksum file: ${name}`);
   }
   if (problems.length) throw new ReleaseError(problems.join("\n"));
@@ -142,12 +166,13 @@ export function assemble(version, artifacts, out) {
     copyFileSync(found.get(e.name)[0], join(out, e.name));
     result.set(e.name, join(out, e.name));
   }
+  const inSums = new Set(want.filter((e) => e.sums === SUMS).map((e) => e.name));
   for (const name of publishedSums()) {
     const dest = join(out, name);
     if (name === SUMS) {
-      // the two installer lists, one file as in every release
-      const merged = new Map(INSTALLER_SUMS.flatMap((s) => [...parseSums(readFileSync(found.get(s)[0], "utf8"))]));
-      writeFileSync(dest, [...merged.keys()].sort().map((n) => `${merged.get(n)}  ${n}\n`).join(""));
+      // the installer lists, one file as in every release (only the installers: as in 0.3.4)
+      const listed = [...merged.keys()].filter((n) => inSums.has(n)).sort();
+      writeFileSync(dest, listed.map((n) => `${merged.get(n)}  ${n}\n`).join(""));
     } else {
       copyFileSync(found.get(name)[0], dest);
     }
