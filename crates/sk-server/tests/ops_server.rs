@@ -268,6 +268,167 @@ async fn tree_follows_without_monitoring() {
     assert!(root.join("stay.tmp").exists());
 }
 
+// ---------------------------------------------------------------------------------- what runs
+
+use sk_server::ops_service::TestHooks;
+
+/// Two sessions ask to execute at the same moment: one operation starts, the other is told one
+/// is running (the busy check and the registration are one step; they were two, and a second
+/// request between them started a second operation on the same basket).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn only_one_of_two_executions_at_once_starts() {
+    let (srv, c) = setup().await;
+    let c2 = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    make_tree(&root, &[("doomed.tmp", 1000)]);
+    let scan_id = scanned(&c, &root).await;
+    c.ok("basket.clear", json!({})).await;
+    let node = node_of(&c, &scan_id, &root.join("doomed.tmp")).await;
+    c.ok("basket.add", json!({"scan_id": scan_id, "nodes": [node]}))
+        .await;
+    srv.server.ops.set_delete_delay(Duration::from_secs(60)); // both would wait: nothing deleted
+    // widen the moment between the busy check and the registration
+    srv.server.ops.set_test_hooks(TestHooks {
+        registering: Some(std::sync::Arc::new(|| {
+            std::thread::sleep(Duration::from_millis(300))
+        })),
+        ..TestHooks::default()
+    });
+    let execute = json!({"mode": "delete"});
+    let (a, b) = tokio::join!(
+        c.call("basket.execute", execute.clone()),
+        c2.call("basket.execute", execute.clone())
+    );
+    srv.server.ops.set_test_hooks(TestHooks::default());
+    let started: Vec<String> = [&a, &b]
+        .iter()
+        .filter_map(|r| r.as_ref().ok())
+        .map(|t| t["task_id"].as_str().unwrap().to_owned())
+        .collect();
+    for id in &started {
+        c.ok("ops.cancel", json!({"task_id": id})).await; // called off in the undo window
+    }
+    assert_eq!(started.len(), 1, "{a:?} {b:?}");
+    let refused = [&a, &b].into_iter().find_map(|r| r.as_ref().err()).unwrap();
+    assert_eq!(
+        refused.code,
+        i64::from(sk_protocol::ErrorCode::InvalidRequest.code())
+    );
+    // its events go to the session that started it
+    let owner = if a.is_ok() { &c } else { &c2 };
+    phase(owner, &started[0], &["undone"]).await;
+    assert!(root.join("doomed.tmp").exists());
+}
+
+/// What a confirmation was given for is what runs: the ids the client confirmed, not whatever
+/// another session put into the shared basket meanwhile.
+#[tokio::test]
+async fn execute_takes_only_the_items_confirmed() {
+    let (srv, c) = setup().await;
+    let other = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    make_tree(&root, &[("confirmed.tmp", 100), ("added later.tmp", 100)]);
+    let scan_id = scanned(&c, &root).await;
+    c.ok("basket.clear", json!({})).await;
+    let first = node_of(&c, &scan_id, &root.join("confirmed.tmp")).await;
+    let state = c
+        .ok("basket.add", json!({"scan_id": scan_id, "nodes": [first]}))
+        .await["state"]
+        .clone();
+    let confirmed: Vec<String> = state["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap().to_owned())
+        .collect();
+    // the confirmation dialog is open; another session adds an item
+    let later = node_of(&other, &scan_id, &root.join("added later.tmp")).await;
+    other
+        .ok("basket.add", json!({"scan_id": scan_id, "nodes": [later]}))
+        .await;
+    let task = c
+        .ok(
+            "basket.execute",
+            json!({"mode": "delete", "ids": confirmed}),
+        )
+        .await;
+    assert_eq!(task["total"], 1);
+    phase(&c, task["task_id"].as_str().unwrap(), &["done"]).await;
+    assert!(!root.join("confirmed.tmp").exists());
+    assert!(root.join("added later.tmp").exists());
+    assert_eq!(
+        names(&c.ok("basket.list", json!({})).await),
+        ["added later.tmp".to_string()].into()
+    );
+}
+
+/// A move to the trash stopped midway can be undone: what went to the trash before the stop
+/// comes back (it could not: the undo only took finished runs). The Windows shell takes up to
+/// 64 items per operation and stops between operations, so there are more than that.
+#[tokio::test]
+async fn a_cancelled_trash_run_can_be_undone() {
+    let (srv, c) = setup().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let n = sk_core::ops::trash::BATCH_ITEMS + 6;
+    let names: Vec<String> = (0..n).map(|i| format!("t{i:03}.tmp")).collect();
+    let spec: Vec<(&str, usize)> = names.iter().map(|s| (s.as_str(), 10)).collect();
+    make_tree(&root, &spec);
+    let files: Vec<std::path::PathBuf> = names.iter().map(|s| root.join(s)).collect();
+    let scan_id = scanned(&c, &root).await;
+    c.ok("basket.clear", json!({})).await;
+    let mut nodes = Vec::new();
+    for f in &files {
+        nodes.push(node_of(&c, &scan_id, f).await);
+    }
+    c.ok("basket.add", json!({"scan_id": scan_id, "nodes": nodes}))
+        .await;
+    // stop once the first item is in the trash
+    let server = std::sync::Arc::downgrade(&srv.server);
+    srv.server.ops.set_test_hooks(TestHooks {
+        progress: Some(std::sync::Arc::new(move |task: &str, done: usize| {
+            if done == 1
+                && let Some(server) = server.upgrade()
+            {
+                let _ = server.ops.cancel(task);
+            }
+        })),
+        ..TestHooks::default()
+    });
+    let task = c.ok("basket.execute", json!({"mode": "trash"})).await;
+    let id = task["task_id"].as_str().unwrap().to_owned();
+    let end = phase(&c, &id, &["done", "cancelled"]).await;
+    srv.server.ops.set_test_hooks(TestHooks::default());
+    let gone: Vec<&std::path::PathBuf> = files.iter().filter(|f| !f.exists()).collect();
+    if gone.is_empty() {
+        eprintln!("skipped: no usable recycle bin here: {:?}", end["results"]);
+        return;
+    }
+    let check = async {
+        assert_eq!(end["phase"], "cancelled", "{end}");
+        assert!(gone.len() < files.len(), "{end}");
+        assert_eq!(end["can_undo"], true, "{end}");
+        c.ok("ops.undo", json!({"task_id": id})).await;
+        phase(&c, &id, &["undone"]).await;
+        assert!(files.iter().all(|f| f.exists()));
+    };
+    let outcome = futures_util::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(check)).await;
+    if outcome.is_err() {
+        // put back what went to the recycle bin anyway
+        if let Some(run) = srv.server.ops.run(&id) {
+            let refs = run.refs();
+            if !refs.is_empty() {
+                sk_core::ops::restore(&refs);
+            }
+        }
+        panic!(
+            "a_cancelled_trash_run_can_be_undone failed (restored what went to the recycle bin)"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------------- export.*
 
 #[tokio::test]

@@ -44,6 +44,17 @@ pub const KEEP_TASKS: usize = 8;
 /// After file changes, the basket is checked again once this quiet.
 pub const REFRESH_QUIET: Duration = Duration::from_secs(1);
 
+/// Test hooks of one backend's operations ([`OpsService::set_test_hooks`]).
+#[doc(hidden)]
+#[derive(Clone, Default)]
+pub struct TestHooks {
+    /// runs while `basket.execute` registers an operation, right after its busy check (tests
+    /// widen that moment)
+    pub registering: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// runs as each item of an operation becomes final: (task id, items done)
+    pub progress: Option<Arc<dyn Fn(&str, usize) + Send + Sync>>,
+}
+
 mod text {
     pub const NOT_ON_DISK: &str = "只能操作「现在」还在磁盘上的项";
     pub const NO_BLOCK: &str = "这个块已经不在视图里了，请再试一次";
@@ -113,8 +124,9 @@ impl OpRun {
                 Vec::new()
             },
             freed: st.freed,
+            // a move to the trash stopped midway can be undone too: what went there comes back
             can_undo: st.phase == OpPhase::Waiting
-                || (st.phase == OpPhase::Done && !st.refs.is_empty()),
+                || (matches!(st.phase, OpPhase::Done | OpPhase::Cancelled) && !st.refs.is_empty()),
         }
     }
 
@@ -151,6 +163,7 @@ pub struct OpsService {
     refreshing: AtomicBool,
     locking: AtomicBool,
     delay: Mutex<Duration>,
+    hooks: Mutex<TestHooks>,
 }
 
 fn rpc_internal(e: impl std::fmt::Display) -> RpcError {
@@ -168,7 +181,14 @@ impl OpsService {
             refreshing: AtomicBool::new(false),
             locking: AtomicBool::new(false),
             delay: Mutex::new(DELETE_DELAY),
+            hooks: Mutex::new(TestHooks::default()),
         }
+    }
+
+    /// Set the test hooks (tests only).
+    #[doc(hidden)]
+    pub fn set_test_hooks(&self, hooks: TestHooks) {
+        *self.hooks.lock() = hooks;
     }
 
     /// The undo window of a permanent deletion.
@@ -486,19 +506,25 @@ impl OpsService {
 
     // ------------------------------------------------------------- executing (W5-41…49)
 
+    /// Start executing the items `p.ids` (None: the whole basket; a front end sends the ids it
+    /// asked the user to confirm). One operation at a time: the busy check and the registration
+    /// are one step under the list of runs, so two requests at once never both start.
     pub fn execute(
         &self,
         server: &Arc<Server>,
         session: &Arc<Session>,
         p: &BasketExecuteParams,
     ) -> RpcResult<OpTask> {
-        if self
-            .runs
-            .lock()
+        let mut runs = self.runs.lock();
+        if runs
             .iter()
             .any(|r| matches!(r.phase(), OpPhase::Waiting | OpPhase::Running))
         {
             return Err(RpcError::invalid_request(tr!(text::BUSY)));
+        }
+        let registering = self.hooks.lock().registering.clone();
+        if let Some(f) = registering {
+            f();
         }
         let targets = self.basket.targets(p.ids.as_deref());
         if targets.is_empty() {
@@ -560,13 +586,11 @@ impl OpsService {
             called_off: AtomicBool::new(false),
             wake: tokio::sync::Notify::new(),
         });
-        {
-            let mut runs = self.runs.lock();
-            runs.push(run.clone());
-            while runs.len() > KEEP_TASKS {
-                runs.remove(0);
-            }
+        runs.push(run.clone());
+        while runs.len() > KEEP_TASKS {
+            runs.remove(0);
         }
+        drop(runs);
         tracing::info!(
             "file operation {}: {} {} items",
             run.id,
@@ -606,6 +630,7 @@ impl OpsService {
         }
         run.emit(true);
         let r = run.clone();
+        let hook = self.hooks.lock().progress.clone();
         let results = tokio::task::spawn_blocking(move || {
             let mut progress = |done: usize, _total: usize, res: &OpResult| {
                 {
@@ -614,6 +639,9 @@ impl OpsService {
                     st.current = res.path.clone();
                 }
                 r.emit(false);
+                if let Some(f) = &hook {
+                    f(&r.id, done);
+                }
             };
             let cancel = || r.cancel.load(Ordering::SeqCst);
             let opts = OpOptions {
@@ -747,7 +775,8 @@ impl OpsService {
         Ok(())
     }
 
-    /// Call off a deletion still waiting, or put what went to the trash back (UI-W5-44).
+    /// Call off a deletion still waiting, or put what went to the trash back, also from a move
+    /// to the trash that was stopped (UI-W5-44).
     pub async fn undo(&self, server: &Arc<Server>, task_id: &str) -> RpcResult<()> {
         let run = self.get(task_id)?;
         let refs = {
@@ -757,7 +786,9 @@ impl OpsService {
                     drop(st);
                     return self.cancel(task_id);
                 }
-                OpPhase::Done if !st.refs.is_empty() => std::mem::take(&mut st.refs),
+                OpPhase::Done | OpPhase::Cancelled if !st.refs.is_empty() => {
+                    std::mem::take(&mut st.refs)
+                }
                 _ => return Ok(()),
             }
         };

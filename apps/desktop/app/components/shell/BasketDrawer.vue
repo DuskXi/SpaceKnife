@@ -5,17 +5,35 @@
 import { computed, nextTick, ref, watch } from "vue";
 
 import Icon from "@/components/ui/Icon.vue";
-import { BASKET_SORTS, type BasketSort, basketSortLabel, itemCount, mainVolume, parentOf, sortedItems, statusText } from "@/lib/basketDrawer";
+import {
+  BASKET_SORTS,
+  type BasketSort,
+  type Confirmed,
+  basketSortLabel,
+  confirmedOf,
+  grewSince,
+  itemCount,
+  mainVolume,
+  parentOf,
+  sortedItems,
+  statusText,
+  stillConfirmed,
+} from "@/lib/basketDrawer";
 import { fmtInt, fmtSize, plural, sizeParts } from "@/lib/format";
 import { inBrowser, serverName } from "@/lib/host";
 import { byLang, t } from "@/lib/i18n";
 import { basketClear, basketExecute, basketRemove } from "@/state/actions";
-import { set, useApp } from "@/state/store";
+import { set, toast, useApp } from "@/state/store";
 
 const basket = useApp((s) => s.basket);
 const busy = useApp((s) => !!s.op && (s.op.phase === "running" || s.op.phase === "waiting"));
 const sort = ref<BasketSort>("size");
 const confirm = ref(false);
+// what the confirmation dialog asks about: the basket as it was when it opened (another session
+// can add to the shared basket meanwhile; that is not part of what the user confirms)
+const confirmed = ref<Confirmed>([]);
+const asked = computed(() => stillConfirmed(confirmed.value, basket.value?.items ?? []));
+const askedSize = computed(() => asked.value.reduce((n, it) => n + it.alloc, 0));
 const cancelBtn = ref<HTMLButtonElement | null>(null);
 const items = computed(() => sortedItems(basket.value?.items ?? [], sort.value));
 const total = computed(() => basket.value?.freeable ?? 0);
@@ -47,9 +65,27 @@ watch(confirm, async (open) => {
   cancelBtn.value?.focus(); // autoFocus
 });
 
+function askDelete(): void {
+  confirmed.value = confirmedOf(items.value);
+  confirm.value = true;
+}
+
 function deleteNow(): void {
+  const now = basket.value?.items ?? [];
+  if (grewSince(confirmed.value, now)) {
+    // a confirmed group took in more meanwhile: show what it holds now and ask again
+    confirmed.value = confirmedOf(stillConfirmed(confirmed.value, now));
+    toast(t("删除篮在确认时有了变化，请再确认一次"));
+    return;
+  }
+  const ids = confirmed.value.map((c) => c.id);
   confirm.value = false;
-  void basketExecute("delete");
+  void basketExecute("delete", ids);
+}
+
+// what the drawer shows when the button is clicked
+function trashNow(): void {
+  void basketExecute("trash", items.value.map((it) => it.id));
 }
 </script>
 
@@ -140,14 +176,14 @@ function deleteNow(): void {
         {{ plural(blocked.length, t("{n} 项现在不能删除，执行时会跳过", { n: fmtInt(blocked.length) }), "1 item can't be deleted now and will be skipped.") }}
       </div>
       <div class="bk-buttons">
-        <button class="primary flex" :disabled="!items.length || busy" @click="basketExecute('trash')"><Icon name="basket" :size="14" /> {{ t("移到回收站") }}</button>
-        <button class="danger-btn" :disabled="!items.length || busy" @click="confirm = true">{{ t("永久删除…") }}</button>
+        <button class="primary flex" :disabled="!items.length || busy" @click="trashNow()"><Icon name="basket" :size="14" /> {{ t("移到回收站") }}</button>
+        <button class="danger-btn" :disabled="!items.length || busy" @click="askDelete()">{{ t("永久删除…") }}</button>
       </div>
     </div>
     <div v-if="confirm" class="modal-back" role="presentation" @mousedown="confirm = false">
       <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="bk-confirm" @mousedown.stop>
         <h3 id="bk-confirm">
-          {{ plural(items.length, t("永久删除 {n} 项（{size}）？", { n: fmtInt(items.length), size: fmtSize(total) }), "Delete 1 item ({size}) permanently?", { size: fmtSize(total) }) }}
+          {{ plural(asked.length, t("永久删除 {n} 项（{size}）？", { n: fmtInt(asked.length), size: fmtSize(askedSize) }), "Delete 1 item ({size}) permanently?", { size: fmtSize(askedSize) }) }}
         </h3>
         <p class="muted">{{ t("不进回收站，无法从回收站还原。执行前有 5 秒可以撤销。") }}</p>
         <p v-if="remote" class="remote-line">

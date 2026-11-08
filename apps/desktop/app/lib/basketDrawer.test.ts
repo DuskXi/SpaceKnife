@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BasketItem, BasketVolume } from "@/protocol/generated";
 import { crumbLabel } from "@/lib/scanPage";
 
-import { itemCount, mainVolume, parentOf, sortedItems, statusText } from "./basketDrawer";
+import { confirmedOf, grewSince, itemCount, mainVolume, opUndoable, parentOf, sortedItems, statusText, stillConfirmed } from "./basketDrawer";
 
 const item = (name: string, path: string, alloc: number) => ({ id: name, name, path, alloc }) as BasketItem;
 
@@ -28,6 +28,37 @@ describe("basket drawer helpers", () => {
     expect(statusText("ready")).toBe("");
     expect(parentOf("C:\\Users\\me\\a.txt")).toBe("C:\\Users\\me");
     expect(parentOf("/home/me/dir/")).toBe("/home/me");
+  });
+});
+
+describe("confirming a permanent deletion", () => {
+  const group = (id: string, members: number) => ({ id, name: id, path: id, alloc: 1, members }) as BasketItem;
+
+  it("runs what was confirmed, not what another session added meanwhile", () => {
+    const confirmed = confirmedOf([group("a", 0), group("g", 3)]);
+    const now = [group("a", 0), group("g", 3), group("added", 0)];
+    expect(stillConfirmed(confirmed, now).map((i) => i.id)).toEqual(["a", "g"]);
+    expect(grewSince(confirmed, now)).toBe(false);
+    // gone meanwhile: simply not run
+    expect(stillConfirmed(confirmed, [group("g", 3)]).map((i) => i.id)).toEqual(["g"]);
+    expect(grewSince(confirmed, [group("g", 3)])).toBe(false);
+  });
+
+  it("asks again when a confirmed group grew", () => {
+    const confirmed = confirmedOf([group("g", 3)]);
+    expect(grewSince(confirmed, [group("g", 4)])).toBe(true);
+    expect(grewSince(confirmed, [group("g", 2)])).toBe(false); // members left: less, never more
+  });
+});
+
+describe("the undo of a file operation", () => {
+  it("is offered while a deletion waits and after a move to the trash, also one that was stopped", () => {
+    expect(opUndoable({ can_undo: true, phase: "waiting" })).toBe(true);
+    expect(opUndoable({ can_undo: true, phase: "done" })).toBe(true);
+    expect(opUndoable({ can_undo: true, phase: "cancelled" })).toBe(true);
+    expect(opUndoable({ can_undo: false, phase: "cancelled" })).toBe(false);
+    expect(opUndoable({ can_undo: true, phase: "running" })).toBe(false);
+    expect(opUndoable({ can_undo: true, phase: "undone" })).toBe(false);
   });
 });
 
