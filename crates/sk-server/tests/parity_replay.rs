@@ -849,6 +849,71 @@ fn build_fixture(root: &Path, name: &str) {
     }
 }
 
+// ============================================================================ directory order
+
+/// A folder on a file system that lists folders as the goldens' did (CI: an ext4 with the
+/// recording's hash seed): a scenario that differs where the system's temp folder lists the
+/// fixture folders otherwise is replayed there, and must find them listed as recorded (README.md,
+/// "Directory order").
+const PARITY_TMP: &str = "SPACEKNIFE_PARITY_TMP";
+
+/// How this file system lists a built fixture tree (fixtures.py `listing`): each folder ("" for
+/// the top, `a/b` below) with its entries in the order `read_dir` gives them, which is the order
+/// 0.3.4 (and the candidate) keep for entries of equal size.
+fn listing(root: &Path) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::new();
+    let mut stack = vec![(root.to_path_buf(), String::new())];
+    while let Some((dir, rel)) = stack.pop() {
+        let mut names = Vec::new();
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let e = e.unwrap();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if e.file_type().unwrap().is_dir() {
+                let below = if rel.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{rel}/{name}")
+                };
+                stack.push((e.path(), below));
+            }
+            names.push(name);
+        }
+        out.insert(rel, names);
+    }
+    out
+}
+
+/// The first folder `actual` lists otherwise than `recorded` (a tree of golden/<platform>/
+/// listing.json), "." for the top; None when every folder is listed alike (fixtures.py
+/// `listing_difference`).
+fn listing_difference(recorded: &Value, actual: &BTreeMap<String, Vec<String>>) -> Option<String> {
+    let empty = Map::new();
+    let recorded = recorded.as_object().unwrap_or(&empty);
+    let folders: BTreeSet<&String> = recorded.keys().chain(actual.keys()).collect();
+    folders
+        .into_iter()
+        .find(|f| {
+            let want: Option<Vec<&str>> = recorded
+                .get(*f)
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).collect());
+            let have: Option<Vec<&str>> = actual
+                .get(*f)
+                .map(|v| v.iter().map(String::as_str).collect());
+            want != have
+        })
+        .map(|f| if f.is_empty() { ".".into() } else { f.clone() })
+}
+
+/// golden/<platform>/listing.json, when there is one.
+fn recorded_listing() -> Option<Value> {
+    let p = parity_dir()
+        .join("golden")
+        .join(platform())
+        .join("listing.json");
+    p.exists().then(|| read_json(&p))
+}
+
 /// Remove a folder tree, read-only fixture files included.
 fn remove_all(p: &Path) {
     if std::fs::remove_dir_all(p).is_ok() || !p.exists() {
@@ -971,14 +1036,17 @@ struct Places {
 }
 
 impl Places {
-    fn make() -> Places {
-        // the harness's prefix and length (Python's mkdtemp: 8 characters)
-        let tmp = tempfile::Builder::new()
-            .prefix("sk-parity-")
-            .rand_bytes(8)
-            .tempdir()
-            .unwrap()
-            .keep();
+    fn make(parent: Option<&std::ffi::OsStr>) -> Places {
+        // the harness's prefix and length (Python's mkdtemp: 8 characters), in the system's temp
+        // folder or `parent`
+        let mut builder = tempfile::Builder::new();
+        builder.prefix("sk-parity-").rand_bytes(8);
+        let tmp = match parent {
+            Some(dir) => builder.tempdir_in(dir),
+            None => builder.tempdir(),
+        }
+        .unwrap()
+        .keep();
         // the long name, as the backend reports it
         let tmp = std::fs::canonicalize(&tmp).unwrap_or(tmp);
         let tmp = PathBuf::from(
@@ -2033,10 +2101,75 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
     }
     let golden = read_json(&golden_path);
     let rules = load_rules(sc.get("normalize"));
+    // in the system's temp folder first: a folder on its volume, as when recorded (the basket's
+    // volumes and trash); where the fixture folders are listed otherwise and that makes
+    // differences, again in SPACEKNIFE_PARITY_TMP, which must list them as recorded (README.md,
+    // "Directory order")
+    let mut run = replay_in(name, &sc, &golden, &rules, None).await;
+    if let (Some(at), false) = (&run.other_order, run.bad.is_empty()) {
+        remove_all(&run.places.tmp);
+        let Some(parent) = std::env::var_os(PARITY_TMP).filter(|v| !v.is_empty()) else {
+            eprintln!(
+                "{name}: {} differences from the 0.3.4 golden not counted: this file system lists the fixture folders in another order than the one the goldens were recorded on ({at}), and 0.3.4 keeps that order for entries of equal size. Replay it with {PARITY_TMP} naming a folder that lists them as golden/{}/listing.json says (tests/parity/README.md, \"Directory order\").",
+                run.bad.len(),
+                platform()
+            );
+            return None;
+        };
+        eprintln!(
+            "{name}: the temp folder lists the fixture folders otherwise ({at}): replayed in {PARITY_TMP}"
+        );
+        run = replay_in(name, &sc, &golden, &rules, Some(&parent)).await;
+        if let Some(at) = &run.other_order {
+            remove_all(&run.places.tmp);
+            panic!(
+                "{name}: {PARITY_TMP} lists the fixture folders in another order than golden/{}/listing.json ({at}): it does not reproduce the file system the goldens were recorded on",
+                platform()
+            );
+        }
+    }
+    if run.bad.is_empty() {
+        remove_all(&run.places.tmp);
+    } else {
+        // kept for a look: the backend's log is there
+        eprintln!("{name}: kept {}", run.places.tmp.display());
+    }
+    Some(run.bad)
+}
+
+/// One replay of a scenario: its differences (known ones left out), the first fixture folder
+/// listed otherwise than the recording (None: as recorded), and the run's folders.
+struct Replayed {
+    bad: Vec<(String, Value, Value)>,
+    other_order: Option<String>,
+    places: Places,
+}
+
+/// The scenario replayed with its folders in `parent` (None: the system's temp folder).
+async fn replay_in(
+    name: &str,
+    sc: &Value,
+    golden: &Value,
+    rules: &Value,
+    parent: Option<&std::ffi::OsStr>,
+) -> Replayed {
+    let dir = parity_dir();
     let feed = start_feed().await;
-    let places = Places::make();
+    let places = Places::make(parent);
+    // a folder this file system lists otherwise than the recording's did: entries of equal size
+    // come in another order, as with 0.3.4 itself
+    let recorded = recorded_listing();
+    let mut other_order = None;
     for (fname, tree) in sc["fixtures"].as_object().cloned().unwrap_or_default() {
-        build_fixture(&places.root.join(&fname), tree.as_str().unwrap());
+        let tree = tree.as_str().unwrap();
+        let root = places.root.join(&fname);
+        build_fixture(&root, tree);
+        if let Some(rec) = &recorded
+            && other_order.is_none()
+            && let Some(folder) = listing_difference(&rec["trees"][tree], &listing(&root))
+        {
+            other_order = Some(format!("{tree}: {folder}"));
+        }
     }
     let upgrade = sc.get("setup").is_some();
     if upgrade {
@@ -2050,10 +2183,10 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
     }
     let mapping = places.mapping();
     let mut run = Run {
-        sc: &sc,
+        sc,
         places: &places,
         feed,
-        norm: Normalizer::new(&rules, &mapping),
+        norm: Normalizer::new(rules, &mapping),
         saved: HashMap::new(),
         last_scan: String::new(),
         view_scan: HashMap::new(),
@@ -2087,7 +2220,7 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
         .filter(|r| !live_only.contains(&int_of(&r["i"])))
         .cloned()
         .collect();
-    let diffs = compare(&keyed(&expected), &keyed(&transcript), &rules);
+    let diffs = compare(&keyed(&expected), &keyed(&transcript), rules);
     let mut known: Vec<Value> = read_json(&dir.join("known_diffs.json"))["known"]
         .as_array()
         .cloned()
@@ -2101,13 +2234,11 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
                 .any(|k| glob_match(k["path"].as_str().unwrap(), p))
         })
         .collect();
-    if bad.is_empty() {
-        remove_all(&places.tmp);
-    } else {
-        // kept for a look: the backend's log is there
-        eprintln!("{name}: kept {}", places.tmp.display());
+    Replayed {
+        bad,
+        other_order,
+        places,
     }
-    Some(bad)
 }
 
 fn report(name: &str, bad: &[(String, Value, Value)]) -> String {
@@ -2185,6 +2316,82 @@ fn every_scenario_has_a_test() {
     listed.push("upgrade".into());
     listed.sort();
     assert_eq!(on_disk, listed, "list each scenario in parity_replay.rs");
+}
+
+/// Each platform with goldens says how its recording listed every fixture tree's folders: the
+/// replay checks the folders it builds against it.
+#[test]
+fn every_fixture_tree_has_a_recorded_listing() {
+    let trees = read_json(&parity_dir().join("fixtures/trees.json"));
+    let names: Vec<&String> = trees
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(_, v)| v.is_object())
+        .map(|(k, _)| k)
+        .collect();
+    for platform in ["linux", "win32"] {
+        let p = parity_dir()
+            .join("golden")
+            .join(platform)
+            .join("listing.json");
+        let rec = read_json(&p);
+        for tree in &names {
+            let folders = rec["trees"][tree.as_str()]
+                .as_object()
+                .unwrap_or_else(|| panic!("{}: no tree {tree}", p.display()));
+            assert!(
+                folders.contains_key(""),
+                "{}: {tree} has no top",
+                p.display()
+            );
+        }
+        assert!(rec["filesystem"]["type"].is_string(), "{}", p.display());
+    }
+    // what CI makes its ext4 from (.github/workflows/ci.yml)
+    let linux = read_json(&parity_dir().join("golden/linux/listing.json"));
+    assert_eq!(linux["filesystem"]["type"], "ext4");
+    assert_eq!(linux["filesystem"]["hash"], "half_md4");
+    assert!(
+        linux["filesystem"]["hash_seed"]
+            .as_str()
+            .is_some_and(|s| s.len() == 36 && s.matches('-').count() == 4),
+        "{}",
+        linux["filesystem"]
+    );
+}
+
+#[test]
+fn a_tree_listed_otherwise_is_found() {
+    let dir = tempfile::tempdir().unwrap();
+    build_fixture(&dir.path().join("t"), "small");
+    let have = listing(&dir.path().join("t"));
+    let sorted = |f: &str| {
+        let mut v = have[f].clone();
+        v.sort();
+        v
+    };
+    assert_eq!(
+        have.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["", "a", "b", "b/c"]
+    );
+    assert_eq!(sorted(""), ["a", "b", "top.bin"]);
+    assert_eq!(sorted("a"), ["one.txt", "two.jpg"]);
+    assert_eq!(sorted("b/c"), ["three.mp4"]);
+    // as recorded, in the order this file system gave
+    let same = serde_json::to_value(&have).unwrap();
+    assert_eq!(listing_difference(&same, &have), None);
+    // another order of one folder, a folder more or less, no record at all
+    let mut swapped = same.clone();
+    swapped["a"] = json!(have["a"].iter().rev().collect::<Vec<_>>());
+    assert_eq!(listing_difference(&swapped, &have), Some("a".into()));
+    let mut more = same.clone();
+    more["a/x"] = json!([]);
+    assert_eq!(listing_difference(&more, &have), Some("a/x".into()));
+    let mut top = same.clone();
+    top[""] = json!(["a", "b"]);
+    assert_eq!(listing_difference(&top, &have), Some(".".into()));
+    assert_eq!(listing_difference(&Value::Null, &have), Some(".".into()));
 }
 
 #[test]

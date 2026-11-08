@@ -17,8 +17,10 @@ fi
 # spaceknife-cli: a plain link (headless.rs finds the interface from where the program really is)
 ln -sf '/opt/${sanitizedProductName}/spaceknife-cli' '/usr/bin/spaceknife-cli'
 
-# Check if user namespaces are supported by the kernel and working with a quick test:
-if ! { [[ -L /proc/self/ns/user ]] && unshare --user true; }; then
+# Check if user namespaces are supported by the kernel and working with a quick test (only its
+# answer counts: where they are not allowed, a container's seccomp filter for one, unshare says
+# "unshare failed: Operation not permitted", which is no error of the install):
+if ! { [[ -L /proc/self/ns/user ]] && unshare --user true 2>/dev/null; }; then
     # Use SUID chrome-sandbox only on systems without user namespaces:
     chmod 4755 '/opt/${sanitizedProductName}/chrome-sandbox' || true
 else

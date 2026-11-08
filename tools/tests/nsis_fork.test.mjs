@@ -2,11 +2,12 @@
 //   node --test "tools/tests/*.test.mjs"
 
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { gzipSync } from "node:zlib";
+import { crc32, gzipSync } from "node:zlib";
 
 import * as fork from "../nsis_fork.mjs";
 
@@ -98,6 +99,9 @@ test("the repository's fork, lockfile and pin agree", () => {
   const conf = JSON.parse(readFileSync(join(fork.DESKTOP, "src-tauri", "tauri.bundle.windows.json"), "utf8"));
   assert.equal(conf.bundle.windows.nsis.template, "windows/installer.nsi");
   assert.equal(conf.bundle.windows.nsis.installerHooks, "windows/spaceknife.nsh");
+  // its tools (NSIS, WebView2's bootstrapper) in <target>/.tauri, where `nsis_fork.mjs tools` and
+  // the workflow's cache put them, not in %LOCALAPPDATA%\tauri
+  assert.equal(conf.bundle.useLocalToolsDir, true);
   // every file the fork follows is pinned, the template first of all
   for (const f of ["installer.nsi", "utils.nsh", "FileAssociation.nsh", "languages/English.nsh", "languages/SimpChinese.nsh", "mod.rs"]) {
     assert.match(pin.files[`src/bundle/windows/nsis/${f}`] ?? "", /^[0-9a-f]{64}$/, f);
@@ -173,4 +177,174 @@ test("check: crates.io's crate, checked against the index, against the pin", asy
   await assert.rejects(fork.check({ ...opts, fetcher: fetcher("0".repeat(64)) }), /the index says/);
   const loose = await fork.check({ ...opts, fetcher: fetcher(fork.sha256(crate), `^${v}`) });
   assert.match(loose.join("\n"), /asks for tauri-bundler \^/);
+});
+
+// ------------------------------------------------------------------ the bundler's NSIS, fetched once
+
+/** A zip file (stored members) of `files` (name -> content). */
+function zip(files) {
+  const local = [];
+  const central = [];
+  let at = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const data = Buffer.from(content);
+    const n = Buffer.from(name);
+    const crc = crc32(data);
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0);
+    head.writeUInt16LE(20, 4);
+    head.writeUInt32LE(crc, 14);
+    head.writeUInt32LE(data.length, 18);
+    head.writeUInt32LE(data.length, 22);
+    head.writeUInt16LE(n.length, 26);
+    local.push(head, n, data);
+    const dir = Buffer.alloc(46);
+    dir.writeUInt32LE(0x02014b50, 0);
+    dir.writeUInt16LE(20, 4);
+    dir.writeUInt16LE(20, 6);
+    dir.writeUInt32LE(crc, 16);
+    dir.writeUInt32LE(data.length, 20);
+    dir.writeUInt32LE(data.length, 24);
+    dir.writeUInt16LE(n.length, 28);
+    dir.writeUInt32LE(at, 42);
+    central.push(dir, n);
+    at += head.length + n.length + data.length;
+  }
+  const cd = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(Object.keys(files).length, 8);
+  end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(cd.length, 12);
+  end.writeUInt32LE(at, 16);
+  return Buffer.concat([...local, cd, end]);
+}
+
+const sha1 = (b) => createHash("sha1").update(b).digest("hex").toUpperCase();
+
+/** NSIS as the bundler's zip has it (`nsis-<v>/`), the plugin, and a pin of their SHA-1s. */
+function nsisRelease(extra = {}) {
+  const inner = { "NSIS.exe": "nsis gui", ...Object.fromEntries(fork.NSIS_REQUIRED.filter((f) => !f.endsWith("nsis_tauri_utils.dll")).map((f) => [f, `content of ${f}`])), ...extra };
+  const archive = zip(Object.fromEntries(Object.entries(inner).map(([p, c]) => [`nsis-3.13/${p}`, c])));
+  const dll = Buffer.from("MZ the plugin");
+  const pin = { ...PIN, nsisSha1: sha1(archive), nsisExeSha1: sha1(Buffer.from(inner["NSIS.exe"])), nsisTauriUtilsSha1: sha1(dll) };
+  return { archive, dll, pin };
+}
+
+/** A fetcher that answers the bundler's URLs, failing the first `fails` times each with 504. */
+function releaseFetcher({ archive, dll, pin }, { fails = 0, webview2 = Buffer.from("MZ webview2 bootstrapper") } = {}) {
+  const urls = fork.nsisDownloads(pin);
+  const asked = [];
+  const left = new Map();
+  const fetcher = async (url) => {
+    asked.push(url);
+    const n = left.get(url) ?? fails;
+    if (n > 0) {
+      left.set(url, n - 1);
+      throw new fork.ForkError(`${url}: HTTP 504`);
+    }
+    if (url === urls.nsis.url) return archive;
+    if (url === urls.utils.url) return dll;
+    if (url === fork.WEBVIEW2_BOOTSTRAPPER_URL) {
+      if (!webview2) throw new fork.ForkError(`${url}: HTTP 503`);
+      return webview2;
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  return { fetcher, asked };
+}
+
+const quietly = { wait: 0, log: () => {} };
+
+test("the NSIS the bundler downloads is pinned with the SHA-1s it checks", () => {
+  const pin = fork.readPin();
+  for (const k of ["nsisSha1", "nsisExeSha1", "nsisTauriUtilsSha1"]) assert.match(pin[k] ?? "", /^[0-9A-F]{40}$/, k);
+  const urls = fork.nsisDownloads(pin);
+  assert.equal(urls.nsis.url, `https://github.com/tauri-apps/binary-releases/releases/download/nsis-${pin.nsis}/nsis-${pin.nsis}.zip`);
+  assert.equal(urls.utils.url, `https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v${pin.nsisTauriUtils}/nsis_tauri_utils.dll`);
+  // the crate's mod.rs must name the same SHA-1s and required files
+  const { pin: fake } = nsisRelease();
+  const required = `#[cfg(target_os = "windows")]\nconst NSIS_REQUIRED_FILES: &[&str] = &[\n${fork.NSIS_REQUIRED.map((f) => `  "${f}",`).join("\n")}\n];\n#[cfg(not(target_os = "windows"))]\nconst NSIS_REQUIRED_FILES: &[&str] = &["Plugins/x86-unicode/additional/nsis_tauri_utils.dll"];\n`;
+  const mod = `${MOD}const NSIS_SHA1: &str = "${fake.nsisSha1}";\nconst NSIS_EXE_SHA1: &str = "${fake.nsisExeSha1}";\nconst NSIS_TAURI_UTILS_SHA1: &str = "${fake.nsisTauriUtilsSha1}";\n${required}`;
+  const files = new Map(crateFiles()).set("src/bundle/windows/nsis/mod.rs", Buffer.from(mod));
+  const pinned = { ...pinFor(files), nsisSha1: fake.nsisSha1, nsisExeSha1: fake.nsisExeSha1, nsisTauriUtilsSha1: fake.nsisTauriUtilsSha1 };
+  assert.deepEqual(fork.crateProblems(pinned, files), []);
+  const other = fork.crateProblems({ ...pinned, nsisSha1: "0".repeat(40) }, files);
+  assert.match(other.join("\n"), /does not check NSIS's download against SHA-1 0{40}/);
+  const fewer = new Map(files).set("src/bundle/windows/nsis/mod.rs", Buffer.from(mod.replace('  "Include/x64.nsh",\n', "")));
+  assert.match(fork.crateProblems({ ...pinned, files: pinFor(fewer).files }, fewer).join("\n"), /no longer needs Include\/x64\.nsh/);
+});
+
+test("the bundler's NSIS is laid out as it would do it, fetched with retries once, then kept", async () => {
+  const tools = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+  const release = nsisRelease();
+  const { fetcher, asked } = releaseFetcher(release, { fails: 2 });
+  assert.equal(await fork.prepareTools(tools, { pin: release.pin, fetcher, ...quietly }), "fetched");
+  const nsis = join(tools, "NSIS");
+  assert.ok(fork.nsisReady(nsis, release.pin));
+  assert.equal(readFileSync(join(nsis, "Plugins", "x86-unicode", "additional", "nsis_tauri_utils.dll")).toString(), "MZ the plugin");
+  assert.equal(readFileSync(join(nsis, "Include", "MUI2.nsh")).toString(), "content of Include/MUI2.nsh");
+  assert.equal(readFileSync(join(tools, "MicrosoftEdgeWebview2Setup.exe")).toString(), "MZ webview2 bootstrapper");
+  assert.deepEqual(readdirSync(tools).sort(), ["MicrosoftEdgeWebview2Setup.exe", "NSIS", "downloads"]);
+  assert.deepEqual(readdirSync(join(tools, "downloads")).sort(), ["nsis-3.13.zip", "nsis_tauri_utils-0.5.3.dll"]);
+  const urls = fork.nsisDownloads(release.pin);
+  assert.equal(asked.filter((u) => u === urls.nsis.url).length, 3, "two 504s, then the file");
+  // kept (the cache): nothing of NSIS is fetched; the folder is unpacked afresh, so a file of it
+  // that changed meanwhile is put right
+  asked.length = 0;
+  writeFileSync(join(nsis, "Bin", "makensis.exe"), "changed");
+  assert.equal(await fork.prepareTools(tools, { pin: release.pin, fetcher, ...quietly }), "cached");
+  assert.ok(!asked.includes(urls.nsis.url) && !asked.includes(urls.utils.url), asked.join(" "));
+  assert.equal(readFileSync(join(nsis, "Bin", "makensis.exe")).toString(), "content of Bin/makensis.exe");
+  // a kept download with another SHA-1 is fetched again
+  writeFileSync(join(tools, "downloads", "nsis-3.13.zip"), "not the zip");
+  assert.equal(await fork.prepareTools(tools, { pin: release.pin, fetcher, ...quietly }), "fetched");
+  assert.ok(fork.nsisReady(nsis, release.pin));
+  // the folder the bundler checks: another NSIS.exe is not taken
+  writeFileSync(join(nsis, "NSIS.exe"), "an older NSIS");
+  assert.ok(!fork.nsisReady(nsis, release.pin));
+});
+
+test("a download that is not the pinned one, or that names a path outside, leaves nothing", async () => {
+  const release = nsisRelease();
+  for (const [what, bad, kept] of [
+    ["another zip", { ...release, archive: zip({ "nsis-3.13/NSIS.exe": "other" }) }, []],
+    ["another plugin", { ...release, dll: Buffer.from("MZ other") }, ["nsis-3.13.zip"]],
+  ]) {
+    const tools = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+    const { fetcher } = releaseFetcher(bad);
+    await assert.rejects(fork.prepareTools(tools, { pin: release.pin, fetcher, ...quietly }), /SHA-1/, what);
+    assert.ok(!existsSync(join(tools, "NSIS")), what);
+    // only what had the pinned SHA-1 is kept
+    const downloads = join(tools, "downloads");
+    assert.deepEqual(existsSync(downloads) ? readdirSync(downloads) : [], kept, what);
+  }
+  const climbing = nsisRelease({ "../../outside.txt": "x" });
+  const tools = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+  await assert.rejects(fork.prepareTools(tools, { pin: climbing.pin, fetcher: releaseFetcher(climbing).fetcher, ...quietly }), /outside/);
+  assert.ok(!existsSync(join(tools, "NSIS")));
+  assert.ok(!existsSync(join(tools, "..", "outside.txt")));
+  // too many failures: the last error, nothing left
+  const down = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+  await assert.rejects(fork.prepareTools(down, { pin: release.pin, fetcher: releaseFetcher(release, { fails: 9 }).fetcher, tries: 3, ...quietly }), /HTTP 504/);
+  assert.ok(!existsSync(join(down, "NSIS")));
+});
+
+test("WebView2's bootstrapper is fetched fresh, an older copy kept when that fails", async () => {
+  const release = nsisRelease();
+  const tools = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+  const down = { webview2: null };
+  // none there, none to be had: an error (NSIS itself is in place)
+  await assert.rejects(fork.prepareTools(tools, { pin: release.pin, fetcher: releaseFetcher(release, down).fetcher, ...quietly }), /HTTP 503/);
+  assert.ok(fork.nsisReady(join(tools, "NSIS"), release.pin));
+  assert.ok(!existsSync(join(tools, "MicrosoftEdgeWebview2Setup.exe")));
+  mkdirSync(tools, { recursive: true });
+  writeFileSync(join(tools, "MicrosoftEdgeWebview2Setup.exe"), "MZ an older one");
+  assert.equal(await fork.prepareTools(tools, { pin: release.pin, fetcher: releaseFetcher(release, down).fetcher, ...quietly }), "cached");
+  assert.equal(readFileSync(join(tools, "MicrosoftEdgeWebview2Setup.exe")).toString(), "MZ an older one");
+  // not a program: refused, the older one stays
+  await fork.prepareTools(tools, { pin: release.pin, fetcher: releaseFetcher(release, { webview2: Buffer.from("<html>error</html>") }).fetcher, ...quietly });
+  assert.equal(readFileSync(join(tools, "MicrosoftEdgeWebview2Setup.exe")).toString(), "MZ an older one");
+  await fork.prepareTools(tools, { pin: release.pin, fetcher: releaseFetcher(release).fetcher, ...quietly });
+  assert.equal(readFileSync(join(tools, "MicrosoftEdgeWebview2Setup.exe")).toString(), "MZ webview2 bootstrapper");
 });

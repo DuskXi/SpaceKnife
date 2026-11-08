@@ -1114,7 +1114,8 @@ fn win_trash(
             let where_: HashMap<String, usize> = pending
                 .iter()
                 .flat_map(|&i| {
-                    let long = win::long_names(&run.paths[i]).map(|l| (win_key(&l), i));
+                    // expanded from the exact path (`run.os`): a name that is not Unicode too
+                    let long = win::long_names_of(&run.os[i]).map(|l| (win_key(&l), i));
                     std::iter::once((win_key(&run.paths[i]), i)).chain(long)
                 })
                 .collect();

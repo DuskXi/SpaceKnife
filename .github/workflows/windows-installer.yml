@@ -8,6 +8,8 @@ name: Windows installer build
 # renames Tauri's SpaceKnife_<v>_x64-setup.exe to 0.3.4's SpaceKnife-<v>-Setup-x64.exe (the
 # update contract: crates/sk-core update asset_templates) and writes its checksum list
 # SHA256SUMS-installers-win-x64.txt, which tools/release.mjs merges into SHA256SUMS.txt.
+# Tauri's tools (the pinned NSIS, cached; WebView2's bootstrapper) are put in its tools folder
+# target/.tauri beforehand, with retries (tools/nsis_fork.mjs tools): the bundler downloads nothing.
 # Checked here: the fork still follows the locked tauri-cli (tools/nsis_fork.mjs), no file names
 # the build machine's home folder, no program imports the Visual C++ runtime (+crt-static), the
 # installer's own logic (packaging/nsis-logic.mjs), installing, running, updating in place and
@@ -113,6 +115,35 @@ jobs:
       # another one (crates.io's tauri-bundler, the installed CLI's own program) stops the build
       - name: The NSIS fork follows the locked tauri-cli
         run: node tools/nsis_fork.mjs check
+
+      # Tauri's bundler downloads NSIS and its nsis_tauri_utils plugin from GitHub's release pages
+      # for each bundle on a fresh machine (a 504 there failed a run). Its tools folder is
+      # target/.tauri (tauri.bundle.windows.json useLocalToolsDir). The pinned downloads
+      # (windows/upstream.json, whose SHA-1s `check` held to the bundler's own above) are kept in
+      # the cache, saved as soon as they are fetched; `nsis_fork.mjs tools` checks their SHA-1s on
+      # every run, fetches (with retries) what the cache did not have, unpacks NSIS afresh where the
+      # bundler looks, and fetches WebView2's bootstrapper with retries. The bundler then finds all
+      # of it and downloads nothing.
+      - name: The cache key of the pinned NSIS
+        id: nsis
+        run: echo "key=tauri-nsis-$(jq -r '"\(.nsis)-\(.nsisTauriUtils)-\(.nsisSha1)-\(.nsisTauriUtilsSha1)"' apps/desktop/src-tauri/windows/upstream.json)" >> "$GITHUB_OUTPUT"
+
+      - name: The pinned NSIS from the cache
+        id: nsis-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: target/.tauri/downloads
+          key: ${{ steps.nsis.outputs.key }}
+
+      - name: NSIS and WebView2's bootstrapper where the bundler looks
+        run: node tools/nsis_fork.mjs tools target/.tauri
+
+      - name: The pinned NSIS into the cache
+        if: steps.nsis-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: target/.tauri/downloads
+          key: ${{ steps.nsis.outputs.key }}
 
       # the interface, the programs (spaceknife, spaceknife-cli, SpaceKnife.com) and the installer
       # (tauri.windows.conf.json: nsis; tauri.bundle.windows.json: the fork, WebView2's bootstrapper)

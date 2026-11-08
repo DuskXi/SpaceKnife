@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { isElectron, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, uiIn, watchSwap } from "../../packaging/lib.mjs";
+import { alternativesGroup, isElectron, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, uiIn, watchSwap } from "../../packaging/lib.mjs";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sk-packaging-lib-"));
 const line = (msg) => `2026-11-08 10:00:00 ${msg}\n`;
@@ -123,6 +123,36 @@ test("the interface and the shell are found wherever a kind of portable copy kee
   put(["resources", "app.asar"]);
   assert.equal(uiIn(t), join(t, "resources", "ui", "index.html"));
   assert.equal(isElectron(t), true);
+});
+
+test("the alternatives group is read the way each system's tool answers", () => {
+  // what the tools answer (spawnSync's result): Debian's update-alternatives knows --query; Red
+  // Hat's update-alternatives is its `alternatives` (chkconfig), which prints its usage on stdout
+  // for --query and exits 2, and answers --display
+  const missing = { error: Object.assign(new Error("spawnSync ENOENT"), { code: "ENOENT" }) };
+  const usage = { status: 2, stdout: "alternatives version 1.24 - Copyright (C) 2001 Red Hat, Inc.\nusage: alternatives --install <link> <name> <path> <priority>\n", stderr: "" };
+  const debian = "Name: spaceknife\nLink: /usr/bin/spaceknife\nStatus: auto\nBest: /opt/SpaceKnife/spaceknife\nValue: /opt/SpaceKnife/spaceknife\n\nAlternative: /opt/SpaceKnife/spaceknife\nPriority: 100\n";
+  const redhat = "spaceknife - status is auto.\n link currently points to /opt/SpaceKnife/spaceknife\n/opt/SpaceKnife/spaceknife - priority 100\nCurrent `best' version is /opt/SpaceKnife/spaceknife.\n";
+  const system = (answers) => {
+    const asked = [];
+    const run = (cmd, argv) => {
+      asked.push([cmd, ...argv].join(" "));
+      return answers[cmd] ?? missing;
+    };
+    return { run, asked };
+  };
+  const cases = [
+    ["Debian, registered", { "update-alternatives": { status: 0, stdout: debian, stderr: "" } }, debian],
+    ["Debian, none", { "update-alternatives": { status: 2, stdout: "", stderr: "update-alternatives: error: no alternatives for spaceknife\n" } }, null],
+    ["Red Hat, registered", { "update-alternatives": usage, alternatives: { status: 0, stdout: redhat, stderr: "" } }, redhat],
+    ["Red Hat, none", { "update-alternatives": usage, alternatives: { status: 2, stdout: "", stderr: "failed to read link /usr/bin/spaceknife: No such file or directory\n" } }, null],
+    ["no tool", {}, null],
+  ];
+  for (const [what, answers, want] of cases) {
+    const { run, asked } = system(answers);
+    assert.equal(alternativesGroup("spaceknife", run), want, what);
+    assert.equal(asked[0], "update-alternatives --query spaceknife", what);
+  }
 });
 
 test("the processes a test leaves in its folders are found and ended", async () => {

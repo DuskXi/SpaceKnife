@@ -9,6 +9,7 @@
     uv run tests/parity/parity.py check  --cand <spaceknife-cli> [scenario ...]
     uv run tests/parity/parity.py coverage
     uv run tests/parity/parity.py gen-invalid
+    uv run tests/parity/parity.py listing     # golden/<platform>/listing.json (record writes it too)
 
 `run` drives both backends and compares their normalized transcripts; `record` stores the
 reference's transcript as golden/<platform>/<scenario>.json; `check` compares the candidate with
@@ -56,6 +57,40 @@ def known_list(sc: dict[str, Any]) -> list[dict[str, Any]]:
 
 def doc(transcript: list[dict[str, Any]], sc: dict[str, Any]) -> dict[str, Any]:
     return {"format": 1, "scenario": sc["name"], "platform": sys.platform, "steps": transcript}
+
+
+# -------------------------------------------------------------------- directory order
+
+LISTING = GOLDEN / "listing.json"
+
+
+def write_listing() -> Path:
+    """golden/<platform>/listing.json: how the file system of this machine's temp folder (where
+    `record` puts the runs' folders) lists every fixture tree's folders. Its `filesystem` (what CI
+    rebuilds: an ext4's hash seed) is kept; after recording on another file system, set it anew
+    (README.md, "Directory order")."""
+    old = json.loads(LISTING.read_text(encoding="utf-8")) if LISTING.exists() else {}
+    trees = [k for k, v in engine.fixtures.specs().items() if isinstance(v, dict)]
+    out = {
+        "comment": old.get("comment", "How the file system the goldens were recorded on listed each fixture tree's folders (parity.py listing): 0.3.4 keeps that order for entries of equal size (README.md, 'Directory order')."),
+        "filesystem": old.get("filesystem", {"type": "unknown"}),
+        "trees": engine.fixtures.listings(trees, None),
+    }
+    LISTING.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    return LISTING
+
+
+def other_order(sc: dict[str, Any], parent: str | None) -> str | None:
+    """The first fixture folder the file system of `parent` (None: the system's temp folder) lists
+    otherwise than the recording, or None."""
+    if not LISTING.exists():
+        return None
+    recorded = json.loads(LISTING.read_text(encoding="utf-8"))["trees"]
+    trees = sorted(set(sc.get("fixtures", {}).values()))
+    for tree, actual in engine.fixtures.listings(trees, parent).items():
+        if (folder := engine.fixtures.listing_difference(recorded.get(tree), actual)) is not None:
+            return f"{tree}: {folder}"
+    return None
 
 
 # -------------------------------------------------------------------- the upgrade scenario
@@ -245,6 +280,12 @@ async def cmd_record(args: argparse.Namespace) -> int:
             print(f"recorded {out.relative_to(HERE)}  ({len(exp)} records, {len(errors)} step errors)")
     finally:
         server.close()
+    print(f"recorded {write_listing().relative_to(HERE)}  (check its `filesystem`: README.md, 'Directory order')")
+    return 0
+
+
+def cmd_listing(_: argparse.Namespace) -> int:
+    print(f"wrote {write_listing().relative_to(HERE)}")
     return 0
 
 
@@ -262,17 +303,38 @@ async def cmd_check(args: argparse.Namespace) -> int:
             rules = norm.load_rules(sc.get("normalize"))
             exp = json.loads(golden.read_text(encoding="utf-8"))["steps"]
             if "setup" in sc:
-                places = engine.Places.make("cand")
-                for fname, tree in sc.get("fixtures", {}).items():
-                    engine.fixtures.build(places.root / fname, tree)
-                apply_home_template(GOLDEN / f"{name}.home", places.home, places, feed)
-                act, _ = await engine.run_scenario(cand, sc, rules, feed, places=places, replay=True)
                 live = {i for i, s in enumerate(sc["steps"]) if s.get("live_only")}
                 exp = [r for r in exp if r["i"] not in live]
-            else:
-                act, _ = await engine.run_scenario(cand, sc, rules, feed)
-            diffs = norm.compare(norm.keyed(exp), norm.keyed(act), rules, "steps")
-            bad, known = norm.split_known(diffs, known_list(sc))
+
+            async def replay_in(parent: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
+                """(differences, known ones, the first fixture folder listed otherwise) of a replay
+                with its folders in `parent` (None: the system's temp folder)."""
+                moved = other_order(sc, parent)
+                places = engine.Places.make("cand", parent)
+                if "setup" in sc:
+                    for fname, tree in sc.get("fixtures", {}).items():
+                        engine.fixtures.build(places.root / fname, tree)
+                    apply_home_template(GOLDEN / f"{name}.home", places.home, places, feed)
+                    act, _ = await engine.run_scenario(cand, sc, rules, feed, places=places, replay=True)
+                else:
+                    act, _ = await engine.run_scenario(cand, sc, rules, feed, places=places)
+                diffs = norm.compare(norm.keyed(exp), norm.keyed(act), rules, "steps")
+                return (*norm.split_known(diffs, known_list(sc)), moved)
+
+            # the replayer's rule (README.md, "Directory order"): in the system's temp folder; where
+            # it lists the fixture folders otherwise and that makes differences, again in
+            # SPACEKNIFE_PARITY_TMP, which must list them as recorded; without it, not counted
+            bad, known, moved = await replay_in(None)
+            if bad and moved:
+                parent = engine.fixtures.temp_parent()
+                if not parent:
+                    print(f"SKIP   {name}  ({len(bad)} differences not counted: this file system lists the fixture folders otherwise than the recording's ({moved}), and 0.3.4 keeps that order for entries of equal size)")
+                    continue
+                bad, known, moved = await replay_in(parent)
+                if moved:
+                    print(f"FAIL   {name}  ({engine.fixtures.PARITY_TMP} lists the fixture folders otherwise than {LISTING.relative_to(HERE)}: {moved})")
+                    failed += 1
+                    continue
             print(report(name, bad, known, sc, args.limit))
             if bad and not sc.get("xfail"):
                 failed += 1
@@ -408,7 +470,10 @@ def main() -> int:
     sub.add_parser("coverage")
     sub.add_parser("gen-invalid")
     sub.add_parser("gen-filter")
+    sub.add_parser("listing")
     args = ap.parse_args()
+    if args.cmd == "listing":
+        return cmd_listing(args)
     if args.cmd == "coverage":
         return cmd_coverage(args)
     if args.cmd == "gen-invalid":

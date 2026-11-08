@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent.parent
 DAY = 86400.0
+# where the runs' folders go instead of the system's temp folder (README.md, "Directory order")
+PARITY_TMP = "SPACEKNIFE_PARITY_TMP"
 
 
 def specs() -> dict[str, Any]:
@@ -109,3 +114,57 @@ def build(root: Path, name: str, now: float | None = None) -> None:
         dirs = sorted({q for q in root.rglob("*") if q.is_dir()} | {root}, key=lambda q: -len(q.parts))
         for d in dirs:
             set_times(d, float(fixed), float(fixed), float(fixed))
+
+
+# -------------------------------------------------------------------- directory order
+
+
+def temp_parent() -> str | None:
+    """SPACEKNIFE_PARITY_TMP: a folder on a file system that lists folders as the goldens' did,
+    where `check` replays what differs where the system's temp folder lists them otherwise."""
+    return os.environ.get(PARITY_TMP) or None
+
+
+def listing(root: Path) -> dict[str, list[str]]:
+    """How this file system lists a built tree: each folder ("" for the top, `a/b` below) with its
+    entries in the order the system gives them (os.listdir: readdir, FindNextFileW), which is the
+    order 0.3.4 keeps for entries of equal size (README.md, "Directory order")."""
+    out: dict[str, list[str]] = {}
+    stack = [(root, "")]
+    while stack:
+        d, rel = stack.pop()
+        names = os.listdir(d)
+        out[rel] = names
+        for n in names:
+            p = d / n
+            if p.is_dir() and not p.is_symlink():
+                stack.append((p, f"{rel}/{n}" if rel else n))
+    return dict(sorted(out.items()))
+
+
+def listings(names: Iterable[str], parent: str | None) -> dict[str, dict[str, list[str]]]:
+    """`listing` of each tree, built in a temporary folder in `parent` (None: the system's temp
+    folder) and removed."""
+    out: dict[str, dict[str, list[str]]] = {}
+    tmp = Path(tempfile.mkdtemp(prefix="sk-parity-listing-", dir=parent))
+    try:
+        for name in names:
+            build(tmp / name, name)
+            out[name] = listing(tmp / name)
+    finally:
+        def writable(func: Any, path: str, _: Any) -> None:
+            os.chmod(path, 0o700)
+            func(path)
+
+        shutil.rmtree(tmp, onerror=writable)
+    return out
+
+
+def listing_difference(recorded: dict[str, list[str]] | None, actual: dict[str, list[str]]) -> str | None:
+    """The first folder `actual` lists otherwise than `recorded` (a tree of golden/<platform>/
+    listing.json), "." for the top; None when every folder is listed alike."""
+    recorded = recorded or {}
+    for folder in sorted(set(recorded) | set(actual)):
+        if recorded.get(folder) != actual.get(folder):
+            return folder or "."
+    return None

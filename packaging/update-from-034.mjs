@@ -46,12 +46,12 @@
 // failure; SK_KEEP=1 keeps the work folder.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { MAC, WIN, appProcessOf, fail, hello, helperIn, isElectron, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, uiIn, unpack, until, watchSwap } from "./lib.mjs";
+import { MAC, WIN, alternativesGroup, appProcessOf, fail, hello, helperIn, isElectron, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, uiIn, unpack, until, watchSwap } from "./lib.mjs";
 
 const OLD = "0.3.4";
 const args = process.argv.slice(2);
@@ -631,8 +631,7 @@ async function packaged(kind) {
     if (real.startsWith("/opt/") || lstatSync(bin).isSymbolicLink()) throw new Error(`${bin} still leads to ${real}`);
     if (alt) throw new Error(`the alternatives group spaceknife is left:\n${alt}`);
   } else {
-    if (real !== "/opt/SpaceKnife/spaceknife") throw new Error(`${bin} leads to ${real}`);
-    if (!alt?.includes("/opt/SpaceKnife/spaceknife")) throw new Error(`the alternatives group spaceknife: ${alt}`);
+    expectRpmLinks("after the upgrade");
   }
   const desktops = readdirSync("/usr/share/applications").filter((n) => /spaceknife/i.test(n));
   if (desktops.length !== 1 || desktops[0] !== "spaceknife.desktop") throw new Error(`desktop entries: ${desktops.join(", ")}`);
@@ -666,27 +665,52 @@ async function packaged(kind) {
     server.close();
   }
 
-  step(`remove ${kind}`);
-  sh([...sudo, ...(kind === "deb" ? ["apt-get", "remove", "-y", "spaceknife"] : ["dnf", "remove", "-y", "spaceknife"])], "removing");
-  if (existsSync(bin) || lstatSafe(bin)) throw new Error(`${bin} is left after the removal`);
-  if (alternatives()) throw new Error("an alternatives group spaceknife is left");
-  if (existsSync("/opt/SpaceKnife")) throw new Error("/opt/SpaceKnife is left after the removal");
-  expectSeeded(seeded);
+  const remove = () => {
+    step(`remove ${kind}`);
+    sh([...sudo, ...(kind === "deb" ? ["apt-get", "remove", "-y", "spaceknife"] : ["dnf", "remove", "-y", "spaceknife"])], "removing");
+    for (const p of [bin, "/usr/bin/spaceknife-cli"]) if (existsSync(p) || lstatSafe(p)) throw new Error(`${p} is left after the removal`);
+    if (alternatives()) throw new Error("an alternatives group spaceknife is left");
+    if (existsSync("/opt/SpaceKnife")) throw new Error("/opt/SpaceKnife is left after the removal");
+    expectSeeded(seeded);
+  };
+  remove();
+  if (kind === "rpm") {
+    // the rpm's links in the other transactions its scripts take part in: a fresh install, and
+    // the same version over itself (rpm runs an upgrade's scripts: the new %post, the old
+    // %postun with 1, the new %posttrans)
+    step(`install ${basename(newPath)} afresh`);
+    sh([...sudo, "dnf", "install", "-y", newPath], "installing afresh");
+    expectRpmLinks("after a fresh install");
+    step(`install ${basename(newPath)} over itself`);
+    sh([...sudo, "dnf", "reinstall", "-y", newPath], "installing over itself");
+    expectRpmLinks(`after ${NEW_VERSION} over ${NEW_VERSION}`);
+    remove();
+  }
   console.log(`\n${kind} ${OLD} -> ${NEW_VERSION}: ok`);
 }
 
-/** The alternatives group spaceknife as the system shows it (Debian: update-alternatives --query,
- * RHEL: alternatives --display), or null when there is none. */
+/** The rpm's /usr/bin links (the Electron shell, laid out as 0.3.4's): /usr/bin/spaceknife the
+ * alternatives group's own link to /opt/SpaceKnife/spaceknife, /usr/bin/spaceknife-cli a link to
+ * /opt/SpaceKnife/spaceknife-cli (apps/electron-shell/build/linux: after-install.sh, and
+ * rpm-posttrans.sh for what 0.3.4's %postun takes away). */
+function expectRpmLinks(when) {
+  const bin = "/usr/bin/spaceknife";
+  const real = existsSync(bin) ? realpathSync(bin) : null;
+  if (real !== "/opt/SpaceKnife/spaceknife") throw new Error(`${when}: ${bin} leads to ${real ?? "nothing"}`);
+  const alt = alternatives();
+  if (!alt?.includes("/opt/SpaceKnife/spaceknife")) throw new Error(`${when}: the alternatives group spaceknife: ${alt}`);
+  // the group's own link, not a plain one in its place
+  if (readlinkSync(bin) !== "/etc/alternatives/spaceknife") throw new Error(`${when}: ${bin} is a link to ${readlinkSync(bin)}, not the alternative`);
+  const cli = "/usr/bin/spaceknife-cli";
+  if (!lstatSafe(cli) || readlinkSync(cli) !== "/opt/SpaceKnife/spaceknife-cli") throw new Error(`${when}: ${cli}: ${lstatSafe(cli) ? readlinkSync(cli) : "missing"}`);
+  console.log(`${when}: ${bin} -> /etc/alternatives/spaceknife -> ${real}; ${cli}; the alternatives group:\n${alt.trim()}`);
+}
+
+/** The alternatives group spaceknife as the system shows it, or null when there is none (Debian:
+ * update-alternatives --query; RHEL: alternatives --display, its update-alternatives has no
+ * --query: lib.mjs alternativesGroup). */
 function alternatives() {
-  for (const [cmd, argv] of [
-    ["update-alternatives", ["--query", "spaceknife"]],
-    ["alternatives", ["--display", "spaceknife"]],
-  ]) {
-    const r = spawnSync(cmd, argv, { encoding: "utf8" });
-    if (r.error) continue; // not this system's tool
-    return r.status === 0 && r.stdout.trim() ? r.stdout : null;
-  }
-  return null;
+  return alternativesGroup("spaceknife");
 }
 
 function lstatSafe(p) {
