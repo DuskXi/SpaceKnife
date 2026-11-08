@@ -1793,6 +1793,62 @@ mod tests {
         child.id()
     }
 
+    /// [`wait_gone`] for a program this test process started and holds no handle of (the swap's
+    /// own start of the new version): once it ends it stays a zombie of this process until it is
+    /// reaped. Linux counts a zombie as gone (/proc); macOS has no /proc and `kill(pid, 0)` still
+    /// finds one, so it is reaped here. (The swap itself never waits for a child of its own: it
+    /// waits for the old version, which is not its child, and watches the new one through its
+    /// handle, which reaps it.)
+    fn child_gone(pid: u32, timeout: Duration) -> bool {
+        #[cfg(unix)]
+        {
+            let deadline = Instant::now() + timeout;
+            loop {
+                let mut status = 0;
+                // SAFETY: waitpid on this one process id, without blocking.
+                let got = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
+                if got == pid as libc::pid_t {
+                    return true; // it ended, and is reaped now
+                }
+                if got < 0 {
+                    // not (or no longer) a child of this process: whether it still runs at all
+                    return wait_gone(pid, deadline.saturating_duration_since(Instant::now()));
+                }
+                if Instant::now() > deadline {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        #[cfg(not(unix))]
+        wait_gone(pid, timeout)
+    }
+
+    #[test]
+    fn a_child_that_ended_unreaped_is_gone() {
+        // the zombie macOS's kill(pid, 0) still finds (Linux: /proc says Z)
+        let child = std::process::Command::new(example("fake_app"))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        drop(child); // no handle, nothing reaps it
+        assert!(child_gone(pid, Duration::from_secs(10)));
+        // a running one is not
+        #[cfg(windows)]
+        let slow = ("cmd", vec!["/C", "ping -n 30 127.0.0.1 >NUL"]);
+        #[cfg(not(windows))]
+        let slow = ("sleep", vec!["30"]);
+        let mut running = std::process::Command::new(slow.0)
+            .args(&slow.1)
+            .spawn()
+            .unwrap();
+        assert!(!child_gone(running.id(), Duration::from_millis(300)));
+        running.kill().unwrap();
+        running.wait().unwrap();
+    }
+
     /// `tree`'s new version with examples/fake_app.rs as its program, which runs as `run` says
     /// once the swap starts it (fake-app-run.txt moves in with the new files).
     fn tree_with_fake(root: &Path, run: &str) -> Plan {
@@ -1869,9 +1925,9 @@ mod tests {
         assert_eq!(code, 0);
         assert!(plan.app.join("E2E_NEW_BUILD.txt").is_file());
         assert_eq!(log_lines(&plan).last().unwrap(), "updated");
-        // it ran from its place, with --updated
+        // it ran from its place, with --updated; the swap's start of it is this process's child
         let pid: u32 = read(&plan.app.join("fake-app-pid.txt")).parse().unwrap();
-        assert!(wait_gone(pid, Duration::from_secs(10)));
+        assert!(child_gone(pid, Duration::from_secs(10)));
     }
 
     #[test]
