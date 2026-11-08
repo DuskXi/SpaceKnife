@@ -1,0 +1,1658 @@
+{
+ "format": 1,
+ "scenario": "scan_tree",
+ "platform": "linux",
+ "steps": [
+  {
+   "i": 0,
+   "call": "scan.check_paths",
+   "result": {
+    "items": [
+     {
+      "path": "$ROOT/tree",
+      "normalized": "$ROOT/tree",
+      "state": "ok",
+      "message": "",
+      "merged_into": null
+     },
+     {
+      "path": "$ROOT/tree/a",
+      "normalized": "$ROOT/tree/a",
+      "state": "ok",
+      "message": "",
+      "merged_into": "$ROOT/tree"
+     },
+     {
+      "path": "$ROOT/small",
+      "normalized": "$ROOT/small",
+      "state": "ok",
+      "message": "",
+      "merged_into": null
+     },
+     {
+      "path": "$ROOT/nope",
+      "normalized": "$ROOT/nope",
+      "state": "missing",
+      "message": "Path doesn't exist",
+      "merged_into": null
+     },
+     {
+      "path": "$ROOT/tree/c.txt",
+      "normalized": "$ROOT/tree/c.txt",
+      "state": "not_dir",
+      "message": "Not a folder",
+      "merged_into": null
+     },
+     {
+      "path": "relative/path",
+      "normalized": "$TMP/relative/path",
+      "state": "missing",
+      "message": "Path doesn't exist",
+      "merged_into": null
+     }
+    ],
+    "roots": [
+     "$ROOT/tree",
+     "$ROOT/small"
+    ]
+   }
+  },
+  {
+   "i": 1,
+   "call": "scan.start",
+   "result": {
+    "roots": [
+     {
+      "path": "$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "whole_volume": false
+     }
+    ],
+    "source": "scan"
+   }
+  },
+  {
+   "i": 2,
+   "wait_scan": {
+    "scan_id": "<scan#1>",
+    "state": "done",
+    "roots": [
+     {
+      "path": "$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "whole_volume": false
+     }
+    ],
+    "items": 319,
+    "files": 307,
+    "dirs": 12,
+    "bytes_alloc": 1433600,
+    "bytes_size": 207141,
+    "errors": 0,
+    "pending_dirs": 0,
+    "progress": null,
+    "expected_items": null,
+    "started_at": "<time>",
+    "finished_at": "<time>",
+    "denied": [],
+    "message": "",
+    "unknown": null,
+    "snapshot": null,
+    "source": "scan",
+    "method": "hard",
+    "phase": "",
+    "fallback": "",
+    "mft_available": false,
+    "paused": false,
+    "monitor": {
+     "state": "running",
+     "detail": "",
+     "watcher": "inotify",
+     "watched_dirs": 1,
+     "polled_dirs": 0
+    }
+   },
+   "monotonic": true
+  },
+  {
+   "i": 3,
+   "call": "scan.status",
+   "result": {
+    "scan_id": "<scan#1>",
+    "state": "done",
+    "roots": [
+     {
+      "path": "$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "whole_volume": false
+     }
+    ],
+    "items": 319,
+    "files": 307,
+    "dirs": 12,
+    "bytes_alloc": 1433600,
+    "bytes_size": 207141,
+    "errors": 0,
+    "pending_dirs": 0,
+    "progress": null,
+    "expected_items": null,
+    "started_at": "<time>",
+    "finished_at": "<time>",
+    "denied": [],
+    "message": "",
+    "unknown": null,
+    "snapshot": null,
+    "source": "scan",
+    "method": "hard",
+    "phase": "",
+    "fallback": "",
+    "mft_available": false,
+    "paused": false,
+    "monitor": {
+     "state": "running",
+     "detail": "",
+     "watcher": "inotify",
+     "watched_dirs": 1,
+     "polled_dirs": 0
+    }
+   }
+  },
+  {
+   "i": 4,
+   "call": "scan.list",
+   "result": {
+    "scans": [
+     {
+      "scan_id": "<scan#1>",
+      "state": "done",
+      "roots": [
+       {
+        "path": "$ROOT/tree",
+        "node": "@$ROOT/tree",
+        "whole_volume": false
+       }
+      ],
+      "items": 319,
+      "files": 307,
+      "dirs": 12,
+      "bytes_alloc": 1433600,
+      "bytes_size": 207141,
+      "errors": 0,
+      "pending_dirs": 0,
+      "progress": null,
+      "expected_items": null,
+      "started_at": "<time>",
+      "finished_at": "<time>",
+      "denied": [],
+      "message": "",
+      "unknown": null,
+      "snapshot": null,
+      "source": "scan",
+      "method": "hard",
+      "phase": "",
+      "fallback": "",
+      "mft_available": false,
+      "paused": false,
+      "monitor": {
+       "state": "running",
+       "detail": "",
+       "watcher": "inotify",
+       "watched_dirs": 1,
+       "polled_dirs": 0
+      }
+     }
+    ]
+   }
+  },
+  {
+   "i": 5,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree",
+     "parent": "@",
+     "name": "$ROOT/tree",
+     "kind": "dir",
+     "depth": 1,
+     "size": 207141,
+     "alloc": 1433600,
+     "files": 307,
+     "dirs": 11,
+     "child_count": 7,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    }
+   }
+  },
+  {
+   "i": 6,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/a",
+     "parent": "@$ROOT/tree",
+     "name": "a",
+     "kind": "dir",
+     "depth": 2,
+     "size": 129456,
+     "alloc": 143360,
+     "files": 3,
+     "dirs": 1,
+     "child_count": 3,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    }
+   }
+  },
+  {
+   "i": 7,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/中文 文件夹/照片.jpg",
+     "parent": "@$ROOT/tree/中文 文件夹",
+     "name": "照片.jpg",
+     "kind": "file",
+     "depth": 3,
+     "size": 2048,
+     "alloc": 4096,
+     "files": 0,
+     "dirs": 0,
+     "child_count": 0,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "jpg",
+     "flags": []
+    }
+   }
+  },
+  {
+   "i": 8,
+   "call": "tree.find",
+   "result": {
+    "node": null
+   }
+  },
+  {
+   "i": 9,
+   "call": "tree.find",
+   "result": {
+    "node": null
+   }
+  },
+  {
+   "i": 10,
+   "call": "tree.node",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/a",
+     "parent": "@$ROOT/tree",
+     "name": "a",
+     "kind": "dir",
+     "depth": 2,
+     "size": 129456,
+     "alloc": 143360,
+     "files": 3,
+     "dirs": 1,
+     "child_count": 3,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "path": "$ROOT/tree/a",
+    "on_disk": true
+   }
+  },
+  {
+   "i": 11,
+   "call": "tree.children",
+   "result": {
+    "parent": {
+     "id": "@$ROOT/tree",
+     "parent": "@",
+     "name": "$ROOT/tree",
+     "kind": "dir",
+     "depth": 1,
+     "size": 207141,
+     "alloc": 1433600,
+     "files": 307,
+     "dirs": 11,
+     "child_count": 7,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "total": 7,
+    "items": [
+     {
+      "id": "@$ROOT/tree/many",
+      "parent": "@$ROOT/tree",
+      "name": "many",
+      "kind": "dir",
+      "depth": 2,
+      "size": 74850,
+      "alloc": 1228800,
+      "files": 300,
+      "dirs": 0,
+      "child_count": 300,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/a",
+      "parent": "@$ROOT/tree",
+      "name": "a",
+      "kind": "dir",
+      "depth": 2,
+      "size": 129456,
+      "alloc": 143360,
+      "files": 3,
+      "dirs": 1,
+      "child_count": 3,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/deep",
+      "parent": "@$ROOT/tree",
+      "name": "deep",
+      "kind": "dir",
+      "depth": 2,
+      "size": 777,
+      "alloc": 20480,
+      "files": 1,
+      "dirs": 4,
+      "child_count": 1,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/中文 文件夹",
+      "parent": "@$ROOT/tree",
+      "name": "中文 文件夹",
+      "kind": "dir",
+      "depth": 2,
+      "size": 2048,
+      "alloc": 4096,
+      "files": 1,
+      "dirs": 0,
+      "child_count": 1,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/b",
+      "parent": "@$ROOT/tree",
+      "name": "b",
+      "kind": "dir",
+      "depth": 2,
+      "size": 0,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 1,
+      "child_count": 1,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/c.txt",
+      "parent": "@$ROOT/tree",
+      "name": "c.txt",
+      "kind": "file",
+      "depth": 2,
+      "size": 10,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "txt",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/empty.dat",
+      "parent": "@$ROOT/tree",
+      "name": "empty.dat",
+      "kind": "file",
+      "depth": 2,
+      "size": 0,
+      "alloc": 0,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "dat",
+      "flags": []
+     }
+    ]
+   }
+  },
+  {
+   "i": 12,
+   "call": "tree.children",
+   "result": {
+    "parent": {
+     "id": "@$ROOT/tree",
+     "parent": "@",
+     "name": "$ROOT/tree",
+     "kind": "dir",
+     "depth": 1,
+     "size": 207141,
+     "alloc": 1433600,
+     "files": 307,
+     "dirs": 11,
+     "child_count": 7,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "total": 7,
+    "items": [
+     {
+      "id": "@$ROOT/tree/中文 文件夹",
+      "parent": "@$ROOT/tree",
+      "name": "中文 文件夹",
+      "kind": "dir",
+      "depth": 2,
+      "size": 2048,
+      "alloc": 4096,
+      "files": 1,
+      "dirs": 0,
+      "child_count": 1,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/many",
+      "parent": "@$ROOT/tree",
+      "name": "many",
+      "kind": "dir",
+      "depth": 2,
+      "size": 74850,
+      "alloc": 1228800,
+      "files": 300,
+      "dirs": 0,
+      "child_count": 300,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/empty.dat",
+      "parent": "@$ROOT/tree",
+      "name": "empty.dat",
+      "kind": "file",
+      "depth": 2,
+      "size": 0,
+      "alloc": 0,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "dat",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/deep",
+      "parent": "@$ROOT/tree",
+      "name": "deep",
+      "kind": "dir",
+      "depth": 2,
+      "size": 777,
+      "alloc": 20480,
+      "files": 1,
+      "dirs": 4,
+      "child_count": 1,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/c.txt",
+      "parent": "@$ROOT/tree",
+      "name": "c.txt",
+      "kind": "file",
+      "depth": 2,
+      "size": 10,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "txt",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/b",
+      "parent": "@$ROOT/tree",
+      "name": "b",
+      "kind": "dir",
+      "depth": 2,
+      "size": 0,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 1,
+      "child_count": 1,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/a",
+      "parent": "@$ROOT/tree",
+      "name": "a",
+      "kind": "dir",
+      "depth": 2,
+      "size": 129456,
+      "alloc": 143360,
+      "files": 3,
+      "dirs": 1,
+      "child_count": 3,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     }
+    ]
+   }
+  },
+  {
+   "i": 13,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/many",
+     "parent": "@$ROOT/tree",
+     "name": "many",
+     "kind": "dir",
+     "depth": 2,
+     "size": 74850,
+     "alloc": 1228800,
+     "files": 300,
+     "dirs": 0,
+     "child_count": 300,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    }
+   }
+  },
+  {
+   "i": 14,
+   "call": "tree.children",
+   "result": {
+    "parent": {
+     "id": "@$ROOT/tree/many",
+     "parent": "@$ROOT/tree",
+     "name": "many",
+     "kind": "dir",
+     "depth": 2,
+     "size": 74850,
+     "alloc": 1228800,
+     "files": 300,
+     "dirs": 0,
+     "child_count": 300,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "total": 300,
+    "items": [
+     {
+      "id": "@$ROOT/tree/many/f072.log",
+      "parent": "@$ROOT/tree/many",
+      "name": "f072.log",
+      "kind": "file",
+      "depth": 3,
+      "size": 172,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "log",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/many/f106.log",
+      "parent": "@$ROOT/tree/many",
+      "name": "f106.log",
+      "kind": "file",
+      "depth": 3,
+      "size": 206,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "log",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/many/f020.log",
+      "parent": "@$ROOT/tree/many",
+      "name": "f020.log",
+      "kind": "file",
+      "depth": 3,
+      "size": 120,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "log",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/many/f282.log",
+      "parent": "@$ROOT/tree/many",
+      "name": "f282.log",
+      "kind": "file",
+      "depth": 3,
+      "size": 382,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "log",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/many/f210.log",
+      "parent": "@$ROOT/tree/many",
+      "name": "f210.log",
+      "kind": "file",
+      "depth": 3,
+      "size": 310,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "log",
+      "flags": []
+     }
+    ]
+   }
+  },
+  {
+   "i": 15,
+   "call": "tree.children",
+   "result": {
+    "parent": {
+     "id": "@$ROOT/tree/many",
+     "parent": "@$ROOT/tree",
+     "name": "many",
+     "kind": "dir",
+     "depth": 2,
+     "size": 74850,
+     "alloc": 1228800,
+     "files": 300,
+     "dirs": 0,
+     "child_count": 300,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "total": 300,
+    "items": [
+     {
+      "id": "@$ROOT/tree/many/f299.log",
+      "parent": "@$ROOT/tree/many",
+      "name": "f299.log",
+      "kind": "file",
+      "depth": 3,
+      "size": 399,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "log",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/many/f298.log",
+      "parent": "@$ROOT/tree/many",
+      "name": "f298.log",
+      "kind": "file",
+      "depth": 3,
+      "size": 398,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "log",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/many/f297.log",
+      "parent": "@$ROOT/tree/many",
+      "name": "f297.log",
+      "kind": "file",
+      "depth": 3,
+      "size": 397,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "log",
+      "flags": []
+     }
+    ]
+   }
+  },
+  {
+   "i": 16,
+   "call": "tree.children",
+   "result": {
+    "parent": {
+     "id": "@$ROOT/tree/many",
+     "parent": "@$ROOT/tree",
+     "name": "many",
+     "kind": "dir",
+     "depth": 2,
+     "size": 74850,
+     "alloc": 1228800,
+     "files": 300,
+     "dirs": 0,
+     "child_count": 300,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "total": 300,
+    "items": []
+   }
+  },
+  {
+   "i": 17,
+   "call": "tree.summary",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree",
+     "parent": "@",
+     "name": "$ROOT/tree",
+     "kind": "dir",
+     "depth": 1,
+     "size": 207141,
+     "alloc": 1433600,
+     "files": 307,
+     "dirs": 11,
+     "child_count": 7,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "path": "$ROOT/tree",
+    "parent": null,
+    "latest_mtime": 1600000000,
+    "top_files": [
+     {
+      "node": {
+       "id": "@$ROOT/tree/a/sub/movie.mp4",
+       "parent": "@$ROOT/tree/a/sub",
+       "name": "movie.mp4",
+       "kind": "file",
+       "depth": 4,
+       "size": 123456,
+       "alloc": 126976,
+       "files": 0,
+       "dirs": 0,
+       "child_count": 0,
+       "mtime": 1600000000,
+       "ctime": 0,
+       "atime": "<time>",
+       "ext": "mp4",
+       "flags": []
+      },
+      "rel_parent": "a/sub/",
+      "tag": null,
+      "class_id": "video"
+     },
+     {
+      "node": {
+       "id": "@$ROOT/tree/a/two.bin",
+       "parent": "@$ROOT/tree/a",
+       "name": "two.bin",
+       "kind": "file",
+       "depth": 3,
+       "size": 5000,
+       "alloc": 8192,
+       "files": 0,
+       "dirs": 0,
+       "child_count": 0,
+       "mtime": 1600000000,
+       "ctime": 0,
+       "atime": "<time>",
+       "ext": "bin",
+       "flags": []
+      },
+      "rel_parent": "a/",
+      "tag": null,
+      "class_id": "other"
+     },
+     {
+      "node": {
+       "id": "@$ROOT/tree/c.txt",
+       "parent": "@$ROOT/tree",
+       "name": "c.txt",
+       "kind": "file",
+       "depth": 2,
+       "size": 10,
+       "alloc": 4096,
+       "files": 0,
+       "dirs": 0,
+       "child_count": 0,
+       "mtime": 1600000000,
+       "ctime": 0,
+       "atime": "<time>",
+       "ext": "txt",
+       "flags": []
+      },
+      "rel_parent": "",
+      "tag": null,
+      "class_id": "doc"
+     },
+     {
+      "node": {
+       "id": "@$ROOT/tree/deep/l1/l2/l3/l4/x.dat",
+       "parent": "@$ROOT/tree/deep/l1/l2/l3/l4",
+       "name": "x.dat",
+       "kind": "file",
+       "depth": 7,
+       "size": 777,
+       "alloc": 4096,
+       "files": 0,
+       "dirs": 0,
+       "child_count": 0,
+       "mtime": 1600000000,
+       "ctime": 0,
+       "atime": "<time>",
+       "ext": "dat",
+       "flags": []
+      },
+      "rel_parent": "deep/l1/l2/l3/l4/",
+      "tag": null,
+      "class_id": "other"
+     },
+     {
+      "node": {
+       "id": "@$ROOT/tree/a/one.bin",
+       "parent": "@$ROOT/tree/a",
+       "name": "one.bin",
+       "kind": "file",
+       "depth": 3,
+       "size": 1000,
+       "alloc": 4096,
+       "files": 0,
+       "dirs": 0,
+       "child_count": 0,
+       "mtime": 1600000000,
+       "ctime": 0,
+       "atime": "<time>",
+       "ext": "bin",
+       "flags": []
+      },
+      "rel_parent": "a/",
+      "tag": null,
+      "class_id": "other"
+     }
+    ],
+    "classes": [
+     {
+      "class_id": "exec",
+      "bytes": 1228800,
+      "files": 300,
+      "parts": []
+     },
+     {
+      "class_id": "video",
+      "bytes": 126976,
+      "files": 1,
+      "parts": []
+     },
+     {
+      "class_id": "other",
+      "bytes": 16384,
+      "files": 4,
+      "parts": []
+     },
+     {
+      "class_id": "image",
+      "bytes": 4096,
+      "files": 1,
+      "parts": []
+     },
+     {
+      "class_id": "doc",
+      "bytes": 4096,
+      "files": 1,
+      "parts": []
+     }
+    ],
+    "tag": null,
+    "on_disk": true,
+    "folder_class": null,
+    "gaps": []
+   }
+  },
+  {
+   "i": 18,
+   "call": "tree.summary",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/a",
+     "parent": "@$ROOT/tree",
+     "name": "a",
+     "kind": "dir",
+     "depth": 2,
+     "size": 129456,
+     "alloc": 143360,
+     "files": 3,
+     "dirs": 1,
+     "child_count": 3,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "path": "$ROOT/tree/a",
+    "parent": {
+     "id": "@$ROOT/tree",
+     "parent": "@",
+     "name": "$ROOT/tree",
+     "kind": "dir",
+     "depth": 1,
+     "size": 207141,
+     "alloc": 1433600,
+     "files": 307,
+     "dirs": 11,
+     "child_count": 7,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "latest_mtime": 1600000000,
+    "top_files": [
+     {
+      "node": {
+       "id": "@$ROOT/tree/a/sub/movie.mp4",
+       "parent": "@$ROOT/tree/a/sub",
+       "name": "movie.mp4",
+       "kind": "file",
+       "depth": 4,
+       "size": 123456,
+       "alloc": 126976,
+       "files": 0,
+       "dirs": 0,
+       "child_count": 0,
+       "mtime": 1600000000,
+       "ctime": 0,
+       "atime": "<time>",
+       "ext": "mp4",
+       "flags": []
+      },
+      "rel_parent": "sub/",
+      "tag": null,
+      "class_id": "video"
+     },
+     {
+      "node": {
+       "id": "@$ROOT/tree/a/two.bin",
+       "parent": "@$ROOT/tree/a",
+       "name": "two.bin",
+       "kind": "file",
+       "depth": 3,
+       "size": 5000,
+       "alloc": 8192,
+       "files": 0,
+       "dirs": 0,
+       "child_count": 0,
+       "mtime": 1600000000,
+       "ctime": 0,
+       "atime": "<time>",
+       "ext": "bin",
+       "flags": []
+      },
+      "rel_parent": "",
+      "tag": null,
+      "class_id": "other"
+     }
+    ],
+    "classes": [
+     {
+      "class_id": "video",
+      "bytes": 126976,
+      "files": 1,
+      "parts": []
+     },
+     {
+      "class_id": "other",
+      "bytes": 12288,
+      "files": 2,
+      "parts": []
+     }
+    ],
+    "tag": null,
+    "on_disk": true,
+    "folder_class": null,
+    "gaps": []
+   }
+  },
+  {
+   "i": 19,
+   "call": "path.forms",
+   "result": {
+    "raw": "$ROOT/tree/a",
+    "quoted": "'$ROOT/tree/a'",
+    "posix": "$ROOT/tree/a",
+    "uri": "file://$ROOT/tree/a",
+    "on_disk": true
+   }
+  },
+  {
+   "i": 20,
+   "call": "tree.node",
+   "error": {
+    "code": -32010,
+    "loc": null
+   }
+  },
+  {
+   "i": 21,
+   "call": "tree.children",
+   "error": {
+    "code": -32010,
+    "loc": null
+   }
+  },
+  {
+   "i": 22,
+   "call": "tree.node",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  },
+  {
+   "i": 23,
+   "call": "scan.status",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  },
+  {
+   "i": 24,
+   "call": "scan.cancel",
+   "result": {
+    "state": "done",
+    "items": 319,
+    "files": 307,
+    "dirs": 12
+   }
+  },
+  {
+   "i": 25,
+   "call": "scan.pause",
+   "result": {
+    "state": "done",
+    "paused": false
+   }
+  },
+  {
+   "i": 26,
+   "call": "scan.resume",
+   "result": {
+    "state": "done",
+    "paused": false
+   }
+  },
+  {
+   "i": 27,
+   "call": "scan.continue",
+   "error": {
+    "code": -32600,
+    "loc": null
+   }
+  },
+  {
+   "i": 28,
+   "call": "scan.set_load",
+   "error": {
+    "code": -32600,
+    "loc": null
+   }
+  },
+  {
+   "i": 29,
+   "call": "snapshot.save",
+   "result": {
+    "path": "$TMP/saved.sks",
+    "created_at": "<time>",
+    "roots": [
+     "$ROOT/tree"
+    ],
+    "node_count": 320,
+    "bytes_alloc": 1433600,
+    "files": 307,
+    "method": "hard"
+   }
+  },
+  {
+   "i": 30,
+   "call": "snapshot.load",
+   "result": {
+    "scan_id": "<scan#2>",
+    "state": "done",
+    "roots": [
+     {
+      "path": "$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "whole_volume": false
+     }
+    ],
+    "items": 319,
+    "files": 307,
+    "dirs": 12,
+    "bytes_alloc": 1433600,
+    "bytes_size": 207141,
+    "errors": 0,
+    "pending_dirs": 0,
+    "progress": 1.0,
+    "expected_items": null,
+    "started_at": "<time>",
+    "finished_at": "<time>",
+    "denied": [],
+    "message": "",
+    "unknown": null,
+    "snapshot": "$TMP/saved.sks",
+    "source": "snapshot",
+    "method": "snapshot",
+    "phase": "",
+    "fallback": "",
+    "mft_available": false,
+    "paused": false,
+    "monitor": null
+   }
+  },
+  {
+   "i": 31,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/a/sub/movie.mp4",
+     "parent": "@$ROOT/tree/a/sub",
+     "name": "movie.mp4",
+     "kind": "file",
+     "depth": 4,
+     "size": 123456,
+     "alloc": 126976,
+     "files": 0,
+     "dirs": 0,
+     "child_count": 0,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "mp4",
+     "flags": []
+    }
+   }
+  },
+  {
+   "i": 32,
+   "call": "snapshot.load",
+   "error": {
+    "code": -32009,
+    "loc": null
+   }
+  },
+  {
+   "i": 34,
+   "call": "snapshot.load",
+   "error": {
+    "code": -32009,
+    "loc": null
+   }
+  },
+  {
+   "i": 35,
+   "call": "snapshot.list",
+   "result": {
+    "snapshots": []
+   }
+  },
+  {
+   "i": 39,
+   "call": "scan.rescan",
+   "result": {
+    "roots": [
+     {
+      "path": "$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "whole_volume": false
+     }
+    ],
+    "source": "scan"
+   }
+  },
+  {
+   "i": 40,
+   "until": "tree.find",
+   "met": true
+  },
+  {
+   "i": 41,
+   "until": "tree.find",
+   "met": true
+  },
+  {
+   "i": 42,
+   "wait_scan": {
+    "state": "done",
+    "files": 307,
+    "dirs": 12,
+    "bytes_size": 210237,
+    "errors": 0
+   },
+   "monotonic": true
+  },
+  {
+   "i": 43,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/a",
+     "parent": "@$ROOT/tree",
+     "name": "a",
+     "kind": "dir",
+     "depth": 2,
+     "size": 132552,
+     "alloc": 143360,
+     "files": 3,
+     "dirs": 1,
+     "child_count": 3,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    }
+   }
+  },
+  {
+   "i": 44,
+   "call": "tree.children",
+   "result": {
+    "parent": {
+     "id": "@$ROOT/tree/a",
+     "parent": "@$ROOT/tree",
+     "name": "a",
+     "kind": "dir",
+     "depth": 2,
+     "size": 132552,
+     "alloc": 143360,
+     "files": 3,
+     "dirs": 1,
+     "child_count": 3,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "",
+     "flags": []
+    },
+    "total": 3,
+    "items": [
+     {
+      "id": "@$ROOT/tree/a/sub",
+      "parent": "@$ROOT/tree/a",
+      "name": "sub",
+      "kind": "dir",
+      "depth": 3,
+      "size": 123456,
+      "alloc": 126976,
+      "files": 1,
+      "dirs": 0,
+      "child_count": 1,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/a/two.bin",
+      "parent": "@$ROOT/tree/a",
+      "name": "two.bin",
+      "kind": "file",
+      "depth": 3,
+      "size": 5000,
+      "alloc": 8192,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "bin",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/tree/a/new.bin",
+      "parent": "@$ROOT/tree/a",
+      "name": "new.bin",
+      "kind": "file",
+      "depth": 3,
+      "size": 4096,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": 1600000000,
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "bin",
+      "flags": []
+     }
+    ]
+   }
+  },
+  {
+   "i": 45,
+   "call": "tree.find",
+   "result": {
+    "node": null
+   }
+  },
+  {
+   "i": 46,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/a/new.bin",
+     "parent": "@$ROOT/tree/a",
+     "name": "new.bin",
+     "kind": "file",
+     "depth": 3,
+     "size": 4096,
+     "alloc": 4096,
+     "files": 0,
+     "dirs": 0,
+     "child_count": 0,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "bin",
+     "flags": []
+    }
+   }
+  },
+  {
+   "i": 47,
+   "call": "scan.start",
+   "result": {
+    "roots": [
+     {
+      "path": "$ROOT/small",
+      "node": "@$ROOT/small",
+      "whole_volume": false
+     },
+     {
+      "path": "$ROOT/tree/b",
+      "node": "@$ROOT/tree/b",
+      "whole_volume": false
+     }
+    ]
+   }
+  },
+  {
+   "i": 48,
+   "wait_scan": {
+    "scan_id": "<scan#3>",
+    "state": "done",
+    "roots": [
+     {
+      "path": "$ROOT/small",
+      "node": "@$ROOT/small",
+      "whole_volume": false
+     },
+     {
+      "path": "$ROOT/tree/b",
+      "node": "@$ROOT/tree/b",
+      "whole_volume": false
+     }
+    ],
+    "items": 10,
+    "files": 4,
+    "dirs": 6,
+    "bytes_alloc": 286720,
+    "bytes_size": 261000,
+    "errors": 0,
+    "pending_dirs": 0,
+    "progress": null,
+    "expected_items": null,
+    "started_at": "<time>",
+    "finished_at": "<time>",
+    "denied": [],
+    "message": "",
+    "unknown": null,
+    "snapshot": null,
+    "source": "scan",
+    "method": "hard",
+    "phase": "",
+    "fallback": "",
+    "mft_available": false,
+    "paused": false,
+    "monitor": {
+     "state": "running",
+     "detail": "",
+     "watcher": "inotify",
+     "watched_dirs": 2,
+     "polled_dirs": 0
+    }
+   },
+   "monotonic": true
+  },
+  {
+   "i": 49,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/small/b/c/three.mp4",
+     "parent": "@$ROOT/small/b/c",
+     "name": "three.mp4",
+     "kind": "file",
+     "depth": 4,
+     "size": 200000,
+     "alloc": 200704,
+     "files": 0,
+     "dirs": 0,
+     "child_count": 0,
+     "mtime": 1600000000,
+     "ctime": 0,
+     "atime": "<time>",
+     "ext": "mp4",
+     "flags": []
+    }
+   }
+  },
+  {
+   "i": 50,
+   "call": "scan.close",
+   "result": {}
+  },
+  {
+   "i": 51,
+   "call": "scan.status",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  },
+  {
+   "i": 52,
+   "call": "scan.start",
+   "error": {
+    "code": -32008,
+    "loc": null
+   }
+  },
+  {
+   "i": 53,
+   "call": "scan.start",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "roots"
+    ]
+   }
+  },
+  {
+   "i": 54,
+   "call": "scan.start",
+   "error": {
+    "code": -32008,
+    "loc": null
+   }
+  },
+  {
+   "i": 55,
+   "call": "scan.start",
+   "error": {
+    "code": -32008,
+    "loc": null
+   }
+  },
+  {
+   "i": 56,
+   "call": "scan.close",
+   "result": {}
+  },
+  {
+   "i": 57,
+   "call": "scan.list",
+   "result": {
+    "scans": [
+     {
+      "scan_id": "<scan#1>",
+      "state": "done",
+      "roots": [
+       {
+        "path": "$ROOT/tree",
+        "node": "@$ROOT/tree",
+        "whole_volume": false
+       }
+      ],
+      "items": 323,
+      "files": 307,
+      "dirs": 12,
+      "bytes_alloc": 1433600,
+      "bytes_size": 210237,
+      "errors": 0,
+      "pending_dirs": 0,
+      "progress": null,
+      "expected_items": null,
+      "started_at": "<time>",
+      "finished_at": "<time>",
+      "denied": [],
+      "message": "",
+      "unknown": null,
+      "snapshot": "$TMP/saved.sks",
+      "source": "scan",
+      "method": "hard",
+      "phase": "",
+      "fallback": "",
+      "mft_available": false,
+      "paused": false,
+      "monitor": {
+       "state": "running",
+       "detail": "",
+       "watcher": "inotify",
+       "watched_dirs": 12,
+       "polled_dirs": 0
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

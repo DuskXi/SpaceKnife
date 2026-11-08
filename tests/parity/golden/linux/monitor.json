@@ -1,0 +1,333 @@
+{
+ "format": 1,
+ "scenario": "monitor",
+ "platform": "linux",
+ "steps": [
+  {
+   "i": 0,
+   "call": "scan.start",
+   "result": {
+    "source": "scan"
+   }
+  },
+  {
+   "i": 1,
+   "wait_scan": {
+    "state": "done",
+    "items": 8,
+    "monitor": {
+     "state": "running",
+     "detail": "",
+     "watcher": "inotify",
+     "watched_dirs": 1,
+     "polled_dirs": 0
+    }
+   },
+   "monotonic": true
+  },
+  {
+   "i": 2,
+   "subscribe": "scan",
+   "result": {
+    "sub": "<sub#1>"
+   }
+  },
+  {
+   "i": 3,
+   "events": "scan.progress",
+   "got": [
+    {
+     "status": {
+      "scan_id": "<scan#1>",
+      "state": "done",
+      "roots": [
+       {
+        "path": "$ROOT/small",
+        "node": "@$ROOT/small",
+        "whole_volume": false
+       }
+      ],
+      "items": 8,
+      "files": 4,
+      "dirs": 4,
+      "bytes_alloc": 282624,
+      "bytes_size": 261000,
+      "errors": 0,
+      "pending_dirs": 0,
+      "progress": null,
+      "expected_items": null,
+      "started_at": "<time>",
+      "finished_at": "<time>",
+      "denied": [],
+      "message": "",
+      "unknown": null,
+      "snapshot": null,
+      "source": "scan",
+      "method": "hard",
+      "phase": "",
+      "fallback": "",
+      "mft_available": false,
+      "paused": false,
+      "monitor": {
+       "state": "running",
+       "detail": "",
+       "watcher": "inotify",
+       "watched_dirs": 1,
+       "polled_dirs": 0
+      }
+     }
+    }
+   ]
+  },
+  {
+   "i": 5,
+   "call": "scan.status",
+   "result": {
+    "state": "done",
+    "items": 8,
+    "monitor": {
+     "state": "running",
+     "detail": "",
+     "watcher": "inotify",
+     "watched_dirs": 4,
+     "polled_dirs": 0
+    }
+   }
+  },
+  {
+   "i": 8,
+   "until": "tree.find",
+   "met": true
+  },
+  {
+   "i": 10,
+   "until": "tree.find",
+   "met": true
+  },
+  {
+   "i": 12,
+   "until": "tree.find",
+   "met": true
+  },
+  {
+   "i": 13,
+   "until": "tree.find",
+   "met": true
+  },
+  {
+   "i": 16,
+   "until": "tree.find",
+   "met": true
+  },
+  {
+   "i": 18,
+   "until": "tree.find",
+   "met": true
+  },
+  {
+   "i": 20,
+   "call": "scan.status",
+   "result": {
+    "state": "done",
+    "items": 28,
+    "files": 6,
+    "dirs": 6,
+    "bytes_size": 258030,
+    "monitor": {
+     "state": "running",
+     "detail": "",
+     "watcher": "inotify",
+     "watched_dirs": 6,
+     "polled_dirs": 0
+    }
+   }
+  },
+  {
+   "i": 21,
+   "events": "scan.progress",
+   "got": [
+    {
+     "status": {
+      "scan_id": "<scan#1>",
+      "state": "done",
+      "roots": [
+       {
+        "path": "$ROOT/small",
+        "node": "@$ROOT/small",
+        "whole_volume": false
+       }
+      ],
+      "items": 28,
+      "files": 6,
+      "dirs": 6,
+      "bytes_alloc": 294912,
+      "bytes_size": 258030,
+      "errors": 0,
+      "pending_dirs": 0,
+      "progress": null,
+      "expected_items": null,
+      "started_at": "<time>",
+      "finished_at": "<time>",
+      "denied": [],
+      "message": "",
+      "unknown": null,
+      "snapshot": null,
+      "source": "scan",
+      "method": "hard",
+      "phase": "",
+      "fallback": "",
+      "mft_available": false,
+      "paused": false,
+      "monitor": {
+       "state": "running",
+       "detail": "",
+       "watcher": "inotify",
+       "watched_dirs": 6,
+       "polled_dirs": 0
+      }
+     }
+    }
+   ]
+  },
+  {
+   "i": 23,
+   "call": "tree.children",
+   "result": {
+    "total": 5,
+    "items": [
+     {
+      "id": "@$ROOT/small/b2",
+      "parent": "@$ROOT/small",
+      "name": "b2",
+      "kind": "dir",
+      "depth": 2,
+      "size": 200000,
+      "alloc": 204800,
+      "files": 1,
+      "dirs": 1,
+      "child_count": 1,
+      "mtime": "<time>",
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/small/a",
+      "parent": "@$ROOT/small",
+      "name": "a",
+      "kind": "dir",
+      "depth": 2,
+      "size": 50000,
+      "alloc": 53248,
+      "files": 1,
+      "dirs": 0,
+      "child_count": 1,
+      "mtime": "<time>",
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/small/new",
+      "parent": "@$ROOT/small",
+      "name": "new",
+      "kind": "dir",
+      "depth": 2,
+      "size": 30,
+      "alloc": 12288,
+      "files": 2,
+      "dirs": 1,
+      "child_count": 1,
+      "mtime": "<time>",
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/small/live.bin",
+      "parent": "@$ROOT/small",
+      "name": "live.bin",
+      "kind": "file",
+      "depth": 2,
+      "size": 7000,
+      "alloc": 8192,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": "<time>",
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "bin",
+      "flags": []
+     },
+     {
+      "id": "@$ROOT/small/top.bin",
+      "parent": "@$ROOT/small",
+      "name": "top.bin",
+      "kind": "file",
+      "depth": 2,
+      "size": 1000,
+      "alloc": 4096,
+      "files": 0,
+      "dirs": 0,
+      "child_count": 0,
+      "mtime": "<time>",
+      "ctime": 0,
+      "atime": "<time>",
+      "ext": "bin",
+      "flags": []
+     }
+    ]
+   }
+  },
+  {
+   "i": 25,
+   "call": "settings.update",
+   "result": {
+    "version": 1
+   }
+  },
+  {
+   "i": 27,
+   "call": "scan.status",
+   "result": {
+    "monitor": null
+   }
+  },
+  {
+   "i": 30,
+   "call": "tree.find",
+   "result": {
+    "node": null
+   }
+  },
+  {
+   "i": 32,
+   "call": "settings.update",
+   "result": {
+    "version": 2
+   }
+  },
+  {
+   "i": 33,
+   "until": "scan.status",
+   "met": true
+  },
+  {
+   "i": 34,
+   "call": "scan.status",
+   "result": {
+    "monitor": {
+     "state": "running",
+     "detail": "",
+     "watcher": "inotify",
+     "watched_dirs": 1,
+     "polled_dirs": 0
+    }
+   }
+  }
+ ]
+}

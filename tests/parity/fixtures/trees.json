@@ -1,0 +1,58 @@
+{
+  "comment": "Fixture trees of the parity scenarios (skparity/fixtures.py and parity_replay.rs build them). Sizes in bytes; `mtime` fixes every time of every entry; `*_days` are days before the moment the tree is built.",
+  "small": {
+    "mtime": 1600000000,
+    "files": [
+      {"path": "a/one.txt", "size": 10000},
+      {"path": "a/two.jpg", "size": 50000},
+      {"path": "b/c/three.mp4", "size": 200000},
+      {"path": "top.bin", "size": 1000}
+    ]
+  },
+  "standard": {
+    "mtime": 1600000000,
+    "files": [
+      {"path": "a/one.bin", "size": 1000},
+      {"path": "a/two.bin", "size": 5000},
+      {"path": "a/sub/movie.mp4", "size": 123456},
+      {"path": "c.txt", "size": 10},
+      {"path": "中文 文件夹/照片.jpg", "size": 2048},
+      {"path": "deep/l1/l2/l3/l4/x.dat", "size": 777},
+      {"path": "empty.dat", "size": 0},
+      {"path": "many/f{i3}.log", "size": 100, "step": 1, "range": 300}
+    ],
+    "dirs": ["b", "b/inner"]
+  },
+  "filter": {
+    "fill": "zero",
+    "files": [
+      {"path": "notes.txt", "size": 100, "created_days": 2, "modified_days": 2, "accessed_days": 1},
+      {"path": "big.txt", "size": 3000000, "created_days": 40, "modified_days": 10, "accessed_days": 2},
+      {"path": "photo.jpg", "size": 20000000, "created_days": 400, "modified_days": 40, "accessed_days": 10},
+      {"path": "app.log", "size": 5000, "created_days": 400, "modified_days": 400, "accessed_days": 400},
+      {"path": "exact4000.bin", "size": 4000, "created_days": 2, "modified_days": 2, "accessed_days": 2},
+      {"path": "README", "size": 10, "created_days": 10, "modified_days": 10, "accessed_days": 10},
+      {"path": "UPPER.TXT", "size": 2048, "created_days": 10, "modified_days": 10, "accessed_days": 10},
+      {"path": "a1.txt", "size": 1024, "created_days": 10, "modified_days": 10, "accessed_days": 10},
+      {"path": "music.mp3", "size": 4000000, "created_days": 10, "modified_days": 10, "accessed_days": 10, "hidden": true, "readonly": true},
+      {"path": "sub/movie.mp4", "size": 50000000, "created_days": 10, "modified_days": 2, "accessed_days": 1},
+      {"path": "sub/tiny.jpg", "size": 200, "created_days": 2, "modified_days": 10, "accessed_days": 2},
+      {"path": "sub/deeper/temp/x.txt", "size": 300, "created_days": 10, "modified_days": 10, "accessed_days": 10},
+      {"path": "temp/cache.txt", "size": 1500, "created_days": 2, "modified_days": 1, "accessed_days": 1, "hidden": true},
+      {"path": "temp/data.zip", "size": 8000000, "created_days": 2, "modified_days": 40, "accessed_days": 40, "readonly": true},
+      {"path": "Program Files/x/setup.exe", "size": 2000000, "created_days": 10, "modified_days": 10, "accessed_days": 10, "hidden": true, "system": true},
+      {"path": "zero.dat", "size": 0, "created_days": 10, "modified_days": 10, "accessed_days": 10}
+    ]
+  },
+  "units": {
+    "fill": "zero",
+    "files": [
+      {"path": "k1010.bin", "size": 1010, "created_days": 10, "modified_days": 10, "accessed_days": 10},
+      {"path": "m1030k.bin", "size": 1030000, "created_days": 10, "modified_days": 10, "accessed_days": 10},
+      {"path": "age30_5.bin", "size": 10, "created_days": 400, "modified_days": 30.5, "accessed_days": 400},
+      {"path": "age31_5.bin", "size": 10, "created_days": 400, "modified_days": 31.5, "accessed_days": 400},
+      {"path": "age365_5.bin", "size": 10, "created_days": 400, "modified_days": 365.5, "accessed_days": 400},
+      {"path": "age366_5.bin", "size": 10, "created_days": 400, "modified_days": 366.5, "accessed_days": 400}
+    ]
+  }
+}
