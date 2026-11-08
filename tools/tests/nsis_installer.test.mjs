@@ -42,7 +42,7 @@ function body(text, name) {
 const at = (lines, what) => lines.findIndex((l) => l.includes(what));
 
 test("nothing deletes a folder as a whole but the uninstaller's data and cache folders", () => {
-  const allowed = /^"\$(LOCALAPPDATA|APPDATA)\\(\$\{SK_DATA\}|\$\{BUNDLEID\}|spaceknife-electron|spaceknife-electron-updater)(\\(electron|Cache|updates))?"$/;
+  const allowed = /^"\$\{SK_(LOCALAPPDATA|APPDATA)\}\\(\$\{SK_DATA\}|\$\{BUNDLEID\}|spaceknife-electron|spaceknife-electron-updater)(\\(electron|Cache|updates))?"$/;
   const found = [];
   for (const name of readdirSync(windows).filter((n) => /\.(nsi|nsh)$/.test(n))) {
     for (const { line, inside } of codeLines(read(name))) {

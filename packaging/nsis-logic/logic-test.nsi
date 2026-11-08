@@ -7,10 +7,16 @@
 ; process started is cmd.exe standing in for the app (the "start" case). SkRunElevated, SkCloseIn,
 ; SkRemoveElectronBuilder and SkRemoveStockTauri are compiled in but never called.
 ;
+; The uninstaller's un.SkRemoveData runs in this program's own uninstaller (the "uninstaller" case
+; writes it, packaging/nsis-logic.mjs runs it with _?= so that it runs where it is, "removedata"):
+; its folders (SK_LOCALAPPDATA, SK_APPDATA) are the sandbox's Local and Roaming here, never the
+; user's. Its un.onInit does only that, its Uninstall section is empty.
+;
 ;   makensis -DSK_HELPERS=<spaceknife.nsh> -DSK_UTILS=<Tauri's utils.nsh> -DSK_PLUGINS=<dir> -DSK_OUT=<exe> logic-test.nsi
 
 Unicode true
 SilentInstall silent
+SilentUnInstall silent
 RequestExecutionLevel user
 OutFile "${SK_OUT}"
 Name "SpaceKnife installer logic test"
@@ -62,6 +68,12 @@ Var Out
 !define SK_WEBVIEW2_UPDATE TestWebView2Update
 Var TestWv2Updates
 
+; un.SkRemoveData's folders: in the sandbox ("removedata")
+Var TestLocal
+Var TestRoaming
+!define SK_LOCALAPPDATA "$TestLocal"
+!define SK_APPDATA "$TestRoaming"
+
 !include "${SK_HELPERS}"
 LangString skAppRunning 1033 "running"
 LangString installingWebview2 1033 "installing WebView2"
@@ -81,6 +93,8 @@ Function TestWebView2Update
   IntOp $TestWv2Updates $TestWv2Updates + 1
 FunctionEnd
 Section
+SectionEnd
+Section Uninstall
 SectionEnd
 
 !macro OUT TEXT
@@ -524,6 +538,82 @@ Function DropGuard
   !insertmacro EXISTS "kept" "$R8\Not-a-stage\keep.txt"
 FunctionEnd
 
+; un.SkRemoveData in the sandbox's Local and Roaming: the flags as the command line says
+; (un.SkParseFlags), the 「你的数据」 box as SK_LOGIC_BOX says (1 ticked, 0 not, "" no page: a silent
+; run), something else in %APPDATA%\SpaceKnife when SK_LOGIC_ROAMING_OTHER = 1, the program's
+; folder SK_LOGIC_INSTDIR (relative to the sandbox) when set, else $INSTDIR (_?=)
+Function un.RemoveData
+  Call un.SkParseFlags
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  ${If} $R8 == ""
+    !insertmacro OUT "error=no sandbox"
+    Return
+  ${EndIf}
+  StrCpy $TestLocal "$R8\Local"
+  StrCpy $TestRoaming "$R8\Roaming"
+  ReadEnvStr $0 SK_LOGIC_BOX
+  ${If} $0 == "1"
+    StrCpy $SkDeleteData 1
+  ${ElseIf} $0 == "0"
+    StrCpy $SkDeleteData 0
+  ${EndIf}
+  ReadEnvStr $0 SK_LOGIC_INSTDIR
+  ${If} $0 != ""
+    StrCpy $INSTDIR "$R8\$0"
+    !insertmacro PUT "$INSTDIR\user-file.txt" "the user's"
+  ${EndIf}
+  !insertmacro PUT "$TestLocal\spaceknife-electron-updater\installer.exe" "0.3.4"
+  !insertmacro PUT "$TestLocal\SpaceKnife\Cache\cache.bin" "cache"
+  !insertmacro PUT "$TestLocal\SpaceKnife\updates\SpaceKnife-0.3.6-Setup-x64.exe" "update"
+  !insertmacro PUT "$TestLocal\SpaceKnife\snapshots\C.sks" "the user's"
+  !insertmacro PUT "$TestLocal\SpaceKnife\settings.json" "the user's"
+  !insertmacro PUT "$TestLocal\${BUNDLEID}\theme.json" "the shell's"
+  !insertmacro PUT "$TestLocal\SpaceKnifeX\keep.txt" "someone else's"
+  !insertmacro PUT "$TestRoaming\SpaceKnife\electron\Preferences" "0.3.4"
+  !insertmacro PUT "$TestRoaming\spaceknife-electron\Preferences" "0.2"
+  !insertmacro PUT "$TestRoaming\${BUNDLEID}\state.json" "the shell's"
+  !insertmacro PUT "$TestRoaming\Other\keep.txt" "someone else's"
+  ReadEnvStr $0 SK_LOGIC_ROAMING_OTHER
+  ${If} $0 == "1"
+    !insertmacro PUT "$TestRoaming\SpaceKnife\other.txt" "something else"
+  ${EndIf}
+  !insertmacro OUT "update=$UpdateMode"
+  !insertmacro OUT "deletedata=$SkDeleteData"
+  Call un.SkRemoveData
+  !insertmacro EXISTS "updater" "$TestLocal\spaceknife-electron-updater\*.*"
+  !insertmacro EXISTS "cache" "$TestLocal\SpaceKnife\Cache\*.*"
+  !insertmacro EXISTS "updates" "$TestLocal\SpaceKnife\updates\*.*"
+  !insertmacro EXISTS "snapshots" "$TestLocal\SpaceKnife\snapshots\C.sks"
+  !insertmacro EXISTS "settings" "$TestLocal\SpaceKnife\settings.json"
+  !insertmacro EXISTS "local" "$TestLocal\SpaceKnife\*.*"
+  !insertmacro EXISTS "shell_local" "$TestLocal\${BUNDLEID}\*.*"
+  !insertmacro EXISTS "electron" "$TestRoaming\SpaceKnife\electron\*.*"
+  !insertmacro EXISTS "roaming" "$TestRoaming\SpaceKnife\*.*"
+  !insertmacro EXISTS "roaming_other" "$TestRoaming\SpaceKnife\other.txt"
+  !insertmacro EXISTS "electron_old" "$TestRoaming\spaceknife-electron\*.*"
+  !insertmacro EXISTS "shell_roaming" "$TestRoaming\${BUNDLEID}\*.*"
+  !insertmacro EXISTS "neighbours" "$TestLocal\SpaceKnifeX\keep.txt"
+  !insertmacro EXISTS "neighbours_roaming" "$TestRoaming\Other\keep.txt"
+  !insertmacro EXISTS "instdir_user" "$INSTDIR\user-file.txt"
+FunctionEnd
+
+Function un.onInit
+  ReadEnvStr $0 SK_LOGIC_OUT
+  FileOpen $Out "$0" w
+  ${If} $Out == ""
+    Abort
+  ${EndIf}
+  FileWriteUTF16LE /BOM $Out ""
+  ReadEnvStr $R9 SK_LOGIC_CASE
+  ${If} $R9 == "removedata"
+    Call un.RemoveData
+  ${Else}
+    !insertmacro OUT "error=the uninstaller has no case $R9"
+  ${EndIf}
+  FileClose $Out
+  Quit
+FunctionEnd
+
 Function .onInit
   ReadEnvStr $0 SK_LOGIC_OUT
   FileOpen $Out "$0" w
@@ -598,6 +688,16 @@ Function .onInit
     Call WebView2
   ${ElseIf} $R9 == "start"
     Call StartApp
+  ${ElseIf} $R9 == "uninstaller"
+    ; this program's own uninstaller (un.onInit above), for "removedata"
+    ReadEnvStr $0 SK_LOGIC_UNINSTALLER
+    ClearErrors
+    WriteUninstaller "$0"
+    ${If} ${Errors}
+      !insertmacro OUT "written=0"
+    ${Else}
+      !insertmacro OUT "written=1"
+    ${EndIf}
   ${Else}
     Call Staging
   ${EndIf}

@@ -13,9 +13,12 @@
 // nothing outside the folder), 0.3.4's own files (SkRemove034Files) and when its uninstaller may
 // run (SkOldUninstallerUse), the WebView2 minimum (SkWebView2Minimum, with stand-ins for reading
 // and updating the runtime), shortcuts (.lnk files in the sandbox: SkMigrateShortcut's target and
-// AppUserModelID) — and that the app the installer starts gets its environment (cmd.exe stands in
-// for it: on your own desktop run this from packaging/hidden-desktop.ps1, so its console window
-// stays out of sight). Windows only; it writes in a temporary folder only, never the registry.
+// AppUserModelID), what the uninstaller removes of SpaceKnife's own folders (un.SkRemoveData, in
+// the test program's own uninstaller, with a Local and a Roaming folder in the sandbox: 0.3.4's
+// rules for an update, the 「你的数据」 box and --delete-app-data) — and that the app the installer
+// starts gets its environment (cmd.exe stands in for it: on your own desktop run this from
+// packaging/hidden-desktop.ps1, so its console window stays out of sight). Windows only; it writes
+// in a temporary folder only, never the registry.
 //
 //   node packaging/nsis-logic.mjs [--makensis PATH] [--utils PATH] [--helpers PATH]
 //
@@ -81,11 +84,11 @@ try {
   mkdirSync(temp);
   let n = 0;
   /** One run: the case, its command line (as the process gets it, verbatim) -> Map key -> value. */
-  function run(kind, cmdline = "", extra = {}) {
+  function run(kind, cmdline = "", extra = {}, program = exe) {
     const out = join(sandbox, `out-${++n}.txt`);
     const box = join(sandbox, `box-${n}`);
     mkdirSync(box);
-    const r = spawnSync(exe, cmdline ? [cmdline] : [], {
+    const r = spawnSync(program, cmdline ? [cmdline] : [], {
       windowsVerbatimArguments: true,
       encoding: "utf8",
       timeout: 60_000,
@@ -290,6 +293,37 @@ try {
   {
     const { got } = run("dropguard");
     expect("SkDropStage leaves a folder it did not make", got, { kept: "1" });
+  }
+  {
+    // What the uninstaller removes of SpaceKnife's own folders (un.SkRemoveData), by the rules of
+    // 0.3.4's uninstaller (v0.3.4 apps/electron/build/installer.nsh, and electron-builder's own
+    // --delete-app-data part): run in this program's uninstaller, in the sandbox's Local and
+    // Roaming folders. It deletes folders, so only with a helpers file whose un.SkRemoveData names
+    // no folder of the user's: SK_LOCALAPPDATA and SK_APPDATA, which logic-test.nsi points here.
+    const source = readFileSync(helpers, "utf8");
+    const fn = /^Function un\.SkRemoveData\r?\n([\s\S]*?)^FunctionEnd/m.exec(source);
+    const code = fn ? fn[1].split(/\r?\n/).filter((l) => !/^\s*;/.test(l)).join("\n") : "";
+    if (!fn || /\$(LOCALAPPDATA|APPDATA|PROFILE|TEMP)\b/i.test(code) || !/^!ifndef SK_LOCALAPPDATA$/m.test(source) || !/^!ifndef SK_APPDATA$/m.test(source)) {
+      throw new Error(`${helpers}: un.SkRemoveData does not work in SK_LOCALAPPDATA and SK_APPDATA only; not run (it would delete the user's own folders)`);
+    }
+    const uninstaller = join(sandbox, "logic-un.exe");
+    const { got: written } = run("uninstaller", "", { SK_LOGIC_UNINSTALLER: uninstaller });
+    if (written.get("written") !== "1" || !existsSync(uninstaller)) throw new Error("the test program wrote no uninstaller");
+    const kept = { updater: "1", cache: "1", updates: "1", snapshots: "1", settings: "1", local: "1", shell_local: "1", electron: "1", roaming: "1", roaming_other: "1", electron_old: "1", shell_roaming: "1", neighbours: "1", neighbours_roaming: "1" };
+    // an uninstall: electron-builder's copy of its installer, 0.3.4's Chromium profiles, the
+    // shell's folders, the backend's cache and updates; %APPDATA%\SpaceKnife only when empty
+    const caches = { ...kept, updater: "0", cache: "0", updates: "0", shell_local: "0", electron: "0", electron_old: "0", shell_roaming: "0" };
+    const data = { snapshots: "0", settings: "0", local: "0" };
+    const roaming = { roaming: "0", roaming_other: "0" };
+    for (const [what, cmdline, env, want] of [
+      ["an uninstall: the caches go, %APPDATA%\\SpaceKnife with something else in it stays", "/S", { SK_LOGIC_ROAMING_OTHER: "1" }, caches],
+      ["an uninstall: an empty %APPDATA%\\SpaceKnife goes", "/S", {}, { ...caches, ...roaming }],
+      ["the box: an empty %APPDATA%\\SpaceKnife goes", "/S", { SK_LOGIC_BOX: "1" }, { ...caches, ...data, ...roaming }],
+      ["--delete-app-data: the data and %APPDATA%\\SpaceKnife as a whole", "/S --delete-app-data", { SK_LOGIC_ROAMING_OTHER: "1" }, { ...caches, ...data, ...roaming }],
+    ]) {
+      const { got } = run("removedata", `${cmdline} _?=${sandbox}\\Programs\\SpaceKnife`, env, uninstaller);
+      expect(`un.SkRemoveData: ${what}`, got, want, ["error", "update", "deletedata"]);
+    }
   }
   {
     // the app the installer starts after an update gets the installer's environment (0.3.4's

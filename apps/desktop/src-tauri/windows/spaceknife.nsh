@@ -1316,6 +1316,15 @@ Function un.SkDetectScope
   Call un.SkRestoreContext
 FunctionEnd
 
+; The shell's folders un.SkRemoveData works in: the uninstalling user's own (the logic test,
+; packaging/nsis-logic/logic-test.nsi, points them into its sandbox).
+!ifndef SK_LOCALAPPDATA
+  !define SK_LOCALAPPDATA "$LOCALAPPDATA"
+!endif
+!ifndef SK_APPDATA
+  !define SK_APPDATA "$APPDATA"
+!endif
+
 ; What SpaceKnife keeps for itself only: always gone after an uninstall (not after an update).
 ; With $SkDeleteData = 1 the snapshots, settings and logs go too. The uninstalling user's folders,
 ; also for a per-machine installation (installer.nsh of 0.3.4 did the same).
@@ -1326,29 +1335,29 @@ Function un.SkRemoveData
   SetShellVarContext current
   ; electron-builder's copy of its installer (0.3.4), 0.3.4's Chromium profile, the shell's own
   ; folder of 0.3.5+ (WebView2 profile, theme.json), the backend's cache and downloaded updates
-  RMDir /r "$LOCALAPPDATA\spaceknife-electron-updater"
-  ${If} $APPDATA != ""
-    RMDir /r "$APPDATA\${SK_DATA}\electron"
-    RMDir "$APPDATA\${SK_DATA}"
-    RMDir /r "$APPDATA\spaceknife-electron"
-    RMDir /r "$APPDATA\${BUNDLEID}"
+  RMDir /r "${SK_LOCALAPPDATA}\spaceknife-electron-updater"
+  ${If} ${SK_APPDATA} != ""
+    RMDir /r "${SK_APPDATA}\${SK_DATA}\electron"
+    RMDir "${SK_APPDATA}\${SK_DATA}"
+    RMDir /r "${SK_APPDATA}\spaceknife-electron"
+    RMDir /r "${SK_APPDATA}\${BUNDLEID}"
   ${EndIf}
-  ${If} $LOCALAPPDATA != ""
-    RMDir /r "$LOCALAPPDATA\${BUNDLEID}"
-    RMDir /r "$LOCALAPPDATA\${SK_DATA}\Cache"
-    RMDir /r "$LOCALAPPDATA\${SK_DATA}\updates"
+  ${If} ${SK_LOCALAPPDATA} != ""
+    RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
+    RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\Cache"
+    RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\updates"
     ${If} $SkDeleteData = 1
       ; never when the program itself is in there (a pathological 0.3.4 folder choice)
       StrCpy $R0 $INSTDIR
       Call un.SkNormalize
       StrCpy $R2 $R0
-      StrCpy $R0 "$LOCALAPPDATA\${SK_DATA}"
+      StrCpy $R0 "${SK_LOCALAPPDATA}\${SK_DATA}"
       Call un.SkNormalize
       StrCpy $R3 $R0
       Call un.SkRelation
       ${If} $R4 == ""
-        RMDir /r "$LOCALAPPDATA\${SK_DATA}"
-        RMDir /r "$APPDATA\${SK_DATA}"
+        RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}"
+        RMDir /r "${SK_APPDATA}\${SK_DATA}"
       ${EndIf}
     ${EndIf}
   ${EndIf}
