@@ -2,6 +2,7 @@
   "name": "handshake",
   "description": "The ready line, session.hello and its refusals (docs/protocol.md §1-2): wrong token, other major version, missing subprotocol, a first frame that is binary / not hello / not JSON, bad hello params, other paths, foreign origins, the hello timeout.",
   "args": ["--hello-timeout", "1"],
+  "normalize": {"shape_keys": ["release"]},
   "steps": [
     {"ready": true},
     {"hello": true},
