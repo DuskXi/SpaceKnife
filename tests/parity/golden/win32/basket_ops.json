@@ -1,0 +1,757 @@
+{
+ "format": 1,
+ "scenario": "basket_ops",
+ "platform": "win32",
+ "steps": [
+  {
+   "i": 1,
+   "call": "basket.list",
+   "result": {
+    "items": [],
+    "volumes": [],
+    "freeable": 0
+   }
+  },
+  {
+   "i": 3,
+   "wait_scan": {
+    "state": "done"
+   },
+   "monotonic": true
+  },
+  {
+   "i": 8,
+   "call": "basket.add",
+   "result": {
+    "state": {
+     "items": [
+      {
+       "id": "<basket#1>",
+       "scan_id": "<scan#1>",
+       "path": "$ROOT/tree/a/one.txt",
+       "name": "one.txt",
+       "kind": "file",
+       "members": 0,
+       "alloc": 12288,
+       "size": 10000,
+       "files": 1,
+       "dirs": 0,
+       "volume": "string",
+       "status": "ready",
+       "note": "",
+       "tag": null
+      }
+     ],
+     "volumes": [
+      {
+       "mount_point": "C:\\",
+       "total": 4095289061376,
+       "freeable": 12288,
+       "trash": true,
+       "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+      }
+     ],
+     "freeable": 12288
+    },
+    "added": 1,
+    "merged": 0,
+    "absorbed": 0,
+    "refused": []
+   }
+  },
+  {
+   "i": 9,
+   "events": "basket.changed",
+   "got": [
+    {
+     "state": {
+      "items": [
+       {
+        "id": "<basket#1>",
+        "scan_id": "<scan#1>",
+        "path": "$ROOT/tree/a/one.txt",
+        "name": "one.txt",
+        "kind": "file",
+        "members": 0,
+        "alloc": 12288,
+        "size": 10000,
+        "files": 1,
+        "dirs": 0,
+        "volume": "string",
+        "status": "ready",
+        "note": "",
+        "tag": null
+       }
+      ],
+      "volumes": [
+       {
+        "mount_point": "C:\\",
+        "total": 4095289061376,
+        "freeable": 12288,
+        "trash": true,
+        "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+       }
+      ],
+      "freeable": 12288
+     }
+    }
+   ]
+  },
+  {
+   "i": 10,
+   "call": "basket.add",
+   "result": {
+    "state": {
+     "items": [
+      {
+       "id": "<basket#2>",
+       "scan_id": "<scan#1>",
+       "path": "$ROOT/tree/a",
+       "name": "a",
+       "kind": "dir",
+       "members": 0,
+       "alloc": 65536,
+       "size": 60000,
+       "files": 2,
+       "dirs": 0,
+       "volume": "string",
+       "status": "ready",
+       "note": "",
+       "tag": null
+      },
+      {
+       "id": "<basket#3>",
+       "scan_id": "<scan#1>",
+       "path": "$ROOT/tree/top.bin",
+       "name": "top.bin",
+       "kind": "file",
+       "members": 0,
+       "alloc": 4096,
+       "size": 1000,
+       "files": 1,
+       "dirs": 0,
+       "volume": "string",
+       "status": "ready",
+       "note": "",
+       "tag": null
+      }
+     ],
+     "volumes": [
+      {
+       "mount_point": "C:\\",
+       "total": 4095289061376,
+       "freeable": 69632,
+       "trash": true,
+       "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+      }
+     ],
+     "freeable": 69632
+    },
+    "added": 2,
+    "merged": 0,
+    "absorbed": 1,
+    "refused": []
+   }
+  },
+  {
+   "i": 11,
+   "events": "basket.changed",
+   "got": [
+    {
+     "state": {
+      "items": [
+       {
+        "id": "<basket#2>",
+        "scan_id": "<scan#1>",
+        "path": "$ROOT/tree/a",
+        "name": "a",
+        "kind": "dir",
+        "members": 0,
+        "alloc": 65536,
+        "size": 60000,
+        "files": 2,
+        "dirs": 0,
+        "volume": "string",
+        "status": "ready",
+        "note": "",
+        "tag": null
+       },
+       {
+        "id": "<basket#3>",
+        "scan_id": "<scan#1>",
+        "path": "$ROOT/tree/top.bin",
+        "name": "top.bin",
+        "kind": "file",
+        "members": 0,
+        "alloc": 4096,
+        "size": 1000,
+        "files": 1,
+        "dirs": 0,
+        "volume": "string",
+        "status": "ready",
+        "note": "",
+        "tag": null
+       }
+      ],
+      "volumes": [
+       {
+        "mount_point": "C:\\",
+        "total": 4095289061376,
+        "freeable": 69632,
+        "trash": true,
+        "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+       }
+      ],
+      "freeable": 69632
+     }
+    }
+   ]
+  },
+  {
+   "i": 12,
+   "call": "basket.add",
+   "result": {
+    "state": {
+     "items": [
+      {
+       "id": "<basket#2>",
+       "scan_id": "<scan#1>",
+       "path": "$ROOT/tree/a",
+       "name": "a",
+       "kind": "dir",
+       "members": 0,
+       "alloc": 65536,
+       "size": 60000,
+       "files": 2,
+       "dirs": 0,
+       "volume": "string",
+       "status": "ready",
+       "note": "",
+       "tag": null
+      },
+      {
+       "id": "<basket#3>",
+       "scan_id": "<scan#1>",
+       "path": "$ROOT/tree/top.bin",
+       "name": "top.bin",
+       "kind": "file",
+       "members": 0,
+       "alloc": 4096,
+       "size": 1000,
+       "files": 1,
+       "dirs": 0,
+       "volume": "string",
+       "status": "ready",
+       "note": "",
+       "tag": null
+      }
+     ],
+     "volumes": [
+      {
+       "mount_point": "C:\\",
+       "total": 4095289061376,
+       "freeable": 69632,
+       "trash": true,
+       "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+      }
+     ],
+     "freeable": 69632
+    },
+    "added": 0,
+    "merged": 1,
+    "absorbed": 0,
+    "refused": []
+   }
+  },
+  {
+   "i": 13,
+   "call": "basket.add",
+   "result": {
+    "state": {
+     "items": [
+      {
+       "id": "<basket#2>",
+       "scan_id": "<scan#1>",
+       "path": "$ROOT/tree/a",
+       "name": "a",
+       "kind": "dir",
+       "members": 0,
+       "alloc": 65536,
+       "size": 60000,
+       "files": 2,
+       "dirs": 0,
+       "volume": "string",
+       "status": "ready",
+       "note": "",
+       "tag": null
+      },
+      {
+       "id": "<basket#3>",
+       "scan_id": "<scan#1>",
+       "path": "$ROOT/tree/top.bin",
+       "name": "top.bin",
+       "kind": "file",
+       "members": 0,
+       "alloc": 4096,
+       "size": 1000,
+       "files": 1,
+       "dirs": 0,
+       "volume": "string",
+       "status": "ready",
+       "note": "",
+       "tag": null
+      }
+     ],
+     "volumes": [
+      {
+       "mount_point": "C:\\",
+       "total": 4095289061376,
+       "freeable": 69632,
+       "trash": true,
+       "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+      }
+     ],
+     "freeable": 69632
+    },
+    "added": 0,
+    "merged": 0,
+    "absorbed": 0,
+    "refused": [
+     {
+      "path": "999999",
+      "reason": "This item isn't in the scan results"
+     }
+    ]
+   }
+  },
+  {
+   "i": 14,
+   "call": "basket.add",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  },
+  {
+   "i": 15,
+   "call": "basket.list",
+   "result": {
+    "items": [
+     {
+      "id": "<basket#2>",
+      "scan_id": "<scan#1>",
+      "path": "$ROOT/tree/a",
+      "name": "a",
+      "kind": "dir",
+      "members": 0,
+      "alloc": 65536,
+      "size": 60000,
+      "files": 2,
+      "dirs": 0,
+      "volume": "string",
+      "status": "ready",
+      "note": "",
+      "tag": null
+     },
+     {
+      "id": "<basket#3>",
+      "scan_id": "<scan#1>",
+      "path": "$ROOT/tree/top.bin",
+      "name": "top.bin",
+      "kind": "file",
+      "members": 0,
+      "alloc": 4096,
+      "size": 1000,
+      "files": 1,
+      "dirs": 0,
+      "volume": "string",
+      "status": "ready",
+      "note": "",
+      "tag": null
+     }
+    ],
+    "volumes": [
+     {
+      "mount_point": "C:\\",
+      "total": 4095289061376,
+      "freeable": 69632,
+      "trash": true,
+      "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+     }
+    ],
+    "freeable": 69632
+   }
+  },
+  {
+   "i": 16,
+   "call": "basket.remove",
+   "result": {
+    "items": [
+     {
+      "id": "<basket#2>",
+      "scan_id": "<scan#1>",
+      "path": "$ROOT/tree/a",
+      "name": "a",
+      "kind": "dir",
+      "members": 0,
+      "alloc": 65536,
+      "size": 60000,
+      "files": 2,
+      "dirs": 0,
+      "volume": "string",
+      "status": "ready",
+      "note": "",
+      "tag": null
+     }
+    ],
+    "volumes": [
+     {
+      "mount_point": "C:\\",
+      "total": 4095289061376,
+      "freeable": 65536,
+      "trash": true,
+      "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+     }
+    ],
+    "freeable": 65536
+   }
+  },
+  {
+   "i": 17,
+   "events": "basket.changed",
+   "got": [
+    {
+     "state": {
+      "items": [
+       {
+        "id": "<basket#2>",
+        "scan_id": "<scan#1>",
+        "path": "$ROOT/tree/a",
+        "name": "a",
+        "kind": "dir",
+        "members": 0,
+        "alloc": 65536,
+        "size": 60000,
+        "files": 2,
+        "dirs": 0,
+        "volume": "string",
+        "status": "ready",
+        "note": "",
+        "tag": null
+       },
+       {
+        "id": "<basket#3>",
+        "scan_id": "<scan#1>",
+        "path": "$ROOT/tree/top.bin",
+        "name": "top.bin",
+        "kind": "file",
+        "members": 0,
+        "alloc": 4096,
+        "size": 1000,
+        "files": 1,
+        "dirs": 0,
+        "volume": "string",
+        "status": "ready",
+        "note": "",
+        "tag": null
+       }
+      ],
+      "volumes": [
+       {
+        "mount_point": "C:\\",
+        "total": 4095289061376,
+        "freeable": 69632,
+        "trash": true,
+        "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+       }
+      ],
+      "freeable": 69632
+     }
+    }
+   ]
+  },
+  {
+   "i": 18,
+   "call": "basket.remove",
+   "result": {
+    "items": [
+     {
+      "id": "<basket#2>",
+      "scan_id": "<scan#1>",
+      "path": "$ROOT/tree/a",
+      "name": "a",
+      "kind": "dir",
+      "members": 0,
+      "alloc": 65536,
+      "size": 60000,
+      "files": 2,
+      "dirs": 0,
+      "volume": "string",
+      "status": "ready",
+      "note": "",
+      "tag": null
+     }
+    ],
+    "volumes": [
+     {
+      "mount_point": "C:\\",
+      "total": 4095289061376,
+      "freeable": 65536,
+      "trash": true,
+      "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+     }
+    ],
+    "freeable": 65536
+   }
+  },
+  {
+   "i": 19,
+   "call": "basket.clear",
+   "result": {
+    "items": [],
+    "volumes": [],
+    "freeable": 0
+   }
+  },
+  {
+   "i": 20,
+   "events": "basket.changed",
+   "got": [
+    {
+     "state": {
+      "items": [
+       {
+        "id": "<basket#2>",
+        "scan_id": "<scan#1>",
+        "path": "$ROOT/tree/a",
+        "name": "a",
+        "kind": "dir",
+        "members": 0,
+        "alloc": 65536,
+        "size": 60000,
+        "files": 2,
+        "dirs": 0,
+        "volume": "string",
+        "status": "ready",
+        "note": "",
+        "tag": null
+       },
+       {
+        "id": "<basket#3>",
+        "scan_id": "<scan#1>",
+        "path": "$ROOT/tree/top.bin",
+        "name": "top.bin",
+        "kind": "file",
+        "members": 0,
+        "alloc": 4096,
+        "size": 1000,
+        "files": 1,
+        "dirs": 0,
+        "volume": "string",
+        "status": "ready",
+        "note": "",
+        "tag": null
+       }
+      ],
+      "volumes": [
+       {
+        "mount_point": "C:\\",
+        "total": 4095289061376,
+        "freeable": 69632,
+        "trash": true,
+        "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+       }
+      ],
+      "freeable": 69632
+     }
+    }
+   ]
+  },
+  {
+   "i": 23,
+   "call": "basket.execute",
+   "result": {
+    "task_id": "<task#1>",
+    "mode": "delete",
+    "total": 2,
+    "delay_s": 5.0
+   }
+  },
+  {
+   "i": 24,
+   "events": "ops.progress",
+   "got": [
+    {
+     "task_id": "<task#1>",
+     "mode": "delete",
+     "done": 0,
+     "total": 2,
+     "current": "",
+     "phase": "waiting",
+     "results": [],
+     "freed": 0,
+     "can_undo": true
+    }
+   ]
+  },
+  {
+   "i": 25,
+   "call": "ops.undo",
+   "result": {}
+  },
+  {
+   "i": 26,
+   "events": "ops.progress",
+   "got": [
+    {
+     "task_id": "<task#1>",
+     "mode": "delete",
+     "done": 0,
+     "total": 2,
+     "current": "",
+     "phase": "undone",
+     "results": [],
+     "freed": 0,
+     "can_undo": false
+    }
+   ]
+  },
+  {
+   "i": 27,
+   "call": "tree.find",
+   "result": {
+    "node": {
+     "id": "@$ROOT/tree/top.bin",
+     "parent": "@$ROOT/tree",
+     "name": "top.bin",
+     "kind": "file",
+     "depth": 2,
+     "size": 1000,
+     "alloc": 4096,
+     "files": 0,
+     "dirs": 0,
+     "child_count": 0,
+     "mtime": 1600000000,
+     "ctime": "<time>",
+     "atime": "<time>",
+     "ext": "bin",
+     "flags": [
+      "archive"
+     ]
+    }
+   }
+  },
+  {
+   "i": 28,
+   "call": "basket.list",
+   "result": {
+    "items": [
+     {
+      "id": "<basket#4>",
+      "scan_id": "<scan#1>",
+      "path": "$ROOT/tree/b/c/three.mp4",
+      "name": "three.mp4",
+      "kind": "file",
+      "members": 0,
+      "alloc": 200704,
+      "size": 200000,
+      "files": 1,
+      "dirs": 0,
+      "volume": "string",
+      "status": "ready",
+      "note": "",
+      "tag": null
+     },
+     {
+      "id": "<basket#3>",
+      "scan_id": "<scan#1>",
+      "path": "$ROOT/tree/top.bin",
+      "name": "top.bin",
+      "kind": "file",
+      "members": 0,
+      "alloc": 4096,
+      "size": 1000,
+      "files": 1,
+      "dirs": 0,
+      "volume": "string",
+      "status": "ready",
+      "note": "",
+      "tag": null
+     }
+    ],
+    "volumes": [
+     {
+      "mount_point": "C:\\",
+      "total": 4095289061376,
+      "freeable": 204800,
+      "trash": true,
+      "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+     }
+    ],
+    "freeable": 204800
+   }
+  },
+  {
+   "i": 29,
+   "call": "basket.execute",
+   "result": {
+    "task_id": "<task#2>",
+    "mode": "delete",
+    "total": 2,
+    "delay_s": 5.0
+   }
+  },
+  {
+   "i": 30,
+   "events": "ops.progress",
+   "got": [
+    {
+     "task_id": "<task#2>",
+     "mode": "delete",
+     "done": 0,
+     "total": 2,
+     "current": "",
+     "phase": "waiting",
+     "results": [],
+     "freed": 0,
+     "can_undo": true
+    }
+   ]
+  },
+  {
+   "i": 31,
+   "call": "ops.cancel",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 32,
+   "call": "ops.undo",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 33,
+   "call": "basket.execute",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "mode"
+    ]
+   }
+  },
+  {
+   "i": 34,
+   "call": "basket.clear",
+   "result": {
+    "items": [],
+    "volumes": [],
+    "freeable": 0
+   }
+  }
+ ]
+}

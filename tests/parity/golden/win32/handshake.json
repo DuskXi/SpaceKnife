@@ -1,0 +1,313 @@
+{
+ "format": 1,
+ "scenario": "handshake",
+ "platform": "win32",
+ "steps": [
+  {
+   "i": 0,
+   "ready": {
+    "event": "ready",
+    "host": "127.0.0.1",
+    "protocol": "1.1",
+    "subprotocol": "spaceknife.v1",
+    "updates_dir": "$HOME/data/updates"
+   }
+  },
+  {
+   "i": 1,
+   "hello": {
+    "protocol": "1.1",
+    "server": {
+     "name": "spaceknife-backend",
+     "platform": "win32"
+    },
+    "session_id": "<session#1>",
+    "capabilities": [
+     "binary-frames.v1",
+     "cancel",
+     "layout.flame.v1",
+     "layout.polar.v1",
+     "log-stream",
+     "subscriptions",
+     "updates.v1",
+     "visuals.v1"
+    ],
+    "limits": {
+     "max_inbound_message_bytes": 1048576,
+     "max_outbound_chunk_bytes": 4194304,
+     "hello_timeout_s": 1.0
+    }
+   }
+  },
+  {
+   "i": 2,
+   "handshake": {
+    "error": {
+     "code": -32001,
+     "loc": null
+    },
+    "close_code": 4401
+   }
+  },
+  {
+   "i": 3,
+   "handshake": {
+    "error": {
+     "code": -32003,
+     "loc": null
+    },
+    "close_code": 4426
+   }
+  },
+  {
+   "i": 4,
+   "handshake": {
+    "result": {
+     "protocol": "1.1",
+     "capabilities": [
+      "binary-frames.v1",
+      "cancel",
+      "layout.flame.v1",
+      "layout.polar.v1",
+      "log-stream",
+      "subscriptions",
+      "updates.v1",
+      "visuals.v1"
+     ]
+    }
+   }
+  },
+  {
+   "i": 5,
+   "handshake": {
+    "result": {
+     "protocol": "1.1",
+     "capabilities": [
+      "binary-frames.v1",
+      "cancel",
+      "layout.flame.v1",
+      "layout.polar.v1",
+      "log-stream",
+      "subscriptions",
+      "updates.v1",
+      "visuals.v1"
+     ]
+    }
+   }
+  },
+  {
+   "i": 6,
+   "handshake": {
+    "error": {
+     "code": -32602,
+     "loc": [
+      "protocol"
+     ]
+    },
+    "close_code": 4400
+   }
+  },
+  {
+   "i": 7,
+   "handshake": {
+    "http_status": 400
+   }
+  },
+  {
+   "i": 8,
+   "handshake": {
+    "close_code": 4400
+   }
+  },
+  {
+   "i": 9,
+   "handshake": {
+    "error": {
+     "code": -32002,
+     "loc": null
+    },
+    "close_code": 4401
+   }
+  },
+  {
+   "i": 10,
+   "handshake": {
+    "error": {
+     "code": -32700,
+     "loc": null
+    },
+    "close_code": 4400
+   }
+  },
+  {
+   "i": 11,
+   "handshake": {
+    "error": {
+     "code": -32602,
+     "loc": [
+      "protocol"
+     ]
+    },
+    "close_code": 4400
+   }
+  },
+  {
+   "i": 12,
+   "handshake": {
+    "error": {
+     "code": -32602,
+     "loc": [
+      "extra"
+     ]
+    },
+    "close_code": 4400
+   }
+  },
+  {
+   "i": 13,
+   "handshake": {
+    "close_code": 4408
+   }
+  },
+  {
+   "i": 14,
+   "handshake": {
+    "http_status": 404
+   }
+  },
+  {
+   "i": 15,
+   "handshake": {
+    "http_status": 404
+   }
+  },
+  {
+   "i": 16,
+   "handshake": {
+    "http_status": 403
+   }
+  },
+  {
+   "i": 17,
+   "handshake": {
+    "result": {
+     "protocol": "1.1",
+     "capabilities": [
+      "binary-frames.v1",
+      "cancel",
+      "layout.flame.v1",
+      "layout.polar.v1",
+      "log-stream",
+      "subscriptions",
+      "updates.v1",
+      "visuals.v1"
+     ]
+    }
+   }
+  },
+  {
+   "i": 18,
+   "handshake": {
+    "result": {
+     "protocol": "1.1",
+     "capabilities": [
+      "subscriptions"
+     ]
+    }
+   }
+  },
+  {
+   "i": 19,
+   "call": "system.ping",
+   "result": {
+    "payload": "parity",
+    "server_time": "<time>"
+   }
+  },
+  {
+   "i": 20,
+   "call": "system.ping",
+   "result": {
+    "payload": null,
+    "server_time": "<time>"
+   }
+  },
+  {
+   "i": 21,
+   "call": "system.info",
+   "result": {
+    "server": {
+     "name": "spaceknife-backend",
+     "platform": "win32"
+    },
+    "started_at": "<time>",
+    "platform": {
+     "system": "Windows",
+     "release": "11",
+     "machine": "AMD64"
+    },
+    "sessions": 1,
+    "full_disk_access": null
+   }
+  },
+  {
+   "i": 22,
+   "call": "session.hello",
+   "error": {
+    "code": -32600,
+    "loc": null
+   }
+  },
+  {
+   "i": 24,
+   "call": "visual.list",
+   "result": {
+    "visuals": [
+     {
+      "id": "treemap",
+      "layout": "drawlist.v1",
+      "name": "Treemap",
+      "icon": "vizTreemap",
+      "order": 0,
+      "compare": true,
+      "free_space": true,
+      "default_color": "class",
+      "available": true,
+      "reason": null
+     },
+     {
+      "id": "flame",
+      "layout": "flame.v1",
+      "name": "Flame graph",
+      "icon": "vizFlame",
+      "order": 1,
+      "compare": true,
+      "free_space": true,
+      "default_color": "branch",
+      "available": false,
+      "reason": "This window can't show this visualization"
+     },
+     {
+      "id": "flame_polar",
+      "layout": "polar.v1",
+      "name": "Polar flame graph",
+      "icon": "vizFlamePolar",
+      "order": 2,
+      "compare": true,
+      "free_space": true,
+      "default_color": "branch",
+      "available": false,
+      "reason": "This window can't show this visualization"
+     }
+    ]
+   }
+  },
+  {
+   "i": 25,
+   "call": "system.info",
+   "result": {
+    "sessions": 2
+   }
+  }
+ ]
+}

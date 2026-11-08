@@ -1,0 +1,52 @@
+{
+  "format": 1,
+  "comment": "Normalization rules shared by tests/parity/skparity/norm.py and crates/sk-server/tests/parity_replay.rs (README.md, 'Normalization').",
+  "drop_keys": [
+    "schema_hash",
+    "pid",
+    "elapsed_s",
+    "rate",
+    "byte_rate",
+    "remaining_s",
+    "layout_ms",
+    "request_id",
+    "current_path",
+    "free",
+    "used"
+  ],
+  "drop_in": {
+    "monitor": ["events", "changes", "overflows", "pending", "last_apply_ms"]
+  },
+  "shape_keys": ["volume", "io"],
+  "server_info_drop": ["python", "rust", "version"],
+  "server_info_marker": ["name", "platform"],
+  "time_keys": [
+    "started_at",
+    "finished_at",
+    "created_at",
+    "checked_at",
+    "last_check",
+    "last_success",
+    "next_check_at",
+    "published_at",
+    "saved_at",
+    "atime",
+    "ctime"
+  ],
+  "id_keys": {
+    "session_id": "session",
+    "scan_id": "scan",
+    "view_id": "view",
+    "sub": "sub",
+    "compare_id": "compare",
+    "task_id": "task"
+  },
+  "symbol_markers": [
+    {"marker": ["id", "path", "scan_id", "members"], "key": "id", "kind": "basket"}
+  ],
+  "node_keys": ["node", "parent", "zoom_node"],
+  "key_keys": ["key", "zoom_key", "selected"],
+  "node_info_marker": ["id", "parent", "name", "kind"],
+  "float_rel_tol": 1e-9,
+  "f4_rel_tol": 1e-6
+}

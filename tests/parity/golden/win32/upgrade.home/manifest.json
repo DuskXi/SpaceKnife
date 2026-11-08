@@ -1,0 +1,33 @@
+{
+ "keys": [
+  [
+   "$ROOT/tree"
+  ]
+ ],
+ "files": [
+  {
+   "path": "config/class_folders.json",
+   "data": "files/000"
+  },
+  {
+   "path": "config/classes.json",
+   "data": "files/001"
+  },
+  {
+   "path": "config/settings.json",
+   "data": "files/002"
+  },
+  {
+   "path": "data/palette_recent.json",
+   "data": "files/003"
+  },
+  {
+   "path": "data/tags/{key:0}.json",
+   "data": "files/004"
+  },
+  {
+   "path": "data/update.json",
+   "data": "files/005"
+  }
+ ]
+}

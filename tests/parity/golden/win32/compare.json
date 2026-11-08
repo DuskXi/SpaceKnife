@@ -1,0 +1,949 @@
+{
+ "format": 1,
+ "scenario": "compare",
+ "platform": "win32",
+ "steps": [
+  {
+   "i": 1,
+   "wait_scan": {
+    "state": "done",
+    "items": 319,
+    "snapshot": "$HOME/data/snapshots/tree-cba9c776aa29/<stamp>.sks",
+    "expected_items": null
+   },
+   "monotonic": true
+  },
+  {
+   "i": 2,
+   "call": "snapshot.list",
+   "result": {
+    "snapshots": [
+     {
+      "path": "$HOME/data/snapshots/tree-cba9c776aa29/<stamp>.sks",
+      "created_at": "<time>",
+      "roots": [
+       "$ROOT/tree"
+      ],
+      "node_count": 320,
+      "bytes_alloc": 147456,
+      "files": 307,
+      "file_bytes": 5865,
+      "method": "hard"
+     }
+    ]
+   }
+  },
+  {
+   "i": 3,
+   "call": "scan.close",
+   "result": {}
+  },
+  {
+   "i": 9,
+   "call": "scan.start",
+   "result": {
+    "expected_items": 319
+   }
+  },
+  {
+   "i": 10,
+   "wait_scan": {
+    "state": "done",
+    "items": 19,
+    "expected_items": 319
+   },
+   "monotonic": true
+  },
+  {
+   "i": 11,
+   "call": "compare.sources",
+   "result": {
+    "snapshots": [
+     {
+      "path": "$HOME/data/snapshots/tree-cba9c776aa29/<stamp>.sks",
+      "created_at": "<time>",
+      "roots": [
+       "$ROOT/tree"
+      ],
+      "node_count": 320,
+      "bytes_alloc": 147456,
+      "files": 307,
+      "file_bytes": 5865,
+      "method": "hard"
+     }
+    ],
+    "now": {
+     "kind": "now",
+     "path": null,
+     "created_at": "<time>",
+     "bytes_alloc": 458752,
+     "node_count": 20
+    },
+    "now_note": ""
+   }
+  },
+  {
+   "i": 12,
+   "call": "compare.open",
+   "result": {
+    "compare_id": "<compare#1>"
+   }
+  },
+  {
+   "i": 13,
+   "events": "compare.progress",
+   "got": [
+    {
+     "compare_id": "<compare#1>",
+     "phase": "ready",
+     "progress": 1.0,
+     "message": "",
+     "info": {
+      "compare_id": "<compare#1>",
+      "scan_id": "<scan#2>",
+      "base": {
+       "kind": "snapshot",
+       "path": "$HOME/data/snapshots/tree-cba9c776aa29/<stamp>.sks",
+       "created_at": "<time>",
+       "bytes_alloc": 147456,
+       "node_count": 320
+      },
+      "target": {
+       "kind": "now",
+       "path": null,
+       "created_at": "<time>",
+       "bytes_alloc": 458752,
+       "node_count": 20
+      },
+      "grow": 311296,
+      "shrink": 0,
+      "changed": 4,
+      "nodes": 5,
+      "live": true,
+      "revision": 0
+     }
+    }
+   ]
+  },
+  {
+   "i": 14,
+   "call": "compare.info",
+   "result": {
+    "compare_id": "<compare#1>",
+    "scan_id": "<scan#2>",
+    "base": {
+     "kind": "snapshot",
+     "path": "$HOME/data/snapshots/tree-cba9c776aa29/<stamp>.sks",
+     "created_at": "<time>",
+     "bytes_alloc": 147456,
+     "node_count": 320
+    },
+    "target": {
+     "kind": "now",
+     "path": null,
+     "created_at": "<time>",
+     "bytes_alloc": 458752,
+     "node_count": 20
+    },
+    "grow": 311296,
+    "shrink": 0,
+    "changed": 4,
+    "nodes": 5,
+    "live": true,
+    "revision": 0
+   }
+  },
+  {
+   "i": 15,
+   "call": "view.open",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<compare#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": true,
+     "direction": "all",
+     "can_back": false,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 1,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 3,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 311296,
+     "filter": null,
+     "reason": "open",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 1,
+     "final": true,
+     "count": 3,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        2
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        9,
+        5
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1
+       ]
+      },
+      "delta": {
+       "dtype": "<i8",
+       "values": [
+        303104,
+        303104,
+        8192
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        1
+       ]
+      },
+      "dstat": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        1,
+        3
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        600
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/grown.bin",
+        "@$ROOT/tree/c.txt"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        7,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        9,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/grown.bin",
+        "@$ROOT/tree/c.txt"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        303104,
+        303104,
+        8192
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        779,
+        773,
+        19
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        781
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        0
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "grown.bin",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 16,
+   "call": "compare.summary",
+   "result": {
+    "view_id": "<view#1>",
+    "compare_id": "<compare#1>",
+    "scope": "$ROOT/tree",
+    "whole": true,
+    "base": {
+     "kind": "snapshot",
+     "path": "$HOME/data/snapshots/tree-cba9c776aa29/<stamp>.sks",
+     "created_at": "<time>",
+     "bytes_alloc": 147456,
+     "node_count": 320
+    },
+    "target": {
+     "kind": "now",
+     "path": null,
+     "created_at": "<time>",
+     "bytes_alloc": 458752,
+     "node_count": 20
+    },
+    "grow": 311296,
+    "shrink": 0,
+    "net": 311296,
+    "grow_items": [
+     {
+      "node": "@$ROOT/tree/a/grown.bin",
+      "path": "$ROOT/tree/a/grown.bin",
+      "label": "grown.bin",
+      "kind": "file",
+      "delta": 303104,
+      "base": 0,
+      "target": 303104,
+      "status": "new",
+      "new_files": 1,
+      "members": 0,
+      "reason": "Temporary files",
+      "on_disk": true
+     },
+     {
+      "node": "@$ROOT/tree/c.txt",
+      "path": "$ROOT/tree/c.txt",
+      "label": "c.txt",
+      "kind": "file",
+      "delta": 8192,
+      "base": 0,
+      "target": 8192,
+      "status": "changed",
+      "new_files": 0,
+      "members": 0,
+      "reason": "Temporary files",
+      "on_disk": true
+     }
+    ],
+    "shrink_items": [],
+    "grow_count": 2,
+    "shrink_count": 0
+   }
+  },
+  {
+   "i": 17,
+   "call": "compare.summary",
+   "result": {
+    "view_id": "<view#1>",
+    "compare_id": "<compare#1>",
+    "scope": "$ROOT/tree",
+    "whole": true,
+    "base": {
+     "kind": "snapshot",
+     "path": "$HOME/data/snapshots/tree-cba9c776aa29/<stamp>.sks",
+     "created_at": "<time>",
+     "bytes_alloc": 147456,
+     "node_count": 320
+    },
+    "target": {
+     "kind": "now",
+     "path": null,
+     "created_at": "<time>",
+     "bytes_alloc": 458752,
+     "node_count": 20
+    },
+    "grow": 311296,
+    "shrink": 0,
+    "net": 311296,
+    "grow_items": [
+     {
+      "node": "@$ROOT/tree/a/grown.bin",
+      "path": "$ROOT/tree/a/grown.bin",
+      "label": "grown.bin",
+      "kind": "file",
+      "delta": 303104,
+      "base": 0,
+      "target": 303104,
+      "status": "new",
+      "new_files": 1,
+      "members": 0,
+      "reason": "Temporary files",
+      "on_disk": true
+     },
+     {
+      "node": "@$ROOT/tree/c.txt",
+      "path": "$ROOT/tree/c.txt",
+      "label": "c.txt",
+      "kind": "file",
+      "delta": 8192,
+      "base": 0,
+      "target": 8192,
+      "status": "changed",
+      "new_files": 0,
+      "members": 0,
+      "reason": "Temporary files",
+      "on_disk": true
+     }
+    ],
+    "shrink_items": [],
+    "grow_count": 2,
+    "shrink_count": 0
+   }
+  },
+  {
+   "i": 19,
+   "call": "compare.node",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 20,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<compare#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": true,
+     "direction": "grow",
+     "can_back": false,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 2,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 3,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 311296,
+     "filter": null,
+     "reason": "settings",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 2,
+     "final": true,
+     "count": 3,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        2
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        9,
+        5
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1
+       ]
+      },
+      "delta": {
+       "dtype": "<i8",
+       "values": [
+        303104,
+        303104,
+        8192
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        1
+       ]
+      },
+      "dstat": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        1,
+        3
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        600
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/grown.bin",
+        "@$ROOT/tree/c.txt"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        7,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        9,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/grown.bin",
+        "@$ROOT/tree/c.txt"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        303104,
+        303104,
+        8192
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        779,
+        773,
+        19
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        781
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        0
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "grown.bin",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 21,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<compare#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": true,
+     "direction": "shrink",
+     "can_back": false,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 3,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 0,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 311296,
+     "filter": null,
+     "reason": "settings",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 3,
+     "final": true,
+     "count": 0,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": []
+      },
+      "delta": {
+       "dtype": "<i8",
+       "values": []
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "dstat": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": []
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": []
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": []
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": []
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": []
+      }
+     },
+     "names": []
+    }
+   ]
+  },
+  {
+   "i": 22,
+   "call": "compare.open",
+   "result": {
+    "compare_id": "<compare#2>"
+   }
+  },
+  {
+   "i": 23,
+   "call": "compare.info",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  },
+  {
+   "i": 24,
+   "call": "compare.close",
+   "result": {}
+  },
+  {
+   "i": 25,
+   "call": "compare.info",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  }
+ ]
+}

@@ -1,0 +1,1220 @@
+{
+ "format": 1,
+ "scenario": "upgrade",
+ "platform": "win32",
+ "steps": [
+  {
+   "i": 0,
+   "call": "settings.get",
+   "result": {
+    "values": {
+     "general.language": "system",
+     "general.hover_keep_open": true,
+     "general.hover_dates": true,
+     "general.hover_age": true,
+     "general.flash_on_done": true,
+     "general.log_auto_open": true,
+     "general.log_scan_warnings": true,
+     "general.update_check": true,
+     "general.update_download": true,
+     "general.update_channel": "stable",
+     "appearance.theme": "dark",
+     "appearance.accent": "#FF8800",
+     "appearance.reduce_motion": "system",
+     "appearance.level_contrast": 10,
+     "appearance.border_contrast": 10,
+     "appearance.halo_levels": 3,
+     "appearance.hover_highlight": true,
+     "appearance.mouse_trail": false,
+     "appearance.trash_effect": "animated",
+     "appearance.selection_shadow": true,
+     "appearance.default_color_mode": "class",
+     "appearance.default_visual": "treemap",
+     "appearance.partition_color_mode": "branch",
+     "treemap.font_scale": 100,
+     "treemap.min_element": 10,
+     "treemap.aspect": 0,
+     "treemap.initial_detail": 7,
+     "treemap.show_free": true,
+     "treemap.show_unknown": true,
+     "treemap.show_trash": true,
+     "treemap.sort_by_size": true,
+     "treemap.flame_origin": "bottom",
+     "treemap.zoom_ms": 250,
+     "treemap.fps": "display",
+     "treemap.dynazoom": false,
+     "treemap.dynasmooth": true,
+     "treemap.flash_changes": true,
+     "scan.method": "auto",
+     "scan.elevate": true,
+     "scan.load_manual": "balanced",
+     "scan.load_incremental": "quiet",
+     "scan.custom_limit": 70,
+     "scan.idle_low_io": true,
+     "scan.yield_when_busy": true,
+     "scan.concurrency": "auto",
+     "scan.workers": 4,
+     "scan.ads": false,
+     "scan.cross_mounts": false,
+     "scan.protected_places": "ask",
+     "scan.hardlinks": "once",
+     "scan.unit_base": "1000",
+     "scan.monitor": true,
+     "scan.coalesce_ms": 150,
+     "tags.name_red": "Delete me",
+     "tags.name_yellow": "",
+     "tags.name_green": "",
+     "tags.name_blue": "",
+     "tags.omit_ctrl": true,
+     "tags.remember": true,
+     "keys.preset": "modern",
+     "advanced.log_level": "INFO",
+     "advanced.auto_snapshot": true,
+     "advanced.snapshot_keep": 10,
+     "advanced.map_large_scans": false,
+     "advanced.memory_budget": 25
+    }
+   }
+  },
+  {
+   "i": 1,
+   "call": "classes.get",
+   "result": {
+    "classes": [
+     {
+      "id": "image",
+      "name": "Pictures",
+      "aliases": [
+       "Image",
+       "Images",
+       "Picture",
+       "Pictures/Images",
+       "Photos",
+       "图片"
+      ],
+      "extensions": [
+       "jpg",
+       "png"
+      ],
+      "color": "#FF0000",
+      "color_light": "#AA0000"
+     },
+     {
+      "id": "u-logs",
+      "name": "Logs",
+      "aliases": [],
+      "extensions": [
+       "log",
+       "txt"
+      ],
+      "color": "#00FF00",
+      "color_light": ""
+     },
+     {
+      "id": "video",
+      "name": "Video",
+      "aliases": [
+       "Videos",
+       "Movies",
+       "Video/Movies",
+       "视频"
+      ],
+      "extensions": [
+       "mp4"
+      ],
+      "color": "#0000FF",
+      "color_light": ""
+     },
+     {
+      "id": "other",
+      "name": "Other",
+      "aliases": [
+       "Others",
+       "Unclassified",
+       "其他"
+      ],
+      "extensions": [],
+      "color": "",
+      "color_light": ""
+     }
+    ],
+    "defaults": [
+     {
+      "id": "video",
+      "name": "Video",
+      "aliases": [
+       "Videos",
+       "Movies",
+       "Video/Movies",
+       "视频"
+      ],
+      "extensions": [
+       "mp4",
+       "mkv",
+       "mov",
+       "avi",
+       "wmv",
+       "webm",
+       "m4v",
+       "flv",
+       "ts",
+       "m2ts",
+       "mts",
+       "vob",
+       "mpg",
+       "mpeg",
+       "mpe",
+       "m1s",
+       "qt",
+       "rm",
+       "rmvb",
+       "3gp",
+       "f4v",
+       "ogv",
+       "mxf",
+       "dv",
+       "divx",
+       "y4m",
+       "m2t",
+       "m2v",
+       "h264",
+       "h265",
+       "hevc",
+       "ivf",
+       "asf",
+       "wtv",
+       "mk3d",
+       "ogm",
+       "lrv",
+       "insv",
+       "braw",
+       "r3d",
+       "bik",
+       "bk2",
+       "usm"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "image",
+      "name": "Pictures",
+      "aliases": [
+       "Image",
+       "Images",
+       "Picture",
+       "Pictures/Images",
+       "Photos",
+       "图片"
+      ],
+      "extensions": [
+       "jpg",
+       "jpeg",
+       "png",
+       "gif",
+       "bmp",
+       "tif",
+       "tiff",
+       "heic",
+       "heif",
+       "webp",
+       "avif",
+       "jxl",
+       "svg",
+       "ico",
+       "psd",
+       "raw",
+       "nef",
+       "rw2",
+       "cr2",
+       "cr3",
+       "arw",
+       "dng",
+       "orf",
+       "raf",
+       "srw",
+       "x3f",
+       "pef",
+       "rwl",
+       "mrw",
+       "dcr",
+       "kdc",
+       "erf",
+       "mef",
+       "mos",
+       "nrw",
+       "sr2",
+       "srf",
+       "iiq",
+       "3fr",
+       "jfif",
+       "jpe",
+       "jp2",
+       "j2k",
+       "jxr",
+       "hdp",
+       "wdp",
+       "apng",
+       "qoi",
+       "svgz",
+       "exr",
+       "hdr",
+       "dds",
+       "ktx",
+       "ktx2",
+       "tga",
+       "pcx",
+       "pbm",
+       "pgm",
+       "ppm",
+       "pnm",
+       "icns",
+       "cur",
+       "ani",
+       "psb",
+       "xcf",
+       "kra",
+       "clip",
+       "pdn",
+       "sai",
+       "afphoto",
+       "afdesign",
+       "ai",
+       "eps",
+       "emf",
+       "wmf",
+       "cdr",
+       "sketch",
+       "fig",
+       "xd"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "audio",
+      "name": "Audio",
+      "aliases": [
+       "Music",
+       "Audio/Music",
+       "音频"
+      ],
+      "extensions": [
+       "mp3",
+       "flac",
+       "wav",
+       "m4a",
+       "aac",
+       "ogg",
+       "opus",
+       "wma",
+       "aif",
+       "aiff",
+       "alp",
+       "au",
+       "ac3",
+       "amr",
+       "mp2",
+       "voc",
+       "ape",
+       "mid",
+       "midi",
+       "dsf",
+       "3gp",
+       "m4b",
+       "m4r",
+       "caf",
+       "mka",
+       "wv",
+       "tta",
+       "dts",
+       "mpc",
+       "spx",
+       "weba",
+       "oga",
+       "gsm",
+       "ra",
+       "aifc",
+       "w64",
+       "rf64",
+       "dff",
+       "xm",
+       "s3m",
+       "it",
+       "sf2",
+       "wem",
+       "bnk"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "archive",
+      "name": "Archives",
+      "aliases": [
+       "压缩包",
+       "镜像",
+       "Archive",
+       "Disk images",
+       "Archives/Disk images",
+       "压缩包/镜像"
+      ],
+      "extensions": [
+       "zip",
+       "7z",
+       "7zip",
+       "rar",
+       "tar",
+       "gz",
+       "tgz",
+       "bz2",
+       "xz",
+       "zst",
+       "lz",
+       "lzma",
+       "cab",
+       "iso",
+       "img",
+       "dmg",
+       "wim",
+       "esd",
+       "vhd",
+       "vhdx",
+       "vmdk",
+       "qcow2",
+       "tbz",
+       "tbz2",
+       "txz",
+       "tzst",
+       "lz4",
+       "lzo",
+       "br",
+       "sz",
+       "zpaq",
+       "zipx",
+       "arj",
+       "lha",
+       "lzh",
+       "cpio",
+       "xar",
+       "sit",
+       "sitx",
+       "vdi",
+       "qcow",
+       "avhdx",
+       "hdd",
+       "hds",
+       "vmem",
+       "vmsn",
+       "ova",
+       "xva",
+       "sparseimage",
+       "nrg"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "exec",
+      "name": "Programs",
+      "aliases": [
+       "程序",
+       "系统",
+       "Program",
+       "Executable",
+       "Executables",
+       "System files",
+       "Executables/System files",
+       "程序/系统"
+      ],
+      "extensions": [
+       "exe",
+       "dll",
+       "sys",
+       "msi",
+       "msix",
+       "appx",
+       "com",
+       "bat",
+       "cmd",
+       "ps1",
+       "sh",
+       "so",
+       "dylib",
+       "ko",
+       "efi",
+       "drv",
+       "ocx",
+       "cpl",
+       "ini",
+       "log",
+       "apk",
+       "aab",
+       "xapk",
+       "ipa",
+       "deb",
+       "rpm",
+       "snap",
+       "appimage",
+       "jar",
+       "war",
+       "ear",
+       "vsix",
+       "crx",
+       "xpi",
+       "pyd",
+       "node",
+       "wasm",
+       "msp",
+       "msu",
+       "mui",
+       "tlb",
+       "winmd",
+       "dmp",
+       "mdmp",
+       "etl",
+       "evtx"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "doc",
+      "name": "Documents",
+      "aliases": [
+       "Document",
+       "Docs",
+       "文档"
+      ],
+      "extensions": [
+       "pdf",
+       "doc",
+       "docx",
+       "xls",
+       "xlsx",
+       "ppt",
+       "pptx",
+       "odt",
+       "ods",
+       "odp",
+       "rtf",
+       "txt",
+       "md",
+       "csv",
+       "epub",
+       "pages",
+       "numbers",
+       "key",
+       "docm",
+       "dotx",
+       "dotm",
+       "xlsm",
+       "xlsb",
+       "pptm",
+       "odg",
+       "wps",
+       "et",
+       "dps",
+       "hwp",
+       "ofd",
+       "xps",
+       "oxps",
+       "djvu",
+       "chm",
+       "mobi",
+       "azw",
+       "azw3",
+       "fb2",
+       "tex",
+       "rst",
+       "org",
+       "tsv",
+       "vsd",
+       "vsdx",
+       "one",
+       "eml",
+       "msg",
+       "pst",
+       "ost",
+       "mbox"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "game",
+      "name": "Games",
+      "aliases": [
+       "Game",
+       "游戏"
+      ],
+      "extensions": [],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "code",
+      "name": "Code",
+      "aliases": [
+       "代码",
+       "开发",
+       "Source code",
+       "Development",
+       "Dev",
+       "代码/开发"
+      ],
+      "extensions": [
+       "c",
+       "h",
+       "cc",
+       "cpp",
+       "cxx",
+       "hh",
+       "hpp",
+       "hxx",
+       "cs",
+       "java",
+       "kt",
+       "kts",
+       "scala",
+       "groovy",
+       "gradle",
+       "go",
+       "rs",
+       "swift",
+       "m",
+       "mm",
+       "py",
+       "pyi",
+       "pyw",
+       "pyx",
+       "ipynb",
+       "js",
+       "mjs",
+       "cjs",
+       "jsx",
+       "ts",
+       "tsx",
+       "mts",
+       "cts",
+       "vue",
+       "svelte",
+       "css",
+       "scss",
+       "sass",
+       "less",
+       "php",
+       "rb",
+       "pl",
+       "pm",
+       "lua",
+       "r",
+       "jl",
+       "dart",
+       "ex",
+       "exs",
+       "erl",
+       "hs",
+       "elm",
+       "clj",
+       "cljs",
+       "fs",
+       "fsx",
+       "vb",
+       "cmake",
+       "pyc",
+       "pyo",
+       "class",
+       "o",
+       "lib",
+       "a",
+       "pdb",
+       "ilk",
+       "idb",
+       "pch",
+       "ipch",
+       "tlog",
+       "whl",
+       "egg",
+       "gem",
+       "nupkg"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "data",
+      "name": "Data",
+      "aliases": [
+       "数据",
+       "模型",
+       "Datasets",
+       "Models",
+       "Databases",
+       "数据/模型"
+      ],
+      "extensions": [
+       "safetensors",
+       "gguf",
+       "ggml",
+       "ckpt",
+       "pt",
+       "pth",
+       "onnx",
+       "tflite",
+       "mlmodel",
+       "h5",
+       "hdf5",
+       "he5",
+       "nc",
+       "npy",
+       "npz",
+       "pkl",
+       "pickle",
+       "joblib",
+       "parquet",
+       "arrow",
+       "feather",
+       "avro",
+       "orc",
+       "tfrecord",
+       "jsonl",
+       "ndjson",
+       "json",
+       "fits",
+       "fts",
+       "fit",
+       "mat",
+       "db",
+       "sqlite",
+       "sqlite3",
+       "db3",
+       "duckdb",
+       "mdb",
+       "accdb",
+       "ldb",
+       "vscdb",
+       "realm",
+       "ibd",
+       "myd",
+       "myi",
+       "mdf",
+       "ldf",
+       "ndf",
+       "dbf",
+       "kdbx",
+       "sql"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "other",
+      "name": "Other",
+      "aliases": [
+       "Others",
+       "Unclassified",
+       "其他"
+      ],
+      "extensions": [],
+      "color": "",
+      "color_light": ""
+     }
+    ],
+    "custom": true,
+    "folders": [
+     {
+      "path": "$ROOT/tree/a",
+      "class_id": "image"
+     }
+    ]
+   }
+  },
+  {
+   "i": 2,
+   "call": "update.status",
+   "result": {
+    "dismissed": true,
+    "muted": false,
+    "channel": "stable",
+    "current": "0.3.4"
+   }
+  },
+  {
+   "i": 3,
+   "call": "snapshot.list",
+   "result": {
+    "snapshots": [
+     {
+      "path": "$HOME/data/snapshots/tree-074eb99fd6ff/<stamp>.sks",
+      "created_at": "<time>",
+      "roots": [
+       "$ROOT/tree"
+      ],
+      "node_count": 320,
+      "bytes_alloc": 147456,
+      "files": 307,
+      "file_bytes": 5865,
+      "method": "hard"
+     }
+    ]
+   }
+  },
+  {
+   "i": 4,
+   "call": "scan.start",
+   "result": {
+    "source": "scan"
+   }
+  },
+  {
+   "i": 5,
+   "wait_scan": {
+    "state": "done",
+    "items": 319
+   },
+   "monotonic": true
+  },
+  {
+   "i": 6,
+   "call": "scan.status",
+   "result": {
+    "expected_items": 319
+   }
+  },
+  {
+   "i": 7,
+   "call": "view.open",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 7,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": false,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 1,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "open",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 1,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        8,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        556,
+        385,
+        191,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        683,
+        677,
+        64,
+        64,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        6,
+        688,
+        688,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        38,
+        19,
+        406,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 9,
+   "call": "tree.summary",
+   "result": {
+    "tag": "red"
+   }
+  },
+  {
+   "i": 10,
+   "call": "palette.query",
+   "result": {
+    "recent": [
+     {
+      "kind": "filter",
+      "text": ">1kb",
+      "hits": [],
+      "tokens": [
+       {
+        "kind": "compare",
+        "start": 0,
+        "end": 4
+       }
+      ],
+      "exists": true,
+      "node": null,
+      "is_dir": true,
+      "alloc": null
+     },
+     {
+      "kind": "filter",
+      "text": "*.log",
+      "hits": [],
+      "tokens": [
+       {
+        "kind": "mask",
+        "start": 0,
+        "end": 5
+       }
+      ],
+      "exists": true,
+      "node": null,
+      "is_dir": true,
+      "alloc": null
+     },
+     {
+      "kind": "jump",
+      "text": "$ROOT/tree/a/sub",
+      "hits": [],
+      "tokens": [],
+      "exists": true,
+      "node": "@$ROOT/tree/a/sub",
+      "is_dir": true,
+      "alloc": 126976
+     }
+    ]
+   }
+  },
+  {
+   "i": 11,
+   "call": "system.maintenance",
+   "result": {
+    "helper_running": false,
+    "helper_elevated": false,
+    "cache_dir": "$HOME/cache",
+    "cache_bytes": 0,
+    "snapshots_dir": "$HOME/data/snapshots",
+    "snapshots_bytes": 5865,
+    "snapshot_count": 1,
+    "saved_tags": 1
+   }
+  },
+  {
+   "i": 12,
+   "call": "compare.sources",
+   "result": {
+    "snapshots": [
+     {
+      "path": "$HOME/data/snapshots/tree-074eb99fd6ff/<stamp>.sks",
+      "created_at": "<time>",
+      "roots": [
+       "$ROOT/tree"
+      ],
+      "node_count": 320,
+      "bytes_alloc": 147456,
+      "files": 307,
+      "file_bytes": 5865,
+      "method": "hard"
+     }
+    ],
+    "now": {
+     "kind": "now",
+     "path": null,
+     "created_at": "<time>",
+     "bytes_alloc": 147456,
+     "node_count": 320
+    },
+    "now_note": ""
+   }
+  },
+  {
+   "i": 13,
+   "call": "snapshot.load",
+   "result": {
+    "state": "done",
+    "items": 319,
+    "files": 307,
+    "roots": [
+     {
+      "path": "$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "whole_volume": false,
+      "volume": {
+       "cluster_size": "number",
+       "device": "string",
+       "free": "number",
+       "fs_type": "string",
+       "is_remote": "bool",
+       "is_removable": "bool",
+       "is_system": "bool",
+       "label": "string",
+       "media": "string",
+       "mount_point": "string",
+       "note": "string",
+       "reason": "string",
+       "remote_path": "string",
+       "reserved": "number",
+       "serial": "string",
+       "total": "number",
+       "used": "number"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}
