@@ -47,8 +47,15 @@ fn is_token_file_name(name: &str) -> bool {
 
 /// Create a fresh token file readable only by this user (in `directory`, default the temp
 /// directory); returns its path.
+///
+/// POSIX: the path names the folder as it really is, without a symbolic link on the way: the
+/// helper deletes the file only when it reaches it without one ([`read_token_file`]), and macOS's
+/// temp folder is reached through one (`/var/folders/…` is `/private/var/folders/…`). Windows
+/// keeps the folder as given: its helper takes the 8.3 and long forms of a name as the same place.
 pub fn write_token_file(token: &str, directory: Option<&Path>) -> io::Result<PathBuf> {
     let dir = directory.map_or_else(std::env::temp_dir, Path::to_path_buf);
+    #[cfg(unix)]
+    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
     let path = dir.join(format!(
         "spaceknife-helper-{}.token",
         hex(&random_bytes(8)?)
@@ -378,6 +385,25 @@ mod tests {
             assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{err}");
             assert!(target.exists() && std::fs::symlink_metadata(&file_link).is_ok());
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn token_file_in_a_temp_folder_named_through_a_link_is_deleted() {
+        // macOS: the temp folder is /var/folders/…, and /var is a link to /private/var. The file is
+        // named by where it really is, so the helper (which never deletes through a link) deletes
+        // it once read
+        let (_tmp, dir) = plain_tempdir();
+        let real = dir.join("private-var");
+        std::fs::create_dir(&real).unwrap();
+        let var = dir.join("var");
+        std::os::unix::fs::symlink(&real, &var).unwrap();
+        let token = new_token();
+        let path = write_token_file(&token, Some(&var)).unwrap();
+        assert_eq!(path.parent(), Some(real.as_path()));
+        assert_eq!(read_token_file(&path).unwrap(), token);
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_dir(&real).unwrap().count(), 0);
     }
 
     #[cfg(windows)]
