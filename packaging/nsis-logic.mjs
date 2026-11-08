@@ -13,14 +13,17 @@
 // nothing outside the folder), 0.3.4's own files (SkRemove034Files) and when its uninstaller may
 // run (SkOldUninstallerUse), the WebView2 minimum (SkWebView2Minimum, with stand-ins for reading
 // and updating the runtime), shortcuts (.lnk files in the sandbox: SkMigrateShortcut's target and
-// AppUserModelID), what the uninstaller removes of SpaceKnife's own folders (un.SkRemoveData, in
-// the test program's own uninstaller, with a Local and a Roaming folder in the sandbox: 0.3.4's
-// rules for an update, the 「你的数据」 box and --delete-app-data; WebView2's processes that still
-// hold the shell's folder, copies of cmd.exe under msedgewebview2.exe's name, waited for or ended,
-// another program's left alone) — and that the app the installer
-// starts gets its environment (cmd.exe stands in for it: on your own desktop run this from
-// packaging/hidden-desktop.ps1, so its console window stays out of sight). Windows only; it writes
-// in a temporary folder only, never the registry.
+// AppUserModelID), closing what runs from a folder (SkCloseIn, on copies of the test program in the
+// sandbox standing in for SpaceKnife's programs and for other ones: only SpaceKnife's go, one that
+// can't be ended stops it), the files an update in place replaces (SkCheckReplaceable), what the
+// uninstaller removes of SpaceKnife's own folders (un.SkRemoveData, in the test program's own
+// uninstaller, with a Local and a Roaming folder in the sandbox: 0.3.4's rules for an update, the
+// 「你的数据」 box and --delete-app-data; WebView2's processes that still hold the shell's folder,
+// copies of cmd.exe under msedgewebview2.exe's name, waited for or ended, another program's left
+// alone) — and that the app the installer starts gets its environment (cmd.exe stands in for it: on
+// your own desktop run this from packaging/hidden-desktop.ps1, so its console window and the
+// stand-ins' window stay out of sight). Windows only; it writes in a temporary folder only, never
+// the registry.
 //
 //   node packaging/nsis-logic.mjs [--makensis PATH] [--utils PATH] [--helpers PATH]
 //
@@ -87,17 +90,27 @@ try {
   const temp = join(sandbox, "temp");
   mkdirSync(temp);
   let n = 0;
-  /** One run: the case, its command line (as the process gets it, verbatim) -> Map key -> value.
-   *  `prepare(box)` runs once the case's sandbox folder is there, before the program starts. */
-  function run(kind, cmdline = "", extra = {}, program = exe, prepare = () => {}) {
+  /**
+   * One run: the case, its command line (as the process gets it, verbatim) -> Map key -> value.
+   * `program`: what runs (the test program, or the uninstaller it wrote); `exeAt`: it runs from a
+   * copy at this path in the case's folder; `prepare(box)` runs once the case's folder (and that
+   * copy) is there, before the program starts.
+   */
+  function run(kind, cmdline = "", extra = {}, { program = exe, exeAt = null, prepare = () => {}, timeout = 60_000 } = {}) {
     const out = join(sandbox, `out-${++n}.txt`);
     const box = join(sandbox, `box-${n}`);
     mkdirSync(box);
+    if (exeAt) {
+      const copy = join(box, exeAt);
+      mkdirSync(dirname(copy), { recursive: true });
+      copyFileSync(program, copy);
+      program = copy;
+    }
     prepare(box);
     const r = spawnSync(program, cmdline ? [cmdline] : [], {
       windowsVerbatimArguments: true,
       encoding: "utf8",
-      timeout: 60_000,
+      timeout,
       env: { ...process.env, TMP: temp, TEMP: temp, SK_LOGIC_CASE: kind, SK_LOGIC_OUT: out, SK_LOGIC_SANDBOX: box, ...extra },
     });
     if (!existsSync(out)) throw new Error(`${kind} ${cmdline}: no output (exit ${r.status} ${r.error ?? ""})`);
@@ -301,6 +314,43 @@ try {
     expect("SkDropStage leaves a folder it did not make", got, { kept: "1" });
   }
   {
+    // SkCloseIn (installer.nsi step 2, the uninstaller), on copies of the test program standing in
+    // for programs: SpaceKnife's that run from the folder go — asked first (the one with a window
+    // closes it and quits), then ended (by the path, as 0.3.4's installer did) — and nothing else
+    // does: the user's own program in that folder, a SpaceKnife.exe in a folder whose name starts
+    // the same, a program that holds one of the folder's files (0.3.4's uninstaller and
+    // SkCheckReplaceable find that one), another copy of the installer, and the installer itself:
+    // this case runs from the folder (an installer in 0.3.4's data folder, an uninstaller in place)
+    const { got, box } = run("close", "", {}, { exeAt: "Programs\\SpaceKnife\\SpaceKnife-Setup.exe", timeout: 120_000 });
+    const ready = Object.fromEntries(["polite", "backend", "user", "other", "holder", "twin"].map((k) => [`ready_${k}`, "1"]));
+    expect(
+      "SkCloseIn: SpaceKnife's programs in the folder, and nothing else",
+      got,
+      { ...ready, exedir: `${box}\\Programs\\SpaceKnife`, result: "", polite: "ended 10", backend: "ended 1", user: "running", other: "running", holder: "running", twin: "running" },
+      ["given"],
+    );
+  }
+  {
+    // one it can't end (as an elevated SpaceKnife is to an installer that is not): the rest is
+    // ended, and SkCloseIn says so (the installer stops with nothing changed) and logs why
+    const { got } = run("close-busy", "", {}, { timeout: 120_000 });
+    const logFile = join(temp, "SpaceKnife-install.log");
+    const log = existsSync(logFile) ? readFileSync(logFile).toString("utf16le") : "";
+    const logged = /could not end: SpaceKnife\.exe \(\d+\): error 5\b/.test(log) ? "1" : "0";
+    expect(
+      "SkCloseIn: one that can't be ended",
+      new Map([...got, ["logged", logged]]),
+      { ready_stubborn: "1", ready_backend: "1", result: "busy", stubborn: "running", backend: "ended 1", logged: "1" },
+      ["debug_off", "given"],
+    );
+  }
+  {
+    // an update in place (installer.nsi step 2): no file it replaces may be held by a program that
+    // lets no one delete it (what follows is not undone); one shared for deleting too may go
+    const { got } = run("replaceable");
+    expect("SkCheckReplaceable", got, { held: "ui\\index.html", shared: "", free: "" });
+  }
+  {
     // What the uninstaller removes of SpaceKnife's own folders (un.SkRemoveData), by the rules of
     // 0.3.4's uninstaller (v0.3.4 apps/electron/build/installer.nsh, and electron-builder's own
     // --delete-app-data part): run in this program's uninstaller, in the sandbox's Local and
@@ -333,7 +383,7 @@ try {
       ["--delete-app-data, the program in the data folder: that stays", "/S --delete-app-data", { SK_LOGIC_ROAMING_OTHER: "1", SK_LOGIC_INSTDIR: "Local\\SpaceKnife\\app" }, { ...caches, ...roaming, instdir_user: "1" }],
       ["--delete-app-data, the program in %APPDATA%\\SpaceKnife: that stays", "/S --delete-app-data", { SK_LOGIC_INSTDIR: "Roaming\\SpaceKnife\\app" }, { ...caches, ...data, roaming_other: "0", instdir_user: "1" }],
     ]) {
-      const { got } = run("removedata", `${cmdline} _?=${sandbox}\\Programs\\SpaceKnife`, env, uninstaller);
+      const { got } = run("removedata", `${cmdline} _?=${sandbox}\\Programs\\SpaceKnife`, env, { program: uninstaller });
       expect(`un.SkRemoveData: ${what}`, got, want, ["error", "update", "deletedata", "deleteappdata"]);
     }
 
@@ -371,10 +421,13 @@ try {
     const flagsOf = (got, extra) => new Map([...got, ...Object.entries(extra)]);
     {
       let own, other, alike;
-      const { got, box } = run("removedata", `/S _?=${sandbox}\\Programs\\SpaceKnife`, { SK_LOGIC_ROAMING_OTHER: "1" }, uninstaller, (box) => {
-        own = webview2(join(box, "Local", "io.github.duskxi.spaceknife", "EBWebView"), "/k");
-        other = webview2(join(box, "Local", "Another.App", "EBWebView"), "/k");
-        alike = webview2(join(box, "Local", "io.github.duskxi.spaceknife-beta", "EBWebView"), "/k");
+      const { got, box } = run("removedata", `/S _?=${sandbox}\\Programs\\SpaceKnife`, { SK_LOGIC_ROAMING_OTHER: "1" }, {
+        program: uninstaller,
+        prepare: (box) => {
+          own = webview2(join(box, "Local", "io.github.duskxi.spaceknife", "EBWebView"), "/k");
+          other = webview2(join(box, "Local", "Another.App", "EBWebView"), "/k");
+          alike = webview2(join(box, "Local", "io.github.duskxi.spaceknife-beta", "EBWebView"), "/k");
+        },
       });
       const state = {
         own_ended: alive(own) ? "0" : "1",
@@ -398,8 +451,11 @@ try {
       // ends by itself after about 2 s (ping, whose output goes nowhere; the lockfile stays held
       // until then): waited for, not ended (an ended one exits with 1)
       let own;
-      const { got } = run("removedata", `/S _?=${sandbox}\\Programs\\SpaceKnife`, { SK_LOGIC_ROAMING_OTHER: "1" }, uninstaller, (box) => {
-        own = webview2(join(box, "Local", "io.github.duskxi.spaceknife", "EBWebView"), "/c ping -n 3 127.0.0.1 >nul &");
+      const { got } = run("removedata", `/S _?=${sandbox}\\Programs\\SpaceKnife`, { SK_LOGIC_ROAMING_OTHER: "1" }, {
+        program: uninstaller,
+        prepare: (box) => {
+          own = webview2(join(box, "Local", "io.github.duskxi.spaceknife", "EBWebView"), "/c ping -n 3 127.0.0.1 >nul &");
+        },
       });
       const code = await exitCode(own);
       expect("un.SkRemoveData: WebView2 that goes by itself is waited for", flagsOf(got, { own_exit: String(code) }), { ...caches, own_exit: "0" });

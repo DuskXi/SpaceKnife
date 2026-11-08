@@ -68,6 +68,13 @@ Var SkStageMove      ; 1: $SkStage is beside $INSTDIR (renames), 0: elsewhere (c
 Var SkStageMissing   ; the first file the staging lacks ("" when it has them all)
 Var SkPlaceFailed    ; the first file that could not be put in place ("" when all were)
 Var SkOldGone        ; 1: the earlier installation's files are gone (nothing to start again)
+Var SkCloseDir       ; SkCloseIn: the folder, as processes name their programs (long, no \ at the end)
+Var SkSelfImage      ; this program's own image (it and its other copy are never closed)
+Var SkProcCount      ; SkScanProcs: how many of SpaceKnife's programs run from $SkCloseDir
+Var SkProcPids       ; " pid pid … "
+Var SkProcInfo       ; "name (pid), …" (the log)
+Var SkProcStuck      ; "name (pid): error N, …": what could not be ended
+Var SkHeldFile       ; SkCheckReplaceable: the first file another program keeps from being replaced
 
 ; ------------------------------------------------------------------ small helpers (both sides)
 
@@ -356,66 +363,355 @@ Function ${UN}SkRunElevated
   StrCpy $1 0
 FunctionEnd
 
-; Close what runs from the folder in $R0 (0.3.4's Electron app and its backend, 0.3.5's app, its
-; console launcher and spaceknife-cli): wait up to 10 s for them to go (after 「无缝更新」 they are
-; quitting), then the Restart Manager shuts them down. $R0 = "" when nothing holds them any more,
-; else "busy".
-Function ${UN}SkCloseIn
+; Push path, Call SkLongPath, Pop: its long form (GetLongPathNameW: no 8.3 parts, as processes name
+; their programs), or the path as it was when that fails (it does not exist). Registers are kept.
+Function ${UN}SkLongPath
+  Exch $0
+  Push $1
+  Push $2
+  ${If} $0 != ""
+    System::Call 'kernel32::GetLongPathNameW(w r0, w .r1, i ${NSIS_MAX_STRLEN}) i .r2'
+    ${If} $2 > 0
+    ${AndIf} $2 < ${NSIS_MAX_STRLEN}
+      StrCpy $0 $1
+    ${EndIf}
+  ${EndIf}
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
+; Push pid, Call SkProcImage, Pop: the program that process runs, its long path ("" when it can't
+; be read: gone, or protected). Registers are kept.
+Function ${UN}SkProcImage
+  Exch $0
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $2 ""
+  ; PROCESS_QUERY_LIMITED_INFORMATION: granted across integrity levels (an elevated one too)
+  System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i r0) p .r1'
+  ${If} $1 P<> 0
+    System::Call 'kernel32::QueryFullProcessImageNameW(p r1, i 0, w .r2, *i ${NSIS_MAX_STRLEN}) i .r3'
+    ${If} $3 = 0
+      StrCpy $2 ""
+    ${EndIf}
+    System::Call 'kernel32::CloseHandle(p r1)'
+  ${EndIf}
+  Push $2
+  Call ${UN}SkLongPath
+  Pop $0
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
+; $R0 = a folder -> $SkCloseDir: its full long path without a trailing \, "" for a drive or no
+; folder (a prefix that tells nothing apart); $SkSelfImage: this program's own. Registers are kept.
+Function ${UN}SkCloseTarget
+  Push $R0
   Push $R1
-  Push $R2
+  Push $0
+  Push $1
+  StrCpy $SkCloseDir ""
+  StrLen $R1 $R0
+  ${If} $R1 >= 4
+    Call ${UN}SkNormalize
+    Push $R0
+    Call ${UN}SkLongPath
+    Pop $R0
+    StrLen $R1 $R0
+    ${If} $R1 >= 4
+      StrCpy $SkCloseDir $R0
+    ${EndIf}
+  ${EndIf}
+  System::Call 'kernel32::GetCurrentProcess() p .r0'
+  System::Call 'kernel32::QueryFullProcessImageNameW(p r0, i 0, w .r1, *i ${NSIS_MAX_STRLEN}) i .r0'
+  ${If} $0 = 0
+    StrCpy $1 $EXEPATH
+  ${EndIf}
+  Push $1
+  Call ${UN}SkLongPath
+  Pop $SkSelfImage
+  Pop $1
+  Pop $0
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+; Push a program's long path, Call SkIsOurs, Pop: 1 when it is one of SpaceKnife's programs in
+; $SkCloseDir — below that folder, a file name with "spaceknife" in it (SpaceKnife.exe and .com,
+; spaceknife-cli.exe, 0.3.4's resources\backend\spaceknife-backend.exe) or 0.3.4's
+; resources\elevate.exe — and not this program (nor another copy of it: the instance that waits for
+; its elevated copy, an installer started from the folder); else 0. Another program the user keeps
+; in that folder is not SpaceKnife's to close. Registers are kept.
+Function ${UN}SkIsOurs
+  Exch $0
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $3 0
+  ${If} $0 != ""
+  ${AndIf} $0 != $SkSelfImage
+    StrLen $1 "$SkCloseDir\"
+    StrCpy $2 $0 $1
+    ${If} $2 == "$SkCloseDir\"
+      StrCpy $2 $0 "" $1
+      ${GetFileName} $2 $1
+      Push $1
+      Push "spaceknife"
+      Call ${UN}SkHas
+      Pop $3
+      ${If} $2 == "resources\elevate.exe"
+        StrCpy $3 1
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+  StrCpy $0 $3
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
+; SpaceKnife's programs running from $SkCloseDir (SkIsOurs; never this process). $R3 = "list":
+; $SkProcCount, $SkProcPids (" pid pid … "), $SkProcInfo ("name (pid), …" for the log); "kill":
+; each one ended (TerminateProcess, on a handle whose program is checked again first), $SkProcStuck
+; = those that could not be ("name (pid): error N, …": 5 is an elevated one while this program is
+; not). Registers are kept.
+Function ${UN}SkScanProcs
   Push $0
   Push $1
   Push $2
   Push $3
-  StrCpy $R2 0
-  sk_close_again:
-  !insertmacro RestartManager_StartSession $R1
-  ${If} $R1 == ""
-    StrCpy $R0 ""   ; no Restart Manager: the uninstallers' own checks decide
-    Goto sk_close_done
+  Push $4
+  Push $5
+  Push $6
+  Push $7
+  Push $8
+  Push $9
+  StrCpy $SkProcCount 0
+  StrCpy $SkProcPids " "
+  StrCpy $SkProcInfo ""
+  ${If} $R3 == "kill"
+    StrCpy $SkProcStuck ""
   ${EndIf}
-  !insertmacro RestartManager_RegisterFile $R1 "$R0\SpaceKnife.exe"
-  !insertmacro RestartManager_RegisterFile $R1 "$R0\SpaceKnife.com"
-  !insertmacro RestartManager_RegisterFile $R1 "$R0\spaceknife-cli.exe"
-  !insertmacro RestartManager_RegisterFile $R1 "$R0\spaceknife.exe"
-  !insertmacro RestartManager_RegisterFile $R1 "$R0\resources\backend\spaceknife-backend.exe"
-  !insertmacro RestartManager_RegisterFile $R1 "$R0\resources\app.asar"
-  !insertmacro RestartManager_RegisterFile $R1 "$R0\resources\elevate.exe"
-  System::Call 'RSTRTMGR::RmGetList(p R1, *i .r1, *i .r2, p 0, *i .r3) i .r0'
-  ${If} $0 = 0           ; ERROR_SUCCESS: nothing uses them
-    !insertmacro RestartManager_EndSession $R1
-    StrCpy $R0 ""
-    Goto sk_close_done
+  System::Call 'kernel32::GetCurrentProcessId() i .r9'
+  ; TH32CS_SNAPPROCESS
+  System::Call 'kernel32::CreateToolhelp32Snapshot(i 2, i 0) p .r0'
+  ${If} $0 P= -1
+  ${OrIf} $0 P= 0
+    Goto sk_scan_done
   ${EndIf}
-  ${If} $R2 < 20         ; 20 × 500 ms for the app that is quitting
-    !insertmacro RestartManager_EndSession $R1
-    IntOp $R2 $R2 + 1
-    Sleep 500
-    Goto sk_close_again
-  ${EndIf}
-  ${If} ${Silent}
-  ${OrIf} $UpdateMode = 1
-  ${OrIf} $PassiveMode = 1
-    Goto sk_close_kill
-  ${EndIf}
-  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(skAppRunning)" IDOK sk_close_kill
-  !insertmacro RestartManager_EndSession $R1
-  StrCpy $R0 "busy"
-  Goto sk_close_done
-  sk_close_kill:
-  System::Call 'RSTRTMGR::RmShutdown(p R1, i ${RmForceShutdown}, p 0) i .r0'
-  !insertmacro RestartManager_EndSession $R1
-  ${If} $0 = 0
-    StrCpy $R0 ""
-  ${Else}
-    StrCpy $R0 "busy"   ; e.g. an elevated process and this installer is not
-  ${EndIf}
-  sk_close_done:
+  ; PROCESSENTRY32W
+  System::Call '*(&l4, i 0, i 0, p 0, i 0, i 0, i 0, i 0, i 0, &w260 "") p .r1'
+  System::Call 'kernel32::Process32FirstW(p r0, p r1) i .r2'
+  ${DoWhile} $2 <> 0
+    System::Call '*$1(i, i, i .r3, p, i, i, i, i, i, &w260 .r4)'
+    ; by the file name first (no process is opened for the others), then by where it runs from
+    Push $4
+    Push "spaceknife"
+    Call ${UN}SkHas
+    Pop $5
+    ${If} $4 == "elevate.exe"
+      StrCpy $5 1
+    ${EndIf}
+    ${If} $5 = 1
+    ${AndIf} $3 <> $9
+      Push $3
+      Call ${UN}SkProcImage
+      Pop $5
+      Push $5
+      Call ${UN}SkIsOurs
+      Pop $6
+      ${If} $6 = 1
+      ${AndIf} $R3 == "kill"
+        ; PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION
+        System::Call 'kernel32::OpenProcess(i 0x00101001, i 0, i r3) p .r6 ?e'
+        Pop $7
+        ${If} $6 P= 0
+          !insertmacro SK_STUCK "$4 ($3): error $7"
+        ${Else}
+          ; still that program on this handle (a process number is used again only once it is free)
+          StrCpy $7 ""
+          System::Call 'kernel32::QueryFullProcessImageNameW(p r6, i 0, w .r7, *i ${NSIS_MAX_STRLEN}) i .r8'
+          Push $7
+          Call ${UN}SkLongPath
+          Pop $7
+          ${If} $8 <> 0
+          ${AndIf} $7 == $5
+            System::Call 'kernel32::TerminateProcess(p r6, i 1) i .r7 ?e'
+            Pop $8
+            ${If} $7 = 0
+              System::Call 'kernel32::WaitForSingleObject(p r6, i 0) i .r7'
+              ${If} $7 <> 0
+                !insertmacro SK_STUCK "$4 ($3): error $8"
+              ${EndIf}
+            ${Else}
+              System::Call 'kernel32::WaitForSingleObject(p r6, i 2000)'
+            ${EndIf}
+          ${EndIf}
+          System::Call 'kernel32::CloseHandle(p r6)'
+        ${EndIf}
+      ${ElseIf} $6 = 1
+        IntOp $SkProcCount $SkProcCount + 1
+        StrCpy $SkProcPids "$SkProcPids$3 "
+        ${If} $SkProcInfo != ""
+          StrCpy $SkProcInfo "$SkProcInfo, "
+        ${EndIf}
+        StrCpy $SkProcInfo "$SkProcInfo$4 ($3)"
+      ${EndIf}
+    ${EndIf}
+    System::Call 'kernel32::Process32NextW(p r0, p r1) i .r2'
+  ${Loop}
+  System::Free $1
+  System::Call 'kernel32::CloseHandle(p r0)'
+  sk_scan_done:
+  Pop $9
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
   Pop $3
   Pop $2
   Pop $1
   Pop $0
-  Pop $R2
+FunctionEnd
+
+; Wait up to $R1 × 250 ms until none of SpaceKnife's programs runs from $SkCloseDir ($SkProcCount
+; etc. as SkScanProcs "list" says at the end). Registers are kept.
+Function ${UN}SkWaitProcs
+  Push $R1
+  Push $R3
+  StrCpy $R3 "list"
+  sk_wait_again:
+  Call ${UN}SkScanProcs
+  ${If} $SkProcCount > 0
+  ${AndIf} $R1 > 0
+    IntOp $R1 $R1 - 1
+    Sleep 250
+    Goto sk_wait_again
+  ${EndIf}
+  Pop $R3
+  Pop $R1
+FunctionEnd
+
+; Ask the processes in $SkProcPids to close, as taskkill without /F does: WM_CLOSE to their visible
+; top-level windows that no other window owns (the app's own, not its dialogs; never the hidden
+; ones its toolkit keeps). $R4 = how many were asked. Registers are kept.
+Function ${UN}SkPostClose
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $R4 0
+  ; the windows first, then the messages (a window that closes at once ends no enumeration)
+  Push "|"
+  StrCpy $0 0
+  ${Do}
+    System::Call 'user32::FindWindowExW(p 0, p r0, p 0, p 0) p .r0'
+    ${If} $0 P= 0
+      ${Break}
+    ${EndIf}
+    StrCpy $1 0
+    System::Call 'user32::GetWindowThreadProcessId(p r0, *i .r1)'
+    Push $SkProcPids
+    Push " $1 "
+    Call ${UN}SkHas
+    Pop $2
+    ${If} $2 = 1
+      System::Call 'user32::IsWindowVisible(p r0) i .r2'
+      ; GW_OWNER
+      System::Call 'user32::GetWindow(p r0, i 4) p .r3'
+      ${If} $2 <> 0
+      ${AndIf} $3 P= 0
+        Push $0
+      ${EndIf}
+    ${EndIf}
+  ${Loop}
+  ${Do}
+    Pop $0
+    ${If} $0 == "|"
+      ${Break}
+    ${EndIf}
+    ; WM_CLOSE
+    System::Call 'user32::PostMessageW(p r0, i 0x10, p 0, p 0)'
+    IntOp $R4 $R4 + 1
+  ${Loop}
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; Close SpaceKnife's programs that run from the folder in $R0 (0.3.4's Electron app, its backend
+; and helper; 0.3.5's app, its console launcher, spaceknife-cli: SkIsOurs) the way 0.3.4's installer
+; and uninstaller did (electron-builder's CHECK_APP_RUNNING: by the path of the folder): asked
+; first (WM_CLOSE to their windows; after 「无缝更新」 the app is quitting anyway), then ended,
+; their helpers with them. Another program holding a file of the folder is not closed: what
+; replaces the files finds it (0.3.4's uninstaller puts every file back, SkCheckReplaceable).
+; $R0 = "" when none of them runs any more, else "busy": one that can't be ended (an elevated one
+; while this program is not) or the user's Cancel. Every step goes to the log.
+Function ${UN}SkCloseIn
+  Push $R1
+  Push $R3
+  Push $R4
+  Call ${UN}SkCloseTarget
+  StrCpy $R0 ""
+  ${If} $SkCloseDir == ""
+    Goto sk_close_done
+  ${EndIf}
+  StrCpy $R3 "list"
+  Call ${UN}SkScanProcs
+  ${If} $SkProcCount = 0
+    Goto sk_close_done
+  ${EndIf}
+  !insertmacro SK_LOG "${UN}" "running from $SkCloseDir: $SkProcInfo"
+  ${IfNot} ${Silent}
+  ${AndIf} $UpdateMode <> 1
+  ${AndIf} $PassiveMode <> 1
+    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(skAppRunning)" IDOK sk_close_go
+    !insertmacro SK_LOG "${UN}" "the user did not let SpaceKnife be closed"
+    StrCpy $R0 "busy"
+    Goto sk_close_done
+  ${EndIf}
+  sk_close_go:
+  ; asked: 5 s for an app with a window, 2 s for one that is quitting by itself
+  Call ${UN}SkPostClose
+  ${If} $R4 > 0
+    StrCpy $R1 20
+  ${Else}
+    StrCpy $R1 8
+  ${EndIf}
+  Call ${UN}SkWaitProcs
+  ; ended: up to three rounds, 3 s each (Electron's helpers end with its main process)
+  StrCpy $R4 0
+  ${DoWhile} $SkProcCount > 0
+    ${If} $R4 >= 3
+      ${Break}
+    ${EndIf}
+    IntOp $R4 $R4 + 1
+    !insertmacro SK_LOG "${UN}" "ending $SkProcInfo"
+    StrCpy $R3 "kill"
+    Call ${UN}SkScanProcs
+    ${If} $SkProcStuck != ""
+      !insertmacro SK_LOG "${UN}" "could not end: $SkProcStuck"
+    ${EndIf}
+    StrCpy $R1 12
+    Call ${UN}SkWaitProcs
+  ${Loop}
+  ${If} $SkProcCount > 0
+    !insertmacro SK_LOG "${UN}" "still running from $SkCloseDir: $SkProcInfo"
+    StrCpy $R0 "busy"
+  ${Else}
+    !insertmacro SK_LOG "${UN}" "SpaceKnife closed in $SkCloseDir"
+  ${EndIf}
+  sk_close_done:
+  ClearErrors
+  Pop $R4
+  Pop $R3
   Pop $R1
 FunctionEnd
 
@@ -573,6 +869,14 @@ FunctionEnd
     StrCpy $R0 "${REASON}"
     Goto sk_unsafe_done
   ${EndIf}
+!macroend
+
+; inside SkScanProcs: one more that could not be ended
+!macro SK_STUCK TEXT
+  ${If} $SkProcStuck != ""
+    StrCpy $SkProcStuck "$SkProcStuck, "
+  ${EndIf}
+  StrCpy $SkProcStuck "$SkProcStuck${TEXT}"
 !macroend
 
 ; "${UN}" helpers inside SkPlainRelative: done, with $R3 not "" (bad), when the line ($R2) or HAY
@@ -953,6 +1257,51 @@ Function SkPlaceAll
   ${EndIf}
 FunctionEnd
 
+; How many times (500 ms apart) SkCheckReplaceable looks again (the logic test sets its own)
+!define /ifndef SK_HELD_TRIES 10
+
+!macro SK_HELD_CHECK REL
+  ${If} $SkHeldFile == ""
+  ${AndIf} ${FileExists} "$INSTDIR\${REL}"
+    ; DELETE with every share mode: a sharing violation only while some handle lets no one delete
+    ; or rename the file
+    System::Call 'kernel32::CreateFileW(w "$INSTDIR\${REL}", i 0x10000, i 7, p 0, i 3, i 0x80, p 0) p .r1 ?e'
+    Pop $2
+    ${If} $1 P= -1
+      ${If} $2 = 32
+        StrCpy $SkHeldFile "${REL}"
+      ${EndIf}
+    ${Else}
+      System::Call 'kernel32::CloseHandle(p r1)'
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; An update in place (an earlier forked version in $INSTDIR): the files this installer replaces must
+; be free to go before the first of them goes, as the steps after it are not undone (0.3.4's
+; uninstaller's are: it puts every file back). SkCloseIn has closed SpaceKnife; another program may
+; still hold one of them (a file manager, a scanner for a moment): looked at again for 5 s.
+; $SkHeldFile = the first one still held, "" when every one may go. Registers are kept.
+Function SkCheckReplaceable
+  Push $0
+  Push $1
+  Push $2
+  StrCpy $0 1
+  sk_held_again:
+  StrCpy $SkHeldFile ""
+  !insertmacro SK_EACH_FILE SK_HELD_CHECK
+  ${If} $SkHeldFile != ""
+  ${AndIf} $0 < ${SK_HELD_TRIES}
+    IntOp $0 $0 + 1
+    Sleep 500
+    Goto sk_held_again
+  ${EndIf}
+  ClearErrors
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
 !macro SK_MANIFEST_FILE REL
   FileWriteUTF16LE $R1 "${REL}$\r$\n"
 !macroend
@@ -1037,7 +1386,7 @@ Function SkRemoveElectronBuilder
   StrCpy $R0 $SkOldDir
   Call SkCloseIn
   ${If} $R0 != ""
-    ${SkLog} "files in $SkOldDir are in use"
+    ${SkLog} "SpaceKnife is still running from $SkOldDir"
     StrCpy $R0 "failed"
     Return
   ${EndIf}

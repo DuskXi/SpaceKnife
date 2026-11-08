@@ -24,8 +24,12 @@
 
   Machine set-up for the UAC legs (VM): an administrator account, UAC on (EnableLUA=1) and
   ConsentPromptBehaviorAdmin=0 ("elevate without prompting", so -Verb RunAs needs no click), the
-  script started from a NON-elevated Windows PowerShell 5.1. GitHub runners are elevated with UAC
-  off: the UAC-dependent assertions are recorded as "skip" there.
+  script started from a NON-elevated Windows PowerShell 5.1. GitHub runners run the script
+  elevated: the UAC-dependent assertions are recorded as "skip" there.
+
+  Each scenario runs on its own: an error in one is recorded as a failed assertion (the message
+  and the line), SpaceKnife is reset, and the next one runs; the JSON is written after every
+  scenario and at the end whatever happened.
 
   Scenarios (-Only to pick):
     S0  launchability: CreateProcess (what 0.3.4's Node spawn and 0.3.5's Rust Command do) of each
@@ -41,15 +45,16 @@
     S2  all users: 0.3.4 /allusers, update with /allusers started NON-elevated (UAC legs) -> the
         fork elevates itself, HKLM entry, Program Files, all-users shortcuts, app restarted as the
         user (not elevated)
-    S4  running app: 0.3.4 running (and a second process holding a file) while updating -> closed,
-        updated; an ELEVATED lock holder the installer can't close -> update refused, 0.3.4 intact
-        and started again
+    S4  0.3.4 running while updating (the user runs the new installer while SpaceKnife is open) ->
+        its processes closed, updated; another program holding 0.3.4's app.asar (not SpaceKnife's
+        to close) -> the update stops with nothing changed, that program left alone, 0.3.4 started
+        again; (UAC legs) an ELEVATED 0.3.4 the installer can't end -> the same, and the log says why
     S5  WebView2: on a machine without the WebView2 Runtime, the update installs it before
         touching 0.3.4 (-RemoveWebView2 on Windows 10 removes it first; -Offline blocks the network
         to check that a failed WebView2 install leaves 0.3.4 intact and running)
     S6  downgrade / reinstall: 0.3.4's installer over 0.3.5 (electron-builder runs the fork's
         uninstaller with its own flags) -> one entry 0.3.4, no Tauri files, data kept; then 0.3.5
-        again; then 0.3.5 over 0.3.5
+        again; then 0.3.5 over 0.3.5 while 0.3.5 runs (the fork's app closed, in place)
     S7  both scopes installed: per-user and per-machine 0.3.4, each updated by its own flag, the
         other untouched
     S8  fork -> fork (needs -NextVersion): the update command every version uses (0.3.4's,
@@ -86,16 +91,21 @@ if (-not (($env:GITHUB_ACTIONS -eq 'true') -or (Test-Path 'C:\spaceknife-test-vm
   throw 'Not a test machine: neither GITHUB_ACTIONS=true nor C:\spaceknife-test-vm.txt.'
 }
 
+# PowerShell's names ignore case: a scenario's $old would be $OLD. The installers' names are their own.
 $GUID = '3cb3f1fc-eef4-5813-9008-c29b5510458c'
 $AUMID = 'io.github.duskxi.spaceknife'
-$OLD = Join-Path $Share 'SpaceKnife-0.3.4-Setup-x64.exe'
-$NEW = Join-Path $Share "SpaceKnife-$NewVersion-Setup-x64.exe"
-$NEXT = if ($NextVersion) { Join-Path $Share "SpaceKnife-$NextVersion-Setup-x64.exe" } else { Join-Path $Share 'no-next-version' }
-$STOCK = Join-Path $Share 'stock-both-Setup.exe'
-$OLD_SHA = '383f640a26e81948496594abf3ddbc7a0242bd5e2e7a2b155832b6c33d8acb40'
+$Installer034 = Join-Path $Share 'SpaceKnife-0.3.4-Setup-x64.exe'
+$InstallerNew = Join-Path $Share "SpaceKnife-$NewVersion-Setup-x64.exe"
+$InstallerNext = if ($NextVersion) { Join-Path $Share "SpaceKnife-$NextVersion-Setup-x64.exe" } else { Join-Path $Share 'no-next-version' }
+$InstallerStock = Join-Path $Share 'stock-both-Setup.exe'
+$SHA_034 = '383f640a26e81948496594abf3ddbc7a0242bd5e2e7a2b155832b6c33d8acb40'
 if (-not $OutDir) { $OutDir = $Share }
-$work = Join-Path $env:TEMP ('sk-installer-e2e-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-New-Item -ItemType Directory -Force $work | Out-Null
+$stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+$envInfo = $null
+$uacOn = $false
+$s1Done = $false
+$s1Seed = $null
+$uninstallerBusy = ''
 
 $LOCAL = $env:LOCALAPPDATA
 $ROAM = $env:APPDATA
@@ -108,6 +118,7 @@ $SM_ALL = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Spac
 $DT_USER = Join-Path ([Environment]::GetFolderPath('Desktop')) 'SpaceKnife.lnk'
 $DT_ALL = Join-Path $env:PUBLIC 'Desktop\SpaceKnife.lnk'
 $PIN = Join-Path $ROAM 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\SpaceKnife.lnk'
+$INSTALL_LOG = Join-Path $env:TEMP 'SpaceKnife-install.log'
 $ELECTRON_FILES = @('resources\app.asar', 'resources\elevate.exe', 'resources\backend\spaceknife-backend.exe', 'locales\en-US.pak',
   'chrome_100_percent.pak', 'resources.pak', 'd3dcompiler_47.dll', 'ffmpeg.dll', 'icudtl.dat', 'v8_context_snapshot.bin',
   'Uninstall SpaceKnife.exe', 'LICENSES.chromium.html')
@@ -185,31 +196,58 @@ public static class SkNative {
 # ------------------------------------------------------------------ results
 $results = New-Object System.Collections.ArrayList
 $current = $null
+$clock = $null
 function Start-Scenario([string]$Id, [string]$Name) {
   $script:current = [ordered]@{ id = $Id; name = $Name; status = 'pass'; startedUtc = (Get-Date).ToUniversalTime().ToString('o'); durationMs = 0; assertions = New-Object System.Collections.ArrayList; notes = New-Object System.Collections.ArrayList }
   $script:clock = [Diagnostics.Stopwatch]::StartNew()
   Write-Host "== $Id $Name"
 }
 function Assert([string]$Name, [bool]$Ok, $Detail = '') {
-  [void]$script:current.assertions.Add([ordered]@{ name = $Name; ok = $Ok; detail = "$Detail" })
-  if (-not $Ok) { $script:current.status = 'fail'; Write-Host "   FAIL $Name : $Detail" -ForegroundColor Red } else { Write-Host "   ok   $Name" }
+  if ($null -ne $script:current) {
+    [void]$script:current.assertions.Add([ordered]@{ name = $Name; ok = $Ok; detail = "$Detail" })
+    if (-not $Ok) { $script:current.status = 'fail' }
+  }
+  if (-not $Ok) { Write-Host "   FAIL $Name : $Detail" -ForegroundColor Red } else { Write-Host "   ok   $Name" }
 }
 function Skip([string]$Name, [string]$Why) {
-  [void]$script:current.assertions.Add([ordered]@{ name = $Name; ok = $null; detail = "skip: $Why" })
+  if ($null -ne $script:current) { [void]$script:current.assertions.Add([ordered]@{ name = $Name; ok = $null; detail = "skip: $Why" }) }
   Write-Host "   skip $Name : $Why" -ForegroundColor Yellow
 }
-function Note([string]$Text) { [void]$script:current.notes.Add($Text); Write-Host "   .. $Text" }
+function Note([string]$Text) {
+  if ($null -ne $script:current) { [void]$script:current.notes.Add($Text) }
+  Write-Host "   .. $Text"
+}
 function End-Scenario {
+  if ($null -eq $script:current) { return }
   $script:current.durationMs = $script:clock.ElapsedMilliseconds
   [void]$script:results.Add($script:current)
   Save-Results
 }
 function Save-Results {
-  $doc = [ordered]@{ tool = 'installer-experiments.ps1'; machine = $env:COMPUTERNAME; environment = $script:envInfo; scenarios = $script:results }
-  $path = Join-Path $OutDir ("installer-experiments-{0}-{1}.json" -f $env:COMPUTERNAME, $script:stamp)
-  $doc | ConvertTo-Json -Depth 8 | Set-Content -Path $path -Encoding UTF8
+  try {
+    $doc = [ordered]@{ tool = 'installer-experiments.ps1'; machine = $env:COMPUTERNAME; environment = $script:envInfo; scenarios = $script:results }
+    $path = Join-Path $OutDir ("installer-experiments-{0}-{1}.json" -f $env:COMPUTERNAME, $script:stamp)
+    $doc | ConvertTo-Json -Depth 8 | Set-Content -Path $path -Encoding UTF8
+  } catch { Write-Warning "could not save the results: $($_.Exception.Message)" }
 }
 function Want([string]$Id) { return ($Only.Count -eq 0) -or ($Only -contains $Id) }
+# One scenario: an error in it is a failed assertion with the message and where it came from, then
+# SpaceKnife is reset; the scenario is recorded (and the JSON saved) in any case. The body runs in
+# a scope of its own: what it sets is gone afterwards ($script: for what a later one reads).
+function Invoke-Scenario([string]$ScenarioId, [string]$ScenarioName, [scriptblock]$ScenarioBody) {
+  if (-not (Want $ScenarioId)) { return }
+  Start-Scenario $ScenarioId $ScenarioName
+  try { & $ScenarioBody }
+  catch {
+    $err = $_
+    $at = $err.InvocationInfo
+    $where = if ($null -ne $at -and $at.ScriptLineNumber) { "line $($at.ScriptLineNumber): $("$($at.Line)".Trim())" } else { 'no line' }
+    $stack = (@("$($err.ScriptStackTrace)" -split "`r?`n") | Select-Object -First 4) -join ' <- '
+    Assert 'the scenario ran to its end' $false "$($err.Exception.Message) ($where; $stack)"
+    try { Reset-SpaceKnife } catch { Note "Reset-SpaceKnife after that failed too: $($_.Exception.Message)" }
+  }
+  finally { End-Scenario }
+}
 
 # ------------------------------------------------------------------ probes
 function Get-Elevated { $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
@@ -225,7 +263,7 @@ function Get-Entries {
   $out = @()
   foreach ($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
     if (-not (Test-Path $root)) { continue }
-    foreach ($k in Get-ChildItem $root) {
+    foreach ($k in @(Get-ChildItem $root)) {
       $name = Get-RegValue $k.PSPath 'DisplayName'
       if ($k.PSChildName -eq $GUID -or $k.PSChildName -eq 'SpaceKnife' -or ("$name" -like 'SpaceKnife*')) {
         $out += [pscustomobject]@{ hive = ($root -split ':')[0]; key = $k.PSChildName; version = (Get-RegValue $k.PSPath 'DisplayVersion'); uninstall = (Get-RegValue $k.PSPath 'UninstallString'); quiet = (Get-RegValue $k.PSPath 'QuietUninstallString'); location = (Get-RegValue $k.PSPath 'InstallLocation') }
@@ -236,34 +274,56 @@ function Get-Entries {
   # foreach ran once on an empty array and @(Get-Entries).Count was never 0)
   return $out
 }
+# what an assertion about the entries found: their JSON, or that there is none
+function Show-Entries($Entries) {
+  $e = @($Entries | Where-Object { $null -ne $_ })
+  if ($e.Count -eq 0) { return 'no SpaceKnife entry' }
+  return (ConvertTo-Json -InputObject $e -Compress)
+}
 function Get-InstallLocation([string]$Hive) { return Get-RegValue "$($Hive):\Software\$GUID" 'InstallLocation' }
 function Get-Lnk([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return [pscustomobject]@{ exists = $false; target = $null; aumid = $null; id = $null } }
   $t = (New-Object -ComObject WScript.Shell).CreateShortcut($Path).TargetPath
   return [pscustomobject]@{ exists = $true; target = $t; aumid = [SkNative]::Aumid($Path); id = [SkNative]::FileId($Path) }
 }
+function Show-Lnk($Lnk) { if (-not $Lnk.exists) { return 'no such shortcut' }; return "target $($Lnk.target), AUMID $($Lnk.aumid)" }
+function ConvertTo-Proc($Cim) { return [pscustomobject]@{ pid = [int]$Cim.ProcessId; name = $Cim.Name; path = $Cim.ExecutablePath; cmd = $Cim.CommandLine; elevated = [SkNative]::Elevated([int]$Cim.ProcessId); started = $Cim.CreationDate } }
 function Get-AppProcs([string]$Dir) {
   $d = $Dir.TrimEnd('\') + '\'
-  return @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) } |
-    ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; path = $_.ExecutablePath; cmd = $_.CommandLine; elevated = [SkNative]::Elevated([int]$_.ProcessId); started = $_.CreationDate } })
+  return @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { ConvertTo-Proc $_ })
 }
-function Wait-App([string]$Dir, [int]$Seconds = 60) {
+# by name: an elevated process's path and token can't be read from a script that is not elevated
+function Get-NamedProcs([string]$Name) { return @(Get-CimInstance Win32_Process -Filter "Name='$Name'" | ForEach-Object { ConvertTo-Proc $_ }) }
+function Show-Procs($Procs) {
+  $list = @($Procs | Where-Object { $null -ne $_ })
+  if ($list.Count -eq 0) { return 'none' }
+  return (($list | ForEach-Object { "$($_.name) $($_.pid) (started $($_.started), elevated=$($_.elevated)) [$($_.cmd)]" }) -join '; ')
+}
+# which of these (Get-AppProcs) still run: the same process number, started at the same time
+function Get-StillRunning($Procs) {
+  $now = @(Get-CimInstance Win32_Process)
+  return @(@($Procs | Where-Object { $null -ne $_ }) | Where-Object { $p = $_; @($now | Where-Object { [int]$_.ProcessId -eq $p.pid -and $_.CreationDate -eq $p.started }).Count -gt 0 })
+}
+# the app (SpaceKnife.exe from $Dir) started at or after $Since, waited for up to $Seconds
+function Wait-App([string]$Dir, [int]$Seconds = 60, [datetime]$Since = [datetime]::MinValue) {
   $sw = [Diagnostics.Stopwatch]::StartNew()
-  while ($sw.Elapsed.TotalSeconds -lt $Seconds) {
-    $p = Get-AppProcs $Dir | Where-Object { $_.path -like '*\SpaceKnife.exe' }
-    if ($p) { return $p }
+  do {
+    $p = @(Get-AppProcs $Dir | Where-Object { $_.path -like '*\SpaceKnife.exe' -and $_.started -ge $Since })
+    if ($p.Count -gt 0) { return $p }
     Start-Sleep -Milliseconds 500
-  }
+  } while ($sw.Elapsed.TotalSeconds -lt $Seconds)
   return @()
 }
 # an NSIS uninstaller started without _?= (as Windows starts it) copies itself to
 # %TEMP%\~nsu*.tmp\Au_.exe, starts the copy with _?=<its folder>\ and exits before the copy has done
 # anything: wait (at most $Seconds) until no process runs from $Dir or has it on its command line
 # (the copy), as packaging/lib.mjs untilUninstalled does; a copy whose command line cannot be read
-# (elevated, seen from a script that is not) counts by its name. $true when it has ended.
+# (elevated, seen from a script that is not) counts by its name. $true when it has ended; else
+# $script:uninstallerBusy says what is still at work.
 function Wait-Uninstaller([string]$Dir, [int]$Seconds = 180) {
   $d = [IO.Path]::GetFullPath($Dir).TrimEnd('\')
   $sw = [Diagnostics.Stopwatch]::StartNew()
+  $script:uninstallerBusy = ''
   do {
     $busy = @(Get-CimInstance Win32_Process | Where-Object {
         $_.ProcessId -ne $PID -and (
@@ -274,17 +334,39 @@ function Wait-Uninstaller([string]$Dir, [int]$Seconds = 180) {
     if ($busy.Count -eq 0) { return $true }
     Start-Sleep -Milliseconds 500
   } while ($sw.Elapsed.TotalSeconds -lt $Seconds)
-  Note ("still at work: " + (($busy | ForEach-Object { "$($_.ProcessId) $($_.Name) $($_.CommandLine)" }) -join '; '))
+  $script:uninstallerBusy = "still at work after $Seconds s: " + (($busy | ForEach-Object { "$($_.ProcessId) $($_.Name) $($_.CommandLine)" }) -join '; ')
+  Note $script:uninstallerBusy
   return $false
 }
 function Sha([string]$Path) { return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLower() }
 function Is-Under([string]$Path, [string]$Dir) { $p = [IO.Path]::GetFullPath($Path).TrimEnd('\'); $d = [IO.Path]::GetFullPath($Dir).TrimEnd('\'); return $p.Equals($d, 'OrdinalIgnoreCase') -or $p.StartsWith($d + '\', 'OrdinalIgnoreCase') }
+# those of the paths that exist ($Base\<each> when $Base is given)
+function Get-Present([string[]]$Paths, [string]$Base = '') {
+  return @($Paths | Where-Object { Test-Path -LiteralPath $(if ($Base) { Join-Path $Base $_ } else { $_ }) })
+}
+# a folder that should be gone: what is still in it (a few names)
+function Show-Left([string]$Dir) {
+  if (-not (Test-Path -LiteralPath $Dir)) { return "$Dir is gone" }
+  $in = @(Get-ChildItem -LiteralPath $Dir -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 8 | ForEach-Object { $_.FullName })
+  return "$Dir is still there: " + $(if ($in.Count) { $in -join ', ' } else { 'empty' })
+}
+function Get-InstallLog([int]$Lines = 15) {
+  if (-not (Test-Path -LiteralPath $INSTALL_LOG)) { return '(no install log)' }
+  return ((@(Get-Content -LiteralPath $INSTALL_LOG -Encoding Unicode -Tail $Lines)) -join ' | ')
+}
+function Shorten([string]$Text, [int]$Max = 400) {
+  $t = ("$Text" -replace '\s+', ' ').Trim()
+  if ($t.Length -gt $Max) { return $t.Substring(0, $Max) + '...' }
+  return $t
+}
 
 # ------------------------------------------------------------------ actions
 function Run-Wait([string]$Exe, [string]$Arguments, [switch]$Elevated, [int]$Timeout = 900) {
   Note "run $(Split-Path $Exe -Leaf) $Arguments$(if ($Elevated) { ' (elevated)' })"
-  if ($Elevated -and -not (Get-Elevated)) { $p = Start-Process -FilePath $Exe -ArgumentList $Arguments -Verb RunAs -PassThru }
-  else { $p = Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru }
+  $how = @{ FilePath = $Exe; PassThru = $true }
+  if ($Arguments) { $how.ArgumentList = $Arguments }
+  if ($Elevated -and -not (Get-Elevated)) { $how.Verb = 'RunAs' }
+  $p = Start-Process @how
   if (-not $p.WaitForExit($Timeout * 1000)) { try { $p.Kill() } catch {} ; return -999 }
   return $p.ExitCode
 }
@@ -297,6 +379,18 @@ function Spawn-Wait([string]$Exe, [string]$Arguments, [int]$Timeout = 900) {
   if (-not $p.WaitForExit($Timeout * 1000)) { try { $p.Kill() } catch {} ; return -999 }
   return $p.ExitCode
 }
+# a console program, its output read (2>&1 under $ErrorActionPreference = 'Stop' would end the run
+# at its first line on stderr), ended after $Timeout s: code (-999 on a timeout), out, err
+function Run-Capture([string]$Exe, [string]$Arguments, [int]$Timeout = 60) {
+  $psi = New-Object Diagnostics.ProcessStartInfo $Exe, $Arguments
+  $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+  $p = [Diagnostics.Process]::Start($psi)
+  $out = $p.StandardOutput.ReadToEndAsync(); $err = $p.StandardError.ReadToEndAsync()
+  if (-not $p.WaitForExit($Timeout * 1000)) { try { $p.Kill() } catch {}; return [pscustomobject]@{ code = -999; out = ''; err = "timed out after $Timeout s" } }
+  $p.WaitForExit()
+  return [pscustomobject]@{ code = $p.ExitCode; out = $out.Result; err = $err.Result }
+}
 function Stop-SpaceKnife {
   Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('SpaceKnife.exe', 'spaceknife-backend.exe', 'spaceknife-cli.exe', 'SpaceKnife.com') } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
   Start-Sleep -Seconds 1
@@ -304,16 +398,20 @@ function Stop-SpaceKnife {
 function Reset-SpaceKnife {
   Stop-SpaceKnife
   foreach ($e in @(Get-Entries)) {
-    if ($e.quiet -or $e.uninstall) {
-      $cmd = if ($e.quiet) { $e.quiet } else { "$($e.uninstall) /S" }
-      if ($cmd -match '^"([^"]+)"\s*(.*)$') { $exe = $Matches[1]; $rest = $Matches[2] } else { $exe = $cmd; $rest = '/S' }
-      if (Test-Path -LiteralPath $exe) {
-        [void](Run-Wait $exe "$rest --delete-app-data" -Elevated:($e.hive -eq 'HKLM') -Timeout 300)
-        [void](Wait-Uninstaller (Split-Path $exe) 300)
+    try {
+      if ($e.quiet -or $e.uninstall) {
+        $cmd = if ($e.quiet) { "$($e.quiet)" } else { "$($e.uninstall) /S" }
+        $exe = $cmd; $rest = '/S'
+        if ($cmd -match '^"([^"]+)"\s*(.*)$') { $exe = $Matches[1]; $rest = $Matches[2] }
+        if (Test-Path -LiteralPath $exe) {
+          [void](Run-Wait $exe "$rest --delete-app-data" -Elevated:($e.hive -eq 'HKLM') -Timeout 300)
+          [void](Wait-Uninstaller (Split-Path $exe) 300)
+        }
       }
-    }
+    } catch { Note "reset: uninstalling $($e.key) ($($e.hive)) failed: $($_.Exception.Message)" }
   }
   Start-Sleep -Seconds 3
+  Stop-SpaceKnife
   foreach ($d in @($USERDIR, $MACHDIR, $DATA, $SHELLDIR, (Join-Path $ROAM 'SpaceKnife'), (Join-Path $LOCAL 'spaceknife-electron-updater'), 'C:\SK Test')) {
     if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
   }
@@ -327,8 +425,8 @@ function Reset-SpaceKnife {
       Remove-Item -LiteralPath $k -Recurse -Force -ErrorAction SilentlyContinue
     }
   } else {
-    $leftovers = @($MACHDIR, $SM_ALL, $DT_ALL) | Where-Object { Test-Path -LiteralPath $_ }
-    if ($leftovers) { $ps = "Remove-Item -LiteralPath '$($leftovers -join "','")' -Recurse -Force; Remove-Item -LiteralPath 'HKLM:\SOFTWARE\$GUID','HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$GUID' -Recurse -Force -ErrorAction SilentlyContinue"; Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -Command $ps" }
+    $leftovers = @(@($MACHDIR, $SM_ALL, $DT_ALL) | Where-Object { Test-Path -LiteralPath $_ })
+    if ($leftovers.Count) { $ps = "Remove-Item -LiteralPath '$($leftovers -join "','")' -Recurse -Force; Remove-Item -LiteralPath 'HKLM:\SOFTWARE\$GUID','HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\$GUID' -Recurse -Force -ErrorAction SilentlyContinue"; Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile -Command $ps" }
   }
 }
 # markers the update must keep (data, 0.3.4's theme, the cache) and the folder 0.3.4 runs the setup from
@@ -345,7 +443,8 @@ function Seed-Data {
 function Assert-Seeded($Seed, [string[]]$Which, [string]$When) {
   foreach ($k in $Which) {
     $p = $Seed[$k].path
-    Assert "$When : $k marker kept" ((Test-Path -LiteralPath $p) -and ((Sha $p) -eq $Seed[$k].sha)) $p
+    $there = Test-Path -LiteralPath $p
+    Assert "$When : $k marker kept" ($there -and ((Sha $p) -eq $Seed[$k].sha)) $(if (-not $there) { "gone: $p" } else { "changed: $p" })
   }
 }
 function Stage-Update([string]$Setup) {
@@ -361,352 +460,417 @@ function Pin-Copy([string]$Lnk) {
   New-Item -ItemType Directory -Force (Split-Path $PIN) | Out-Null
   Copy-Item -LiteralPath $Lnk -Destination $PIN -Force
 }
+# 0.3.4 started from $USERDIR (its window minimized), given $Seconds to be up: what runs from there
+function Start-034([int]$Seconds = 15, [switch]$Elevated) {
+  $env:SPACEKNIFE_START_MINIMIZED = '1'
+  $how = @{ FilePath = (Join-Path $USERDIR 'SpaceKnife.exe') }
+  if ($Elevated) { $how.Verb = 'RunAs' }
+  Start-Process @how
+  Start-Sleep -Seconds $Seconds
+  $running = @(Get-AppProcs $USERDIR)
+  Note ("running: " + (Show-Procs $running))
+  return $running
+}
 function Assert-Layout034([string]$Dir, [string]$Hive) {
-  Assert '0.3.4 entry' (@(Get-Entries | Where-Object { $_.key -eq $GUID -and $_.hive -eq $Hive -and $_.version -eq '0.3.4' }).Count -eq 1) (Get-Entries | ConvertTo-Json -Compress)
-  Assert '0.3.4 InstallLocation' ((Get-InstallLocation $Hive) -eq $Dir) (Get-InstallLocation $Hive)
-  Assert '0.3.4 files' ((Test-Path "$Dir\SpaceKnife.exe") -and (Test-Path "$Dir\SpaceKnife.com") -and (Test-Path "$Dir\Uninstall SpaceKnife.exe") -and (Test-Path "$Dir\resources\app.asar")) $Dir
+  $entries = @(Get-Entries)
+  Assert '0.3.4 entry' (@($entries | Where-Object { $_.key -eq $GUID -and $_.hive -eq $Hive -and $_.version -eq '0.3.4' }).Count -eq 1) (Show-Entries $entries)
+  $loc = Get-InstallLocation $Hive
+  Assert '0.3.4 InstallLocation' ($loc -eq $Dir) "InstallLocation: $loc"
+  $missing = @(@('SpaceKnife.exe', 'SpaceKnife.com', 'Uninstall SpaceKnife.exe', 'resources\app.asar') | Where-Object { -not (Test-Path -LiteralPath (Join-Path $Dir $_)) })
+  Assert '0.3.4 files' ($missing.Count -eq 0) ("missing in ${Dir}: " + ($missing -join ', '))
 }
 function Assert-Updated([string]$Dir, [string]$Hive, [string]$Version, [hashtable]$LnkBefore, [string[]]$Lnks, [datetime]$Since, [switch]$NoRestartCheck) {
   $entries = @(Get-Entries)
-  Assert 'one SpaceKnife entry in this hive' (@($entries | Where-Object { $_.hive -eq $Hive }).Count -eq 1) ($entries | ConvertTo-Json -Compress)
-  Assert "the entry is the GUID key, version $Version" (@($entries | Where-Object { $_.hive -eq $Hive -and $_.key -eq $GUID -and $_.version -eq $Version }).Count -eq 1) ($entries | ConvertTo-Json -Compress)
-  Assert 'no stock Tauri keys' (-not (Test-Path "$($Hive):\Software\Microsoft\Windows\CurrentVersion\Uninstall\SpaceKnife") -and -not (Test-Path "$($Hive):\Software\DuskXi\SpaceKnife")) ''
-  Assert 'same folder' ((Get-InstallLocation $Hive) -eq $Dir) (Get-InstallLocation $Hive)
+  Assert 'one SpaceKnife entry in this hive' (@($entries | Where-Object { $_.hive -eq $Hive }).Count -eq 1) (Show-Entries $entries)
+  Assert "the entry is the GUID key, version $Version" (@($entries | Where-Object { $_.hive -eq $Hive -and $_.key -eq $GUID -and $_.version -eq $Version }).Count -eq 1) (Show-Entries $entries)
+  $stock = @(Get-Present @("$($Hive):\Software\Microsoft\Windows\CurrentVersion\Uninstall\SpaceKnife", "$($Hive):\Software\DuskXi\SpaceKnife"))
+  Assert 'no stock Tauri keys' ($stock.Count -eq 0) ($stock -join ', ')
+  $loc = Get-InstallLocation $Hive
+  Assert 'same folder' ($loc -eq $Dir) "InstallLocation: $loc"
   Assert 'not in the data folder' (-not (Is-Under $Dir $DATA) -and -not (Is-Under $DATA $Dir)) $Dir
-  foreach ($f in $TAURI_FILES) { Assert "has $f" (Test-Path -LiteralPath (Join-Path $Dir $f)) '' }
-  Assert 'has ui\' (Test-Path -LiteralPath (Join-Path $Dir 'ui')) ''
-  $v = (Get-Item -LiteralPath (Join-Path $Dir 'SpaceKnife.exe')).VersionInfo.ProductVersion
-  Assert "SpaceKnife.exe is $Version" ("$v" -like "$Version*") $v
-  $left = @($ELECTRON_FILES | Where-Object { Test-Path -LiteralPath (Join-Path $Dir $_) })
+  foreach ($f in $TAURI_FILES) { $p = Join-Path $Dir $f; Assert "has $f" (Test-Path -LiteralPath $p) "no $p" }
+  Assert 'has ui\' (Test-Path -LiteralPath (Join-Path $Dir 'ui')) "no $(Join-Path $Dir 'ui')"
+  $exe = Join-Path $Dir 'SpaceKnife.exe'
+  $v = if (Test-Path -LiteralPath $exe) { (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion } else { $null }
+  Assert "SpaceKnife.exe is $Version" ("$v" -like "$Version*") $(if ($null -ne $v) { "version $v" } else { "no $exe" })
+  $left = @(Get-Present $ELECTRON_FILES $Dir)
   Assert 'no Electron files left' ($left.Count -eq 0) ($left -join ', ')
-  Assert 'no staging folder left' (-not (Test-Path -LiteralPath "$Dir.sk-staging")) "$Dir.sk-staging"
-  foreach ($l in $Lnks) {
+  Assert 'no staging folder left' (-not (Test-Path -LiteralPath "$Dir.sk-staging")) (Show-Left "$Dir.sk-staging")
+  foreach ($l in @($Lnks)) {
     $now = Get-Lnk $l
     if ($LnkBefore -and $LnkBefore.ContainsKey($l)) {
       $b = $LnkBefore[$l]
       if ($b.exists) {
-        Assert "$(Split-Path $l -Leaf) [$l] still there" $now.exists ''
+        Assert "$(Split-Path $l -Leaf) [$l] still there" $now.exists 'gone'
         Assert "  the same file (pins keep working)" ($now.id -eq $b.id) "$($b.id) -> $($now.id)"
-      } else { Assert "$l not made again (the user removed it)" (-not $now.exists) '' }
+      } else { Assert "$l not made again (the user removed it)" (-not $now.exists) (Show-Lnk $now) }
     }
     if ($now.exists) {
-      Assert "  points at $Dir\SpaceKnife.exe" ($now.target -eq (Join-Path $Dir 'SpaceKnife.exe')) $now.target
-      Assert "  AUMID $AUMID" ($now.aumid -eq $AUMID) "$($now.aumid)"
+      Assert "  points at $Dir\SpaceKnife.exe" ($now.target -eq (Join-Path $Dir 'SpaceKnife.exe')) "target $($now.target)"
+      Assert "  AUMID $AUMID" ($now.aumid -eq $AUMID) "AUMID $($now.aumid)"
     }
   }
   if (-not $NoRestartCheck) {
-    $app = @(Wait-App $Dir 60 | Where-Object { $_.started -ge $Since })
-    Assert 'the app was started again' ($app.Count -ge 1) ''
+    $app = @(Wait-App $Dir 60 $Since)
+    Assert 'the app was started again' ($app.Count -ge 1) ("none from $Dir since $Since; running from there: " + (Show-Procs (Get-AppProcs $Dir)))
     if ($app.Count -ge 1) {
-      Assert '  with --updated' ($app[0].cmd -like '*--updated*') $app[0].cmd
-      if ($script:uacOn) { Assert '  not elevated' ($app[0].elevated -eq 0) "elevated=$($app[0].elevated)" } else { Skip '  not elevated' 'UAC is off: every process is elevated' }
+      Assert '  with --updated' ("$($app[0].cmd)" -like '*--updated*') "command line: $($app[0].cmd)"
+      if ($script:uacOn) { Assert '  not elevated' ($app[0].elevated -eq 0) "elevated=$($app[0].elevated)" } else { Skip '  not elevated' 'the script runs elevated: every process it starts is' }
     }
   }
 }
 
-# ------------------------------------------------------------------ environment
-$stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
-$os = Get-CimInstance Win32_OperatingSystem
-$uac = Get-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'EnableLUA'
-$consent = Get-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'ConsentPromptBehaviorAdmin'
-$uacOn = ($uac -eq 1) -and -not (Get-Elevated)
-$envInfo = [ordered]@{
-  os = "$($os.Caption) $($os.Version) build $($os.BuildNumber)"; elevated = (Get-Elevated); enableLUA = $uac; consentPromptBehaviorAdmin = $consent
-  webview2 = (Get-WebView2); github = ($env:GITHUB_ACTIONS -eq 'true'); user = $env:USERNAME
-  installers = [ordered]@{}
-}
-foreach ($f in @($OLD, $NEW, $NEXT, $STOCK)) { if (Test-Path -LiteralPath $f) { $envInfo.installers[(Split-Path $f -Leaf)] = (Sha $f) } }
-if (-not (Test-Path -LiteralPath $OLD)) { throw "missing $OLD" }
-if ((Sha $OLD) -ne $OLD_SHA) { throw "$OLD is not the v0.3.4 release file" }
-if (-not (Test-Path -LiteralPath $NEW)) { throw "missing $NEW" }
-Write-Host "environment: $($envInfo | ConvertTo-Json -Compress)"
-
-# ------------------------------------------------------------------ S0 launchability
-if (Want 'S0') {
-  Start-Scenario 'S0' 'CreateProcess can start the installer (0.3.4 and 0.3.5 use CreateProcess)'
-  if ($uacOn) {
-    Assert 'the 0.3.4 installer starts (asInvoker)' ([SkNative]::Launchable($OLD) -eq 0) ''
-    Assert 'the fork starts (asInvoker)' ([SkNative]::Launchable($NEW) -eq 0) ''
-    if (Test-Path -LiteralPath $STOCK) { $e = [SkNative]::Launchable($STOCK); Assert 'a stock "both" build does NOT start (740)' ($e -eq 740) "error $e" } else { Skip 'stock "both" build' 'no stock-both-Setup.exe in the share' }
-  } else { Skip 'launchability' 'needs a non-elevated admin with UAC on' }
-  End-Scenario
-}
-
-# ------------------------------------------------------------------ S1 per user
-if (Want 'S1') {
-  Start-Scenario 'S1' 'per user: 0.3.4 -> 0.3.5 with 0.3.4''s seamless-update command'
-  Reset-SpaceKnife
-  $wv = Get-WebView2
-  Assert 'installed 0.3.4 /currentuser' ((Run-Wait $OLD '/S /currentuser') -eq 0) ''
-  Assert-Layout034 $USERDIR 'HKCU'
-  $seed = Seed-Data
-  Pin-Copy $SM_USER
-  $lnks = @($SM_USER, $DT_USER, $PIN)
-  $before = @{}; foreach ($l in $lnks) { $before[$l] = Get-Lnk $l }
-  Assert '0.3.4 shortcuts carry the AUMID' (($before[$SM_USER].aumid -eq $AUMID) -and ($before[$DT_USER].aumid -eq $AUMID)) "$($before[$SM_USER].aumid) / $($before[$DT_USER].aumid)"
-  $setup = Stage-Update $NEW
-  $since = Get-Date
-  $code = Spawn-Wait $setup '--updated /S --force-run /currentuser'
-  Assert 'the update exits 0' ($code -eq 0) "exit $code"
-  Assert-Updated $USERDIR 'HKCU' $NewVersion $before $lnks $since
-  Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
-  if (-not $wv) { Assert 'WebView2 installed by the update' ([bool](Get-WebView2)) "$(Get-WebView2)" }
-  $log = Join-Path $env:TEMP 'SpaceKnife-install.log'
-  if (Test-Path $log) { Note ("install log: " + ((Get-Content $log -Encoding Unicode -Tail 30) -join ' | ')) }
-  End-Scenario
-
-  if (Want 'S1U') {
-    Start-Scenario 'S1U' 'uninstall: data kept by default, gone with --delete-app-data'
-    Stop-SpaceKnife
-    Assert 'uninstall /S /currentuser exits 0' ((Run-Wait (Join-Path $USERDIR 'uninstall.exe') '/S /currentuser') -eq 0) ''
-    Assert '  its copy in %TEMP% has ended' (Wait-Uninstaller $USERDIR) ''
-    Assert 'program gone' (-not (Test-Path -LiteralPath (Join-Path $USERDIR 'SpaceKnife.exe'))) ''
-    Assert 'entry gone' (@(Get-Entries).Count -eq 0) (Get-Entries | ConvertTo-Json -Compress)
-    Assert 'Start menu and desktop shortcuts gone' (-not (Test-Path $SM_USER) -and -not (Test-Path $DT_USER)) ''
-    Assert-Seeded $seed @('data') 'after uninstalling'
-    Assert 'caches gone (Cache, updates, the shell folder, 0.3.4''s profile)' (-not (Test-Path (Join-Path $DATA 'Cache')) -and -not (Test-Path (Join-Path $DATA 'updates')) -and -not (Test-Path $SHELLDIR) -and -not (Test-Path (Join-Path $ROAM 'SpaceKnife\electron'))) ''
-    Assert 'fresh install /S' ((Run-Wait $NEW '/S') -eq 0) ''
-    Assert '  into Programs\SpaceKnife' ((Get-InstallLocation 'HKCU') -eq $USERDIR) (Get-InstallLocation 'HKCU')
-    Assert '  Start menu shortcut with AUMID' ((Get-Lnk $SM_USER).aumid -eq $AUMID) ''
-    Stop-SpaceKnife
-    Assert 'uninstall --delete-app-data' ((Run-Wait (Join-Path $USERDIR 'uninstall.exe') '/S /currentuser --delete-app-data') -eq 0) ''
-    Assert '  its copy in %TEMP% has ended' (Wait-Uninstaller $USERDIR) ''
-    Assert 'data folder gone' (-not (Test-Path -LiteralPath $DATA)) ''
-    End-Scenario
+# ------------------------------------------------------------------ the run
+try {
+  # ---------------------------------------------------------------- environment
+  $os = Get-CimInstance Win32_OperatingSystem
+  $uac = Get-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'EnableLUA'
+  $consent = Get-RegValue 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'ConsentPromptBehaviorAdmin'
+  $uacOn = ($uac -eq 1) -and -not (Get-Elevated)
+  $envInfo = [ordered]@{
+    os = "$($os.Caption) $($os.Version) build $($os.BuildNumber)"; elevated = (Get-Elevated); enableLUA = $uac; consentPromptBehaviorAdmin = $consent
+    webview2 = (Get-WebView2); github = ($env:GITHUB_ACTIONS -eq 'true'); user = $env:USERNAME
+    installers = [ordered]@{}
   }
-}
+  foreach ($f in @($Installer034, $InstallerNew, $InstallerNext, $InstallerStock)) { if (Test-Path -LiteralPath $f) { $envInfo.installers[(Split-Path $f -Leaf)] = (Sha $f) } }
+  if (-not (Test-Path -LiteralPath $Installer034)) { throw "missing $Installer034" }
+  if ((Sha $Installer034) -ne $SHA_034) { throw "$Installer034 is not the v0.3.4 release file" }
+  if (-not (Test-Path -LiteralPath $InstallerNew)) { throw "missing $InstallerNew" }
+  Write-Host "environment: $($envInfo | ConvertTo-Json -Compress)"
 
-# ------------------------------------------------------------------ S2 all users
-if (Want 'S2') {
-  Start-Scenario 'S2' 'all users: 0.3.4 /allusers -> 0.3.5 started non-elevated with /allusers'
-  if (-not $uacOn) { Skip 'S2' 'needs a non-elevated admin with UAC on (ConsentPromptBehaviorAdmin=0)' }
-  else {
+  # ---------------------------------------------------------------- S0 launchability
+  Invoke-Scenario 'S0' 'CreateProcess can start the installer (0.3.4 and 0.3.5 use CreateProcess)' {
+    if ($uacOn) {
+      $e = [SkNative]::Launchable($Installer034); Assert 'the 0.3.4 installer starts (asInvoker)' ($e -eq 0) "error $e"
+      $e = [SkNative]::Launchable($InstallerNew); Assert 'the fork starts (asInvoker)' ($e -eq 0) "error $e"
+      if (Test-Path -LiteralPath $InstallerStock) { $e = [SkNative]::Launchable($InstallerStock); Assert 'a stock "both" build does NOT start (740)' ($e -eq 740) "error $e" } else { Skip 'stock "both" build' 'no stock-both-Setup.exe in the share' }
+    } else { Skip 'launchability' 'needs a non-elevated admin with UAC on' }
+  }
+
+  # ---------------------------------------------------------------- S1 per user
+  Invoke-Scenario 'S1' 'per user: 0.3.4 -> 0.3.5 with 0.3.4''s seamless-update command' {
     Reset-SpaceKnife
-    Assert 'installed 0.3.4 /allusers' ((Run-Wait $OLD '/S /allusers' -Elevated) -eq 0) ''
+    $wv = Get-WebView2
+    $code = Run-Wait $Installer034 '/S /currentuser'
+    Assert 'installed 0.3.4 /currentuser' ($code -eq 0) "exit $code"
+    Assert-Layout034 $USERDIR 'HKCU'
+    $seed = Seed-Data
+    $script:s1Seed = $seed
+    Pin-Copy $SM_USER
+    $lnks = @($SM_USER, $DT_USER, $PIN)
+    $before = @{}; foreach ($l in $lnks) { $before[$l] = Get-Lnk $l }
+    Assert '0.3.4 shortcuts carry the AUMID' (($before[$SM_USER].aumid -eq $AUMID) -and ($before[$DT_USER].aumid -eq $AUMID)) "Start menu: $(Show-Lnk $before[$SM_USER]); desktop: $(Show-Lnk $before[$DT_USER])"
+    $setup = Stage-Update $InstallerNew
+    $since = Get-Date
+    $code = Spawn-Wait $setup '--updated /S --force-run /currentuser'
+    Assert 'the update exits 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    Assert-Updated $USERDIR 'HKCU' $NewVersion $before $lnks $since
+    Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
+    if (-not $wv) { Assert 'WebView2 installed by the update' ([bool](Get-WebView2)) "WebView2: $(Get-WebView2)" }
+    Note ("install log: " + (Get-InstallLog 30))
+    $script:s1Done = $true
+  }
+
+  if (Want 'S1') {
+    Invoke-Scenario 'S1U' 'uninstall: data kept by default, gone with --delete-app-data' {
+      if (-not $script:s1Done) { Skip 'S1U' 'S1 did not get to its end'; return }
+      Stop-SpaceKnife
+      $uninst = Join-Path $USERDIR 'uninstall.exe'
+      if (-not (Test-Path -LiteralPath $uninst)) { Assert 'an uninstaller to run' $false "no $uninst"; return }
+      $code = Run-Wait $uninst '/S /currentuser'
+      Assert 'uninstall /S /currentuser exits 0' ($code -eq 0) "exit $code"
+      $ended = Wait-Uninstaller $USERDIR
+      Assert '  its copy in %TEMP% has ended' $ended $script:uninstallerBusy
+      Assert 'program gone' (-not (Test-Path -LiteralPath (Join-Path $USERDIR 'SpaceKnife.exe'))) (Show-Left $USERDIR)
+      $entries = @(Get-Entries)
+      Assert 'entry gone' ($entries.Count -eq 0) (Show-Entries $entries)
+      $lnk = @(Get-Present @($SM_USER, $DT_USER))
+      Assert 'Start menu and desktop shortcuts gone' ($lnk.Count -eq 0) ("still there: " + ($lnk -join ', '))
+      if ($null -ne $script:s1Seed) { Assert-Seeded $script:s1Seed @('data') 'after uninstalling' }
+      # 0.3.4's uninstaller (installer.nsh customUnInstall) removed these whatever the flags but
+      # --updated; the updater copy with --updated too
+      $caches = @((Join-Path $DATA 'Cache'), (Join-Path $DATA 'updates'), $SHELLDIR, (Join-Path $ROAM 'SpaceKnife\electron'), (Join-Path $LOCAL 'spaceknife-electron-updater'))
+      $left = @(Get-Present $caches)
+      $why = ($left | ForEach-Object { "$_ [" + ((@(Get-ChildItem -LiteralPath $_ -Recurse -Force -File -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { $_.FullName })) -join ', ') + "]" }) -join '; '
+      $wv2 = (@(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { "$($_.CommandLine)" -like "*$SHELLDIR*" } | ForEach-Object { $_.ProcessId })) -join ','
+      $log = (@(Get-Content -LiteralPath $INSTALL_LOG -Encoding Unicode -ErrorAction SilentlyContinue | Select-String 'still there|msedgewebview2' | ForEach-Object { $_.Line })) -join ' | '
+      Assert 'caches gone (Cache, updates, the shell folder, 0.3.4''s profile and updater copy)' ($left.Count -eq 0) "left: $why; WebView2 still running: $wv2; log: $log"
+      $code = Run-Wait $InstallerNew '/S'
+      Assert 'fresh install /S' ($code -eq 0) "exit $code"
+      $loc = Get-InstallLocation 'HKCU'
+      Assert '  into Programs\SpaceKnife' ($loc -eq $USERDIR) "InstallLocation: $loc"
+      $sm = Get-Lnk $SM_USER
+      Assert '  Start menu shortcut with AUMID' ($sm.aumid -eq $AUMID) (Show-Lnk $sm)
+      Stop-SpaceKnife
+      $code = Run-Wait $uninst '/S /currentuser --delete-app-data'
+      Assert 'uninstall --delete-app-data' ($code -eq 0) "exit $code"
+      $ended = Wait-Uninstaller $USERDIR
+      Assert '  its copy in %TEMP% has ended' $ended $script:uninstallerBusy
+      Assert 'data folder gone' (-not (Test-Path -LiteralPath $DATA)) (Show-Left $DATA)
+    }
+  }
+
+  # ---------------------------------------------------------------- S2 all users
+  Invoke-Scenario 'S2' 'all users: 0.3.4 /allusers -> 0.3.5 started non-elevated with /allusers' {
+    if (-not $uacOn) { Skip 'S2' 'needs a non-elevated admin with UAC on (ConsentPromptBehaviorAdmin=0)'; return }
+    Reset-SpaceKnife
+    $code = Run-Wait $Installer034 '/S /allusers' -Elevated
+    Assert 'installed 0.3.4 /allusers' ($code -eq 0) "exit $code"
     Assert-Layout034 $MACHDIR 'HKLM'
     $seed = Seed-Data
     $lnks = @($SM_ALL, $DT_ALL)
     $before = @{}; foreach ($l in $lnks) { $before[$l] = Get-Lnk $l }
-    $setup = Stage-Update $NEW
+    $setup = Stage-Update $InstallerNew
     $since = Get-Date
     $code = Spawn-Wait $setup '--updated /S --force-run /allusers'
-    Assert 'the update exits 0 (it elevated itself)' ($code -eq 0) "exit $code"
+    Assert 'the update exits 0 (it elevated itself)' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     Assert-Updated $MACHDIR 'HKLM' $NewVersion $before $lnks $since
-    Assert 'no per-user entry appeared' (@(Get-Entries | Where-Object { $_.hive -eq 'HKCU' }).Count -eq 0) ''
+    $user = @(Get-Entries | Where-Object { $_.hive -eq 'HKCU' })
+    Assert 'no per-user entry appeared' ($user.Count -eq 0) (Show-Entries $user)
     Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
   }
-  End-Scenario
-}
 
-# ------------------------------------------------------------------ S4 running app, locked files
-if (Want 'S4') {
-  Start-Scenario 'S4' 'update while 0.3.4 runs; a lock the installer cannot lift'
-  Reset-SpaceKnife
-  [void](Run-Wait $OLD '/S /currentuser')
-  $seed = Seed-Data
-  $env:SPACEKNIFE_START_MINIMIZED = '1'
-  $old = Start-Process -FilePath (Join-Path $USERDIR 'SpaceKnife.exe') -PassThru
-  Start-Sleep -Seconds 15
-  Note ("running before: " + ((Get-AppProcs $USERDIR | ForEach-Object { Split-Path $_.path -Leaf }) -join ', '))
-  # a second, unrelated holder of one of 0.3.4's files (the installer may close it)
-  $holder = Start-Process powershell -PassThru -WindowStyle Hidden -ArgumentList "-NoProfile -Command `$f=[IO.File]::Open('$USERDIR\resources\app.asar','Open','Read','Read'); Start-Sleep 600"
-  Start-Sleep -Seconds 2
-  $since = Get-Date
-  $code = Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /currentuser'
-  Assert 'the update exits 0' ($code -eq 0) "exit $code"
-  Assert 'no 0.3.4 process left' (@(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'spaceknife-backend.exe' }).Count -eq 0) ''
-  Assert-Updated $USERDIR 'HKCU' $NewVersion $null @() $since
-  Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
-  try { Stop-Process -Id $holder.Id -Force -ErrorAction SilentlyContinue } catch {}
-  if ($uacOn) {
-    Note 'elevated lock holder: the installer (not elevated) cannot close it'
+  # ---------------------------------------------------------------- S4 running app, held files
+  Invoke-Scenario 'S4' 'update while 0.3.4 runs; a file held by another program; an elevated SpaceKnife' {
+    # 0.3.4 open, as when the user runs the new installer by hand while SpaceKnife is open: its
+    # processes closed (asked, then ended: spaceknife.nsh SkCloseIn), then updated
     Reset-SpaceKnife
-    [void](Run-Wait $OLD '/S /currentuser')
-    $h2 = Start-Process powershell -Verb RunAs -PassThru -WindowStyle Hidden -ArgumentList "-NoProfile -Command `$f=[IO.File]::Open('$USERDIR\resources\app.asar','Open','Read','Read'); Start-Sleep 300"
-    Start-Sleep -Seconds 3
+    $code = Run-Wait $Installer034 '/S /currentuser'
+    Assert 'installed 0.3.4 /currentuser' ($code -eq 0) "exit $code"
+    $seed = Seed-Data
+    $running034 = @(Start-034)
+    Assert '0.3.4 runs (its app and its backend)' (@($running034 | Where-Object { $_.path -like '*\SpaceKnife.exe' }).Count -ge 1 -and @($running034 | Where-Object { $_.path -like '*\spaceknife-backend.exe' }).Count -ge 1) (Show-Procs $running034)
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /currentuser'
-    Assert 'the update fails (non-zero)' ($code -ne 0) "exit $code"
-    Assert-Layout034 $USERDIR 'HKCU'
-    $back = @(Wait-App $USERDIR 30 | Where-Object { $_.started -ge $since })
-    Assert '0.3.4 was started again' ($back.Count -ge 1) ''
-    Stop-SpaceKnife
-    Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile -Command Stop-Process -Id $($h2.Id) -Force"
-  } else { Skip 'elevated lock holder' 'needs UAC on' }
-  End-Scenario
-}
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    Assert 'the update exits 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    $left = @(Get-StillRunning $running034)
+    Assert '0.3.4''s processes were ended' ($left.Count -eq 0) (Show-Procs $left)
+    Assert-Updated $USERDIR 'HKCU' $NewVersion $null @() $since
+    Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
+    Note ("install log: " + (Get-InstallLog 20))
 
-# ------------------------------------------------------------------ S5 WebView2
-if (Want 'S5') {
-  Start-Scenario 'S5' 'WebView2 missing (Windows 10)'
-  if ($RemoveWebView2 -and (Get-WebView2) -and ($os.BuildNumber -lt 22000)) {
-    $u = Get-RegValue 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView' 'UninstallString'
-    if ($u -and $u -match '^"([^"]+)"\s*(.*)$') { Note "removing WebView2: $u --force-uninstall"; Start-Process -FilePath $Matches[1] -ArgumentList "$($Matches[2]) --force-uninstall" -Verb RunAs -Wait }
-  }
-  if (Get-WebView2) { Skip 'S5' "WebView2 $(Get-WebView2) is installed (Windows 11 always has it; on Windows 10 pass -RemoveWebView2)" }
-  else {
+    # another program holds 0.3.4's app.asar and lets no one delete it: not SpaceKnife's to close;
+    # 0.3.4's uninstaller puts every file back, the update stops with nothing changed
     Reset-SpaceKnife
-    [void](Run-Wait $OLD '/S /currentuser')
+    $code = Run-Wait $Installer034 '/S /currentuser'
+    Assert 'installed 0.3.4 /currentuser again' ($code -eq 0) "exit $code"
+    $holder = Start-Process powershell -PassThru -WindowStyle Hidden -ArgumentList "-NoProfile -Command `$f=[IO.File]::Open('$USERDIR\resources\app.asar','Open','Read','Read'); Start-Sleep 600"
+    try {
+      Start-Sleep -Seconds 3
+      $since = Get-Date
+      $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+      Assert 'held file: the update stops (non-zero)' ($code -ne 0) "exit $code; install log: $(Get-InstallLog)"
+      Assert '  the other program was left running' (-not $holder.HasExited) "it ended, exit $(if ($holder.HasExited) { $holder.ExitCode })"
+      Assert-Layout034 $USERDIR 'HKCU'
+      $tauri = @(Get-Present @('spaceknife-cli.exe', 'uninstall.exe', 'ui') $USERDIR)
+      Assert '  no 0.3.5 files' ($tauri.Count -eq 0) ($tauri -join ', ')
+      Assert '  no staging folder left' (-not (Test-Path -LiteralPath "$USERDIR.sk-staging")) (Show-Left "$USERDIR.sk-staging")
+      $back = @(Wait-App $USERDIR 30 $since)
+      Assert '  0.3.4 was started again' ($back.Count -ge 1) ("running from ${USERDIR}: " + (Show-Procs (Get-AppProcs $USERDIR)))
+    } finally { try { Stop-Process -Id $holder.Id -Force -ErrorAction Stop } catch {} }
+    Note ("install log: " + (Get-InstallLog 20))
+
+    # an elevated 0.3.4 the installer (not elevated) can't end: the update stops before any change
+    if ($uacOn) {
+      Reset-SpaceKnife
+      [void](Run-Wait $Installer034 '/S /currentuser')
+      [void](Start-034 -Elevated)
+      # nothing else of SpaceKnife's runs after the reset: these are the elevated ones
+      $elevated = @(Get-NamedProcs 'SpaceKnife.exe')
+      Assert 'an elevated 0.3.4 runs' ($elevated.Count -ge 1) (Show-Procs $elevated)
+      $since = Get-Date
+      $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+      Assert 'elevated 0.3.4: the update stops (non-zero)' ($code -ne 0) "exit $code"
+      Assert-Layout034 $USERDIR 'HKCU'
+      Assert '  the elevated 0.3.4 still runs' (@(Get-StillRunning $elevated).Count -ge 1) (Show-Procs (Get-NamedProcs 'SpaceKnife.exe'))
+      $log = Get-InstallLog 20
+      Assert '  the log says what could not be ended' ($log -match 'could not end: SpaceKnife\.exe') $log
+      Assert '  0.3.4 was started again' (@(Wait-App $USERDIR 30 $since).Count -ge 1) (Show-Procs (Get-AppProcs $USERDIR))
+      Stop-SpaceKnife
+      Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile -Command Get-Process SpaceKnife, spaceknife-backend -ErrorAction SilentlyContinue | Stop-Process -Force"
+    } else { Skip 'an elevated SpaceKnife' 'needs a non-elevated script with UAC on' }
+  }
+
+  # ---------------------------------------------------------------- S5 WebView2
+  Invoke-Scenario 'S5' 'WebView2 missing (Windows 10)' {
+    if ($RemoveWebView2 -and (Get-WebView2) -and ($os.BuildNumber -lt 22000)) {
+      $u = Get-RegValue 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView' 'UninstallString'
+      if ($u -and ("$u" -match '^"([^"]+)"\s*(.*)$')) {
+        $wvExe = $Matches[1]; $wvArgs = $Matches[2]
+        Note "removing WebView2: $u --force-uninstall"
+        Start-Process -FilePath $wvExe -ArgumentList "$wvArgs --force-uninstall" -Verb RunAs -Wait
+      }
+    }
+    if (Get-WebView2) { Skip 'S5' "WebView2 $(Get-WebView2) is installed (Windows 11 always has it; on Windows 10 pass -RemoveWebView2)"; return }
+    Reset-SpaceKnife
+    [void](Run-Wait $Installer034 '/S /currentuser')
     $seed = Seed-Data
     if ($Offline) {
       Note 'blocking outbound traffic: the WebView2 bootstrapper must fail and 0.3.4 must stay'
       New-NetFirewallRule -DisplayName 'sk-e2e-offline' -Direction Outbound -Action Block | Out-Null
       try {
         $since = Get-Date
-        $code = Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /currentuser'
+        $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
         Assert 'the update fails' ($code -ne 0) "exit $code"
         Assert-Layout034 $USERDIR 'HKCU'
-        Assert '0.3.4 was started again' (@(Wait-App $USERDIR 30 | Where-Object { $_.started -ge $since }).Count -ge 1) ''
+        Assert '0.3.4 was started again' (@(Wait-App $USERDIR 30 $since).Count -ge 1) (Show-Procs (Get-AppProcs $USERDIR))
         Stop-SpaceKnife
       } finally { Remove-NetFirewallRule -DisplayName 'sk-e2e-offline' }
     }
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /currentuser'
-    Assert 'the update exits 0' ($code -eq 0) "exit $code"
-    Assert 'WebView2 is installed now' ([bool](Get-WebView2)) "$(Get-WebView2)"
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    Assert 'the update exits 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    Assert 'WebView2 is installed now' ([bool](Get-WebView2)) "WebView2: $(Get-WebView2)"
     Assert-Updated $USERDIR 'HKCU' $NewVersion $null @($SM_USER) $since
     Assert-Seeded $seed @('data') 'after the update'
   }
-  End-Scenario
-}
 
-# ------------------------------------------------------------------ S6 downgrade and reinstall
-if (Want 'S6') {
-  Start-Scenario 'S6' '0.3.4 over 0.3.5 (downgrade), 0.3.5 again, 0.3.5 over itself'
-  Reset-SpaceKnife
-  [void](Run-Wait $NEW '/S')
-  $seed = Seed-Data
-  Stop-SpaceKnife
-  $code = Run-Wait $OLD '/S /currentuser'
-  Assert '0.3.4 installer exits 0' ($code -eq 0) "exit $code"
-  $e = @(Get-Entries)
-  Assert 'one entry, 0.3.4' ((@($e).Count -eq 1) -and ($e[0].version -eq '0.3.4') -and ($e[0].key -eq $GUID)) ($e | ConvertTo-Json -Compress)
-  Assert-Layout034 $USERDIR 'HKCU'
-  $tauriLeft = @('spaceknife-cli.exe', 'uninstall.exe', 'ui\index.html', 'licenses') | Where-Object { Test-Path -LiteralPath (Join-Path $USERDIR $_) }
-  Assert 'no Tauri files left' (@($tauriLeft).Count -eq 0) ($tauriLeft -join ', ')
-  Assert '0.3.4 shortcut points at its program' ((Get-Lnk $SM_USER).target -eq (Join-Path $USERDIR 'SpaceKnife.exe')) ''
-  Assert-Seeded $seed @('data') 'after the downgrade'
-  Stop-SpaceKnife
-  $since = Get-Date
-  $code = Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /currentuser'
-  Assert 'up to 0.3.5 again' ($code -eq 0) "exit $code"
-  Assert-Updated $USERDIR 'HKCU' $NewVersion $null @($SM_USER) $since
-  Stop-SpaceKnife
-  $code = Run-Wait $NEW '/S'
-  Assert '0.3.5 over 0.3.5 exits 0' ($code -eq 0) "exit $code"
-  Assert-Updated $USERDIR 'HKCU' $NewVersion $null @($SM_USER) (Get-Date) -NoRestartCheck
-  End-Scenario
-}
-
-# ------------------------------------------------------------------ S7 both scopes
-if (Want 'S7') {
-  Start-Scenario 'S7' 'per-user and per-machine 0.3.4 side by side'
-  if (-not $uacOn) { Skip 'S7' 'needs a non-elevated admin with UAC on' }
-  else {
+  # ---------------------------------------------------------------- S6 downgrade and reinstall
+  Invoke-Scenario 'S6' '0.3.4 over 0.3.5 (downgrade), 0.3.5 again, 0.3.5 over itself while it runs' {
     Reset-SpaceKnife
-    [void](Run-Wait $OLD '/S /allusers' -Elevated)
-    [void](Run-Wait $OLD '/S /currentuser')
-    Assert 'two 0.3.4 entries' (@(Get-Entries | Where-Object { $_.version -eq '0.3.4' }).Count -eq 2) (Get-Entries | ConvertTo-Json -Compress)
-    $since = Get-Date
-    Assert 'per-user update' ((Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /currentuser') -eq 0) ''
-    $e = @(Get-Entries)
-    Assert 'HKCU 0.3.5, HKLM still 0.3.4' ((@($e | Where-Object { $_.hive -eq 'HKCU' -and $_.version -eq $NewVersion }).Count -eq 1) -and (@($e | Where-Object { $_.hive -eq 'HKLM' -and $_.version -eq '0.3.4' }).Count -eq 1)) ($e | ConvertTo-Json -Compress)
-    Assert 'Program Files 0.3.4 untouched' (Test-Path "$MACHDIR\resources\app.asar") ''
+    $code = Run-Wait $InstallerNew '/S'
+    Assert 'installed 0.3.5 /S' ($code -eq 0) "exit $code"
+    $seed = Seed-Data
     Stop-SpaceKnife
-    Assert 'per-machine update' ((Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /allusers') -eq 0) ''
+    $code = Run-Wait $Installer034 '/S /currentuser'
+    Assert '0.3.4 installer exits 0' ($code -eq 0) "exit $code"
     $e = @(Get-Entries)
-    Assert 'both 0.3.5' (@($e | Where-Object { $_.version -eq $NewVersion }).Count -eq 2) ($e | ConvertTo-Json -Compress)
+    Assert 'one entry, 0.3.4' (($e.Count -eq 1) -and ($e[0].version -eq '0.3.4') -and ($e[0].key -eq $GUID)) (Show-Entries $e)
+    Assert-Layout034 $USERDIR 'HKCU'
+    $tauriLeft = @(Get-Present @('spaceknife-cli.exe', 'uninstall.exe', 'ui\index.html', 'licenses', 'installed-files.txt') $USERDIR)
+    Assert 'no Tauri files left' ($tauriLeft.Count -eq 0) ($tauriLeft -join ', ')
+    $sm = Get-Lnk $SM_USER
+    Assert '0.3.4 shortcut points at its program' ($sm.target -eq (Join-Path $USERDIR 'SpaceKnife.exe')) (Show-Lnk $sm)
+    Assert-Seeded $seed @('data') 'after the downgrade'
+    Stop-SpaceKnife
+    $since = Get-Date
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    Assert 'up to 0.3.5 again' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    Assert-Updated $USERDIR 'HKCU' $NewVersion $null @($SM_USER) $since
+    # the fork over itself, in place (SkRemoveListed, SkCheckReplaceable), while it runs (the
+    # update above started it): closed first
+    $running = @(Wait-App $USERDIR 30)
+    Note ("running before: " + (Show-Procs $running))
+    $code = Run-Wait $InstallerNew '/S'
+    Assert '0.3.5 over 0.3.5 exits 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    $left = @(Get-StillRunning $running)
+    Assert '  the running 0.3.5 was closed' ($left.Count -eq 0) (Show-Procs $left)
+    Assert-Updated $USERDIR 'HKCU' $NewVersion $null @($SM_USER) (Get-Date) -NoRestartCheck
+    Assert-Seeded $seed @('data') 'after reinstalling'
+  }
+
+  # ---------------------------------------------------------------- S7 both scopes
+  Invoke-Scenario 'S7' 'per-user and per-machine 0.3.4 side by side' {
+    if (-not $uacOn) { Skip 'S7' 'needs a non-elevated admin with UAC on'; return }
+    Reset-SpaceKnife
+    [void](Run-Wait $Installer034 '/S /allusers' -Elevated)
+    [void](Run-Wait $Installer034 '/S /currentuser')
+    $e = @(Get-Entries)
+    Assert 'two 0.3.4 entries' (@($e | Where-Object { $_.version -eq '0.3.4' }).Count -eq 2) (Show-Entries $e)
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    Assert 'per-user update' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    $e = @(Get-Entries)
+    Assert 'HKCU 0.3.5, HKLM still 0.3.4' ((@($e | Where-Object { $_.hive -eq 'HKCU' -and $_.version -eq $NewVersion }).Count -eq 1) -and (@($e | Where-Object { $_.hive -eq 'HKLM' -and $_.version -eq '0.3.4' }).Count -eq 1)) (Show-Entries $e)
+    Assert 'Program Files 0.3.4 untouched' (Test-Path -LiteralPath "$MACHDIR\resources\app.asar") "no $MACHDIR\resources\app.asar"
+    Stop-SpaceKnife
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /allusers'
+    Assert 'per-machine update' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    $e = @(Get-Entries)
+    Assert 'both 0.3.5' (@($e | Where-Object { $_.version -eq $NewVersion }).Count -eq 2) (Show-Entries $e)
     Stop-SpaceKnife
   }
-  End-Scenario
-}
 
-# ------------------------------------------------------------------ S8 fork -> fork
-if (Want 'S8') {
-  Start-Scenario 'S8' 'the fork -> a newer fork with the update command every version uses'
-  if (-not (Test-Path -LiteralPath $NEXT)) { Skip 'S8' 'no -NextVersion installer in the share' }
-  else {
+  # ---------------------------------------------------------------- S8 fork -> fork
+  Invoke-Scenario 'S8' 'the fork -> a newer fork with the update command every version uses' {
+    if (-not (Test-Path -LiteralPath $InstallerNext)) { Skip 'S8' 'no -NextVersion installer in the share'; return }
     Reset-SpaceKnife
-    [void](Run-Wait $NEW '/S')
+    $code = Run-Wait $InstallerNew '/S'
+    Assert "installed $NewVersion /S" ($code -eq 0) "exit $code"
     $seed = Seed-Data
     Pin-Copy $SM_USER
-    Set-Content -LiteralPath (Join-Path $USERDIR 'ui\stale-from-0.3.5.js') -Value '//'
+    $stale = Join-Path $USERDIR "ui\stale-from-$NewVersion.js"
+    Set-Content -LiteralPath $stale -Value '//'
     $lnks = @($SM_USER, $DT_USER, $PIN); $before = @{}; foreach ($l in $lnks) { $before[$l] = Get-Lnk $l }
     Stop-SpaceKnife
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $NEXT) '--updated /S --force-run /currentuser'
-    Assert 'exit 0' ($code -eq 0) "exit $code"
+    $code = Spawn-Wait (Stage-Update $InstallerNext) '--updated /S --force-run /currentuser'
+    Assert 'exit 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     Assert-Updated $USERDIR 'HKCU' $NextVersion $before $lnks $since
-    Assert 'stale ui file removed' (-not (Test-Path (Join-Path $USERDIR 'ui\stale-from-0.3.5.js'))) ''
+    Assert 'stale ui file removed' (-not (Test-Path -LiteralPath $stale)) "still there: $stale"
     Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
   }
-  End-Scenario
-}
 
-# ------------------------------------------------------------------ S9 custom folder
-if (Want 'S9') {
-  Start-Scenario 'S9' '0.3.4 in a folder of its own, update without a scope flag'
-  Reset-SpaceKnife
-  $dir = 'C:\SK Test\SpaceKnife'
-  [void](Run-Wait $OLD "/S /currentuser /D=$dir")
-  Assert-Layout034 $dir 'HKCU'
-  $since = Get-Date
-  $code = Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run'
-  Assert 'exit 0' ($code -eq 0) "exit $code"
-  Assert-Updated $dir 'HKCU' $NewVersion $null @($SM_USER) $since
-  End-Scenario
-}
-
-# ------------------------------------------------------------------ S10 0.3.4 in the data folder
-if (Want 'S10') {
-  Start-Scenario 'S10' '0.3.4 installed in %LOCALAPPDATA%\SpaceKnife (the data folder)'
-  Reset-SpaceKnife
-  $seed = Seed-Data
-  [void](Run-Wait $OLD "/S /currentuser /D=$DATA")
-  Assert '0.3.4 is in the data folder' ((Get-InstallLocation 'HKCU') -eq $DATA) (Get-InstallLocation 'HKCU')
-  Assert-Seeded $seed @('data') 'after installing 0.3.4 there'
-  $since = Get-Date
-  $code = Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /currentuser'
-  Assert 'exit 0' ($code -eq 0) "exit $code"
-  Assert-Seeded $seed @('data') 'after the update'
-  Assert 'moved to Programs\SpaceKnife' ((Get-InstallLocation 'HKCU') -eq $USERDIR) (Get-InstallLocation 'HKCU')
-  $left = @($ELECTRON_FILES | Where-Object { Test-Path -LiteralPath (Join-Path $DATA $_) })
-  Assert 'no Electron files in the data folder' ($left.Count -eq 0) ($left -join ', ')
-  Assert 'shortcut retargeted' ((Get-Lnk $SM_USER).target -eq (Join-Path $USERDIR 'SpaceKnife.exe')) (Get-Lnk $SM_USER).target
-  End-Scenario
-}
-
-# ------------------------------------------------------------------ S11 console launcher
-if (Want 'S11') {
-  Start-Scenario 'S11' 'SpaceKnife.com --headless --help'
-  $loc = Get-InstallLocation 'HKCU'; if (-not $loc) { $loc = Get-InstallLocation 'HKLM' }
-  if (-not $loc -or -not (Test-Path (Join-Path $loc 'SpaceKnife.com'))) { [void](Run-Wait $NEW '/S'); $loc = Get-InstallLocation 'HKCU' }
-  $out = & (Join-Path $loc 'SpaceKnife.com') --headless --help 2>&1 | Out-String
-  Assert 'exit 0' ($LASTEXITCODE -eq 0) "exit $LASTEXITCODE"
-  Assert 'prints headless usage' ($out -match '--listen' -or $out -match 'headless') ($out.Substring(0, [Math]::Min(300, $out.Length)))
-  End-Scenario
-}
-
-# ------------------------------------------------------------------ S12 Defender
-if (Want 'S12') {
-  Start-Scenario 'S12' 'Microsoft Defender'
-  $mp = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
-  if (-not (Test-Path $mp)) { Skip 'S12' 'no MpCmdRun' }
-  else {
-    foreach ($f in @($NEW, $NEXT) | Where-Object { Test-Path -LiteralPath $_ }) {
-      $o = & $mp -Scan -ScanType 3 -File $f -DisableRemediation 2>&1 | Out-String
-      Assert "$(Split-Path $f -Leaf): no threat" ($LASTEXITCODE -eq 0) ($o.Trim() -replace '\s+', ' ')
-    }
-    try {
-      $det = Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1116, 1117; StartTime = [datetime]::ParseExact($stamp, 'yyyyMMdd-HHmmss', $null) } -ErrorAction Stop
-      Assert 'no detections during the run' (@($det).Count -eq 0) (($det | Select-Object -First 3 | ForEach-Object { $_.Message }) -join ' | ')
-    } catch { Assert 'no detections during the run' $true 'no events' }
+  # ---------------------------------------------------------------- S9 custom folder
+  Invoke-Scenario 'S9' '0.3.4 in a folder of its own, update without a scope flag' {
+    Reset-SpaceKnife
+    $dir = 'C:\SK Test\SpaceKnife'
+    $code = Run-Wait $Installer034 "/S /currentuser /D=$dir"
+    Assert "installed 0.3.4 in $dir" ($code -eq 0) "exit $code"
+    Assert-Layout034 $dir 'HKCU'
+    $since = Get-Date
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run'
+    Assert 'exit 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    Assert-Updated $dir 'HKCU' $NewVersion $null @($SM_USER) $since
   }
-  End-Scenario
+
+  # ---------------------------------------------------------------- S10 0.3.4 in the data folder
+  Invoke-Scenario 'S10' '0.3.4 installed in %LOCALAPPDATA%\SpaceKnife (the data folder)' {
+    Reset-SpaceKnife
+    $seed = Seed-Data
+    $code = Run-Wait $Installer034 "/S /currentuser /D=$DATA"
+    Assert "installed 0.3.4 in $DATA" ($code -eq 0) "exit $code"
+    $loc = Get-InstallLocation 'HKCU'
+    Assert '0.3.4 is in the data folder' ($loc -eq $DATA) "InstallLocation: $loc"
+    Assert-Seeded $seed @('data') 'after installing 0.3.4 there'
+    $since = Get-Date
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    Assert 'exit 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    Assert-Seeded $seed @('data') 'after the update'
+    $loc = Get-InstallLocation 'HKCU'
+    Assert 'moved to Programs\SpaceKnife' ($loc -eq $USERDIR) "InstallLocation: $loc"
+    $left = @(Get-Present $ELECTRON_FILES $DATA)
+    Assert 'no Electron files in the data folder' ($left.Count -eq 0) ($left -join ', ')
+    $sm = Get-Lnk $SM_USER
+    Assert 'shortcut retargeted' ($sm.target -eq (Join-Path $USERDIR 'SpaceKnife.exe')) (Show-Lnk $sm)
+  }
+
+  # ---------------------------------------------------------------- S11 console launcher
+  Invoke-Scenario 'S11' 'SpaceKnife.com --headless --help' {
+    $loc = Get-InstallLocation 'HKCU'; if (-not $loc) { $loc = Get-InstallLocation 'HKLM' }
+    if (-not $loc -or -not (Test-Path -LiteralPath (Join-Path $loc 'SpaceKnife.com'))) {
+      $code = Run-Wait $InstallerNew '/S'
+      Note "installed $NewVersion for this: exit $code"
+      $loc = Get-InstallLocation 'HKCU'
+    }
+    if (-not $loc) { Assert 'an installation to run it from' $false "no InstallLocation in HKCU\Software\$GUID"; return }
+    $r = Run-Capture (Join-Path $loc 'SpaceKnife.com') '--headless --help' 60
+    $text = "$($r.out) $($r.err)"
+    Assert 'exit 0' ($r.code -eq 0) "exit $($r.code): $(Shorten $text)"
+    Assert 'prints headless usage' (($text -match '--listen') -or ($text -match 'headless')) (Shorten $text)
+  }
+
+  # ---------------------------------------------------------------- S12 Defender
+  Invoke-Scenario 'S12' 'Microsoft Defender' {
+    $mp = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+    if (-not (Test-Path -LiteralPath $mp)) { Skip 'S12' 'no MpCmdRun'; return }
+    foreach ($f in @(@($InstallerNew, $InstallerNext) | Where-Object { Test-Path -LiteralPath $_ })) {
+      $r = Run-Capture $mp "-Scan -ScanType 3 -File `"$f`" -DisableRemediation" 900
+      Assert "$(Split-Path $f -Leaf): no threat" ($r.code -eq 0) "exit $($r.code): $(Shorten "$($r.out) $($r.err)" 600)"
+    }
+    $start = [datetime]::ParseExact($stamp, 'yyyyMMdd-HHmmss', $null)
+    try {
+      $det = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1116, 1117; StartTime = $start } -ErrorAction Stop)
+      Assert 'no detections during the run' ($det.Count -eq 0) (($det | Select-Object -First 3 | ForEach-Object { $_.Message }) -join ' | ')
+    } catch {
+      if ($_.Exception.Message -match 'No events were found') { Assert 'no detections during the run' $true '' }
+      else { Skip 'detections during the run' "the Defender log could not be read: $($_.Exception.Message)" }
+    }
+  }
+} finally {
+  try { Reset-SpaceKnife } catch { Write-Warning "the last Reset-SpaceKnife failed: $($_.Exception.Message)" }
+  Save-Results
 }
 
-Reset-SpaceKnife
-Save-Results
 $failed = @($results | Where-Object { $_.status -eq 'fail' })
 Write-Host ("done: {0} scenarios, {1} failed; {2}" -f $results.Count, $failed.Count, (Join-Path $OutDir "installer-experiments-$env:COMPUTERNAME-$stamp.json"))
 if ($failed.Count) { exit 1 }
