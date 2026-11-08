@@ -111,3 +111,16 @@ fn the_page_may_load_only_its_own_files_and_reach_only_its_backend() {
     assert!(!all.contains("unsafe-eval"));
     assert!(!all.contains("http:") && !all.contains("https:"), "{all}");
 }
+
+#[test]
+fn the_window_groups_with_the_installers_shortcuts() {
+    // The installer's shortcuts (0.3.4's electron-builder ones and the forked Tauri template's,
+    // utils.nsh SetLnkAppUserModelId: ${BUNDLEID}) carry the identifier as their AppUserModelID;
+    // the running window must say the same, or Windows shows it apart from the pinned icon
+    let id = config("tauri.conf.json")["identifier"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(id, "io.github.duskxi.spaceknife");
+    assert_eq!(spaceknife_desktop::window::APP_USER_MODEL_ID, id);
+}
