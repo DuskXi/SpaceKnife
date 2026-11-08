@@ -16,12 +16,21 @@
 //! POSIX: every entry is reached relative to its folder's open descriptor (`fstatat`, `openat`
 //! with `O_NOFOLLOW`, `unlinkat`), so a folder above that is renamed or replaced changes nothing;
 //! a folder opened must be the one `fstatat` saw (device and inode) and on the same mount (Linux:
-//! the `statx` mount id, else `/proc/self/mountinfo`).
+//! the `statx` mount id, else `/proc/self/mountinfo`). Only the deleted folder and the
+//! `OPEN_FOLDERS` deepest levels keep their descriptor open (a tree thousands of levels deep
+//! would otherwise run out of them: 1024 on Linux, 256 for a macOS program); a level closed on
+//! the way down is opened again on the way back, as `..` of the level below it or, failing that,
+//! by the names from the nearest open level, and it must still be that folder (device and inode)
+//! or it is left alone (`moved_inside`).
 //!
 //! Windows: every entry is opened by its full `\\?\` path (no Win32 rewriting of trailing dots or
 //! spaces, no MAX_PATH) without following a reparse point, and checked on that handle: on the same
 //! volume, and opened under the name its folder's and the listed name give (a link swapped in
-//! on the way resolves to another name). It is then deleted through that very handle (POSIX
+//! on the way resolves to another name). A name that matches only in case (SMB redirectors,
+//! WinFsp and Dokan report the case the first program to open it used) counts only for the very
+//! entry the folder lists under that name: its file id (FileIdBothDirectoryInformation, listed
+//! through a handle checked to be the folder) is the handle's file index; in a case-sensitive
+//! folder another case is another entry. It is then deleted through that very handle (POSIX
 //! semantics where the file system has them; a read-only item loses the flag first, as Explorer
 //! does after asking). A folder is listed through a handle to it, checked to be the same folder.
 //!
@@ -66,6 +75,19 @@ fn moved_inside() -> io::Error {
 
 fn cancelled(cancel: Option<CancelFn<'_>>) -> bool {
     cancel.is_some_and(|c| c())
+}
+
+/// POSIX: folder levels below the deleted folder that keep their descriptor open at a time.
+#[cfg(unix)]
+const OPEN_FOLDERS: usize = 32;
+
+/// [`OPEN_FOLDERS`], or what a test set.
+#[cfg(unix)]
+fn open_folders() -> usize {
+    match seams::OPEN_FOLDERS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => OPEN_FOLDERS,
+        n => n,
+    }
 }
 
 /// Whether a listed name (its UTF-16 units or bytes) can be joined to its folder's path and still
@@ -117,7 +139,7 @@ mod tests {
 
 #[cfg(unix)]
 mod imp {
-    use std::ffi::{CString, OsString};
+    use std::ffi::{CStr, CString, OsString};
     use std::io;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -126,7 +148,11 @@ mod imp {
     use super::*;
 
     struct Frame {
-        fd: OwnedFd,
+        /// None while deeper levels hold the descriptors (the deleted folder's is never closed)
+        fd: Option<OwnedFd>,
+        /// what it is: a folder reached again must be this one
+        dev: libc::dev_t,
+        ino: libc::ino_t,
         /// its name in its parent's folder (the top: empty)
         name: CString,
         /// as given (messages, the seams)
@@ -136,11 +162,33 @@ mod imp {
         names: std::vec::IntoIter<OsString>,
     }
 
+    impl Frame {
+        fn raw(&self) -> RawFd {
+            self.fd
+                .as_ref()
+                .expect("the folder being worked on is open")
+                .as_raw_fd()
+        }
+
+        fn is(&self, st: &libc::stat) -> bool {
+            st.st_dev == self.dev && st.st_ino == self.ino
+        }
+    }
+
     fn last() -> io::Error {
         io::Error::last_os_error()
     }
 
-    fn open_dir_at(dir: RawFd, name: &CString) -> io::Result<OwnedFd> {
+    /// A folder that is no longer where the deletion left it: renamed away, swapped for a link
+    /// or a file, gone.
+    fn moved(e: io::Error) -> io::Error {
+        match e.raw_os_error() {
+            Some(libc::ELOOP) | Some(libc::ENOTDIR) | Some(libc::ENOENT) => super::moved_inside(),
+            _ => e,
+        }
+    }
+
+    fn open_dir_at(dir: RawFd, name: &CStr) -> io::Result<OwnedFd> {
         // SAFETY: a NUL-terminated name; the descriptor is owned from here on.
         let fd = unsafe {
             libc::openat(
@@ -244,18 +292,56 @@ mod imp {
 
     fn frame(
         fd: OwnedFd,
+        st: &libc::stat,
         name: CString,
         path: PathBuf,
         real: Option<PathBuf>,
     ) -> io::Result<Frame> {
         let names = super::seam_names(&path, list(fd.as_raw_fd())?);
         Ok(Frame {
-            fd,
+            fd: Some(fd),
+            dev: st.st_dev,
+            ino: st.st_ino,
             name,
             path,
             real,
             names: names.into_iter(),
         })
+    }
+
+    /// The `..` of `child`'s open folder, if that is `parent` (device and inode).
+    fn parent_of(child: &Frame, parent: &Frame) -> Option<OwnedFd> {
+        let fd = open_dir_at(child.fd.as_ref()?.as_raw_fd(), c"..").ok()?;
+        let st = stat_fd(fd.as_raw_fd()).ok()?;
+        parent.is(&st).then_some(fd)
+    }
+
+    /// Open the deepest level of `stack` again (its descriptor was closed on the way down): by
+    /// the names from the nearest level that is open, each folder checked to be the one left
+    /// there. Levels on the way keep their descriptor only within `keep` of the deepest.
+    fn reach(stack: &mut [Frame], keep: usize) -> io::Result<()> {
+        let deepest = stack.len() - 1;
+        let Some(from) = (0..=deepest).rev().find(|&k| stack[k].fd.is_some()) else {
+            return Err(super::moved_inside()); // the deleted folder is always open
+        };
+        let kept = stack.len().saturating_sub(keep);
+        let mut held: Option<OwnedFd> = None; // a level on the way that does not keep it
+        for k in from + 1..=deepest {
+            let dir = held
+                .as_ref()
+                .map_or_else(|| stack[k - 1].raw(), |h| h.as_raw_fd());
+            let fd = open_dir_at(dir, &stack[k].name).map_err(moved)?;
+            if !stack[k].is(&stat_fd(fd.as_raw_fd())?) {
+                return Err(super::moved_inside());
+            }
+            if k >= kept {
+                stack[k].fd = Some(fd);
+                held = None;
+            } else {
+                held = Some(fd);
+            }
+        }
+        Ok(())
     }
 
     struct Tree {
@@ -290,7 +376,7 @@ mod imp {
             let real = mounts
                 .as_ref()
                 .map(|_| super::super::paths::resolve_lenient(top));
-            let f = frame(fd, CString::default(), top.to_path_buf(), real)?;
+            let f = frame(fd, &st, CString::default(), top.to_path_buf(), real)?;
             Ok((
                 f,
                 Tree {
@@ -307,16 +393,35 @@ mod imp {
                 return out;
             }
         };
+        let keep = super::open_folders().max(1);
         let mut stack = vec![first];
-        while let Some(f) = stack.last_mut() {
+        loop {
+            // back at a level closed on the way down (its own folder below could not reach it)
+            if stack.last().is_some_and(|f| f.fd.is_none())
+                && let Err(e) = reach(&mut stack, keep)
+            {
+                out.fail(e);
+                stack.pop(); // what it still holds stays, and so does it
+                continue;
+            }
+            let Some(f) = stack.last_mut() else { break };
             let Some(name) = f.names.next() else {
                 let done = stack.pop().unwrap();
-                let gone = match stack.last() {
-                    Some(parent) => unlink_at(parent.fd.as_raw_fd(), &done.name, true),
-                    None => {
-                        drop(done.fd);
-                        std::fs::remove_dir(top)
+                let gone = if let Some(parent) = stack.last_mut() {
+                    if parent.fd.is_none() {
+                        parent.fd = parent_of(&done, parent);
                     }
+                    if parent.fd.is_none()
+                        && let Err(e) = reach(&mut stack, keep)
+                    {
+                        out.fail(e);
+                        stack.pop(); // what it still holds stays, and so does it
+                        continue;
+                    }
+                    unlink_at(stack.last().unwrap().raw(), &done.name, true)
+                } else {
+                    drop(done.fd);
+                    std::fs::remove_dir(top)
                 };
                 match gone {
                     Ok(()) => out.deleted = true,
@@ -335,7 +440,7 @@ mod imp {
             let path = f.path.join(&name);
             let real = f.real.as_ref().map(|r| r.join(&name));
             seams::entering(&path);
-            let dirfd = f.fd.as_raw_fd();
+            let dirfd = f.raw();
             let st = match stat_at(dirfd, &c) {
                 Ok(st) => st,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => continue, // gone meanwhile
@@ -380,10 +485,17 @@ mod imp {
                 if elsewhere {
                     return Err(super::mount_inside());
                 }
-                frame(cfd, c.clone(), path.clone(), real.clone())
+                frame(cfd, &now, c.clone(), path.clone(), real.clone())
             })();
             match opened {
-                Ok(child) => stack.push(child),
+                Ok(child) => {
+                    stack.push(child);
+                    // the deleted folder and the `keep` deepest levels stay open
+                    let n = stack.len();
+                    if n > keep + 1 {
+                        stack[n - 1 - keep].fd = None;
+                    }
+                }
                 Err(e) => out.fail(e),
             }
         }
@@ -511,10 +623,13 @@ mod imp {
     use std::path::{Path, PathBuf};
     use std::ptr::{null, null_mut};
 
+    use std::collections::HashMap;
+
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FULL_DIR_INFO, GetFileInformationByHandle,
-        GetFileInformationByHandleEx, SetFileInformationByHandle,
+        BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FULL_DIR_INFO, FILE_ID_BOTH_DIR_INFO,
+        GetFileInformationByHandle, GetFileInformationByHandleEx, SetFileInformationByHandle,
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
 
@@ -541,6 +656,8 @@ mod imp {
     const FILE_NAME_INFO: i32 = 2;
     const FILE_DISPOSITION_INFO: i32 = 4;
     const FILE_ATTRIBUTE_TAG_INFO: i32 = 9;
+    const FILE_ID_BOTH_DIRECTORY_INFO: i32 = 10;
+    const FILE_ID_BOTH_DIRECTORY_RESTART_INFO: i32 = 11;
     const FILE_FULL_DIRECTORY_INFO: i32 = 14;
     const FILE_FULL_DIRECTORY_RESTART_INFO: i32 = 15;
     const FILE_DISPOSITION_INFO_EX: i32 = 21;
@@ -686,7 +803,10 @@ mod imp {
             return Err(last());
         }
         let (volume, index) = identity(&h)?;
-        let name = opened_name(&h, buf);
+        let name = opened_name(&h, buf).map(|mut n| {
+            seams::opened_name(&mut n);
+            n
+        });
         Ok(Some((
             h,
             Facts {
@@ -813,27 +933,56 @@ mod imp {
         }
     }
 
-    /// The names in the folder `h` is open on (with listing access).
-    fn list(h: &Handle, buf: &mut [u64]) -> io::Result<Vec<OsString>> {
+    /// A directory information class: the restart and the next query, where an entry's name
+    /// length and name are, and its file id (FileIdBoth).
+    struct Class {
+        restart: i32,
+        next: i32,
+        len_at: usize,
+        name_at: usize,
+        id_at: Option<usize>,
+    }
+
+    const FULL: Class = Class {
+        restart: FILE_FULL_DIRECTORY_RESTART_INFO,
+        next: FILE_FULL_DIRECTORY_INFO,
+        len_at: std::mem::offset_of!(FILE_FULL_DIR_INFO, FileNameLength),
+        name_at: std::mem::offset_of!(FILE_FULL_DIR_INFO, FileName),
+        id_at: None,
+    };
+
+    const ID_BOTH: Class = Class {
+        restart: FILE_ID_BOTH_DIRECTORY_RESTART_INFO,
+        next: FILE_ID_BOTH_DIRECTORY_INFO,
+        len_at: std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileNameLength),
+        name_at: std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileName),
+        id_at: Some(std::mem::offset_of!(FILE_ID_BOTH_DIR_INFO, FileId)),
+    };
+
+    /// Every entry of the folder `h` is open on (with listing access), `.` and `..` left out: its
+    /// name and, where the class has them, its file id.
+    fn entries(
+        h: &Handle,
+        buf: &mut [u64],
+        class: &Class,
+        mut each: impl FnMut(Vec<u16>, Option<u64>),
+    ) -> io::Result<()> {
         let bytes = (buf.len() * 8) as u32;
-        let name_at = std::mem::offset_of!(FILE_FULL_DIR_INFO, FileName);
-        let len_at = std::mem::offset_of!(FILE_FULL_DIR_INFO, FileNameLength);
         let malformed = || io::Error::other("malformed directory listing");
-        let mut names = Vec::new();
-        let mut class = FILE_FULL_DIRECTORY_RESTART_INFO;
+        let mut query = class.restart;
         loop {
             // SAFETY: the buffer holds `bytes` bytes, 8-aligned.
             let ok = unsafe {
-                GetFileInformationByHandleEx(h.0, class, buf.as_mut_ptr() as *mut c_void, bytes)
+                GetFileInformationByHandleEx(h.0, query, buf.as_mut_ptr() as *mut c_void, bytes)
             } != 0;
             if !ok {
                 let e = last();
                 if e.raw_os_error() == Some(ERROR_NO_MORE_FILES) {
-                    return Ok(names);
+                    return Ok(());
                 }
                 return Err(e);
             }
-            class = FILE_FULL_DIRECTORY_INFO;
+            query = class.next;
             // SAFETY: the buffer is initialised memory of `bytes` bytes.
             let raw =
                 unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, bytes as usize) };
@@ -844,16 +993,23 @@ mod imp {
             let mut at = 0usize;
             loop {
                 let next = u32_at(at)?;
-                let len = u32_at(at + len_at)?;
+                let len = u32_at(at + class.len_at)?;
                 let name = raw
-                    .get(at + name_at..at + name_at + len)
+                    .get(at + class.name_at..at + class.name_at + len)
                     .ok_or_else(malformed)?;
                 let units: Vec<u16> = name
                     .chunks_exact(2)
                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                     .collect();
+                let id = match class.id_at {
+                    Some(i) => {
+                        let b = raw.get(at + i..at + i + 8).ok_or_else(malformed)?;
+                        Some(u64::from_le_bytes(b.try_into().unwrap()))
+                    }
+                    None => None,
+                };
                 if units != [b'.' as u16] && units != [b'.' as u16, b'.' as u16] {
-                    names.push(OsString::from_wide(&units));
+                    each(units, id);
                 }
                 if next == 0 {
                     break;
@@ -861,6 +1017,49 @@ mod imp {
                 at += next;
             }
         }
+    }
+
+    /// The names in the folder `h` is open on (with listing access).
+    fn list(h: &Handle, buf: &mut [u64]) -> io::Result<Vec<OsString>> {
+        let mut names = Vec::new();
+        entries(h, buf, &FULL, |units, _| {
+            names.push(OsString::from_wide(&units))
+        })?;
+        Ok(names)
+    }
+
+    /// Whether two names are the same but for case, as the system's file systems compare names
+    /// (its upper-case table).
+    fn same_but_case(a: &[u16], b: &[u16]) -> bool {
+        let (Ok(la), Ok(lb)) = (i32::try_from(a.len()), i32::try_from(b.len())) else {
+            return false;
+        };
+        // SAFETY: two buffers of the lengths given.
+        unsafe { CompareStringOrdinal(a.as_ptr(), la, b.as_ptr(), lb, 1) == CSTR_EQUAL }
+    }
+
+    /// The file id each name of the folder `f` lists has (FileIdBothDirectoryInformation, the id
+    /// a handle's file index is), through a listing handle checked to be that folder. Ids that
+    /// say nothing (0, all ones) are left out; a folder that cannot be listed so has none.
+    fn listed_ids(f: &Frame, buf: &mut [u64]) -> HashMap<Vec<u16>, u64> {
+        let mut ids = HashMap::new();
+        let lister = match open(
+            &f.path,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            f.facts.reparse(),
+        ) {
+            Ok(h) if identity(&h).ok() == Some((f.facts.volume, f.facts.index)) => h,
+            _ => return ids,
+        };
+        let listed = entries(&lister, buf, &ID_BOTH, |units, id| {
+            if let Some(id) = id.filter(|&i| i != 0 && i != u64::MAX) {
+                ids.insert(units, id);
+            }
+        });
+        if listed.is_err() {
+            ids.clear();
+        }
+        ids
     }
 
     /// `\\?\` and the absolute path (no Win32 rewriting, no MAX_PATH).
@@ -899,6 +1098,9 @@ mod imp {
         facts: Facts,
         path: Vec<u16>,
         names: std::vec::IntoIter<OsString>,
+        /// the file ids it lists its names with, read once a handle reports a name of it in
+        /// another case ([`listed_ids`])
+        ids: Option<HashMap<Vec<u16>, u64>>,
     }
 
     /// List the folder `h` is open on: through a listing handle checked to be the same folder
@@ -919,6 +1121,7 @@ mod imp {
             facts,
             path,
             names: names.into_iter(),
+            ids: None,
         })
     }
 
@@ -975,8 +1178,22 @@ mod imp {
                     continue;
                 }
             };
-            // the very entry listed: on this volume, under this folder, by this name
-            if facts.volume != volume || (names_known && facts.name != expected) {
+            // the very entry listed: on this volume, under this folder, by this name; a name
+            // reported in another case (SMB redirectors, WinFsp and Dokan report the case the
+            // first program to open it used) only as the entry the folder lists under the name,
+            // by its file id (in a case-sensitive folder another case is another entry)
+            let named = match (&facts.name, &expected) {
+                _ if !names_known => true,
+                (Some(got), Some(want)) if got == want => true,
+                (Some(got), Some(want)) if same_but_case(got, want) => {
+                    if f.ids.is_none() {
+                        f.ids = Some(listed_ids(f, &mut buf));
+                    }
+                    f.ids.as_ref().and_then(|ids| ids.get(&units)) == Some(&facts.index)
+                }
+                _ => false,
+            };
+            if facts.volume != volume || !named {
                 out.fail(super::moved_inside());
                 continue;
             }

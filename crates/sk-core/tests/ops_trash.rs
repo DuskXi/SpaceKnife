@@ -1003,6 +1003,8 @@ impl Drop for Walk {
     fn drop(&mut self) {
         *trash::seams::ENTERING.lock() = None;
         *trash::seams::LISTED.lock() = None;
+        *trash::seams::OPENED_NAME.lock() = None;
+        trash::seams::OPEN_FOLDERS.store(0, Ordering::SeqCst);
     }
 }
 
@@ -1168,6 +1170,251 @@ fn odd_names_inside_a_folder_are_deleted_exactly() {
         "{r:?}"
     );
     assert!(std::fs::symlink_metadata(&long).is_err());
+}
+
+// --------------------------------------------------------------------------- names in another case (Windows)
+
+/// Make every handle report its name upper-cased, as an SMB redirector, WinFsp or Dokan may
+/// report a name in the case another program opened it with (they keep the first opener's).
+#[cfg(windows)]
+fn report_names_upper_cased() {
+    *trash::seams::OPENED_NAME.lock() = Some(std::sync::Arc::new(|name: &mut Vec<u16>| {
+        for u in name.iter_mut() {
+            if (u16::from(b'a')..=u16::from(b'z')).contains(u) {
+                *u -= 32;
+            }
+        }
+    }));
+}
+
+/// A file system that reports the names of what is opened in another case than the one listed
+/// does not stop a deletion: each entry is the very one listed, by its file id.
+#[cfg(windows)]
+#[test]
+fn names_reported_in_another_case_are_still_deleted() {
+    let (_, _g) = setup();
+    let _w = Walk;
+    let dir = tempfile::tempdir().unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir_all(sel.join("sub").join("Deeper")).unwrap();
+    std::fs::write(sel.join("sub").join("Deeper").join("a.txt"), b"a").unwrap();
+    std::fs::write(sel.join("b.TXT"), b"b").unwrap();
+    report_names_upper_cased();
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert_eq!(
+        (r.code, r.message.as_str()),
+        (OpCode::Ok, "已永久删除"),
+        "{r:?}"
+    );
+    assert!(!sel.exists());
+}
+
+/// Where the reported name matches only in case, the entry must be the one its folder listed:
+/// a folder from outside moved in under the deleted folder's name for it is left alone.
+#[cfg(windows)]
+#[test]
+fn a_folder_moved_in_is_not_deleted_for_a_name_in_another_case() {
+    let (_, _g) = setup();
+    let _w = Walk;
+    let dir = tempfile::tempdir().unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir_all(sel.join("sub")).unwrap();
+    std::fs::write(sel.join("sub").join("x.txt"), b"x").unwrap();
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::fs::write(outside.join("x.txt"), b"keep").unwrap();
+    report_names_upper_cased();
+    let (s_sel, s_out) = (sel.clone(), outside.clone());
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = done.clone();
+    *trash::seams::ENTERING.lock() = Some(std::sync::Arc::new(move |p: &Path| {
+        if named(p, "x.txt") && !once.swap(true, Ordering::SeqCst) {
+            std::fs::rename(s_sel.join("sub"), s_sel.join("moved")).unwrap();
+            std::fs::rename(&s_out, s_sel.join("sub")).unwrap();
+        }
+    }));
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert!(done.load(Ordering::SeqCst));
+    assert!(!r.ok && r.message.contains("换成了别的项"), "{r:?}");
+    assert_eq!(
+        std::fs::read(sel.join("sub").join("x.txt")).unwrap(),
+        b"keep"
+    );
+}
+
+/// In a case-sensitive folder (NTFS's per-folder flag; WinBtrfs) names that differ only in case
+/// are two entries: with names reported in another case, each is deleted as itself (its own
+/// file id), neither in place of the other. Skipped where no such folder can be made.
+#[cfg(windows)]
+#[test]
+fn case_twins_are_each_deleted_when_names_are_reported_in_another_case() {
+    let (_, _g) = setup();
+    let _w = Walk;
+    let dir = tempfile::tempdir().unwrap();
+    let sel = dir.path().join("sel");
+    let cs = sel.join("cs");
+    std::fs::create_dir_all(&cs).unwrap();
+    let _ = std::process::Command::new("fsutil")
+        .args(["file", "setCaseSensitiveInfo"])
+        .arg(&cs)
+        .arg("enable")
+        .output();
+    std::fs::write(cs.join("a"), b"a").unwrap();
+    if std::fs::write(cs.join("A"), b"A").is_err() || std::fs::read(cs.join("a")).unwrap() != b"a" {
+        eprintln!("skipped: {} is not case-sensitive", cs.display());
+        return;
+    }
+    for d in ["d", "D"] {
+        std::fs::create_dir(cs.join(d)).unwrap();
+        std::fs::write(cs.join(d).join("f.txt"), d).unwrap();
+    }
+    report_names_upper_cased();
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert_eq!(r.code, OpCode::Ok, "{r:?}");
+    assert!(!sel.exists());
+}
+
+// --------------------------------------------------------------------------- deep trees (POSIX)
+
+/// Make `levels` nested folders named `name` below `top` (relative to each folder's descriptor:
+/// deeper than PATH_MAX too), with a file in every hundredth one and at the bottom.
+#[cfg(unix)]
+fn nested(top: &Path, levels: usize, name: &str) {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    std::fs::create_dir(top).unwrap();
+    let c = |s: &str| CString::new(s).unwrap();
+    let (dir, file) = (c(name), c("f.txt"));
+    let top_c = CString::new(top.as_os_str().as_bytes()).unwrap();
+    // SAFETY: NUL-terminated names; every descriptor opened here is closed here.
+    unsafe {
+        let mut fd = libc::open(top_c.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY);
+        assert!(fd >= 0);
+        for level in 1..=levels {
+            assert_eq!(libc::mkdirat(fd, dir.as_ptr(), 0o755), 0, "level {level}");
+            let next = libc::openat(fd, dir.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY);
+            assert!(next >= 0, "level {level}");
+            libc::close(fd);
+            fd = next;
+            if level % 100 == 0 || level == levels {
+                let f = libc::openat(fd, file.as_ptr(), libc::O_WRONLY | libc::O_CREAT, 0o644);
+                assert!(f >= 0, "level {level}");
+                libc::close(f);
+            }
+        }
+        libc::close(fd);
+    }
+}
+
+/// A tree a thousand and more folders deep (longer than PATH_MAX) is deleted, all of it, by a
+/// process allowed 128 open files (macOS gives programs 256): the deletion does not keep a
+/// descriptor open per level. The work runs in a child process with that limit (the limit is
+/// the process's: lowering it here would starve the tests beside this one).
+#[cfg(unix)]
+#[test]
+fn deep_trees_are_deleted_within_a_few_descriptors() {
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "deep_tree_child_process",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("1 passed"), "{text}");
+}
+
+/// The child process of `deep_trees_are_deleted_within_a_few_descriptors`.
+#[cfg(unix)]
+#[test]
+#[ignore = "run in a child process with few open files allowed by deep_trees_are_deleted_within_a_few_descriptors"]
+fn deep_tree_child_process() {
+    let (_, _g) = setup();
+    // SAFETY: zeroed is a valid rlimit; this process runs this one test.
+    unsafe {
+        let mut lim: libc::rlimit = std::mem::zeroed();
+        assert_eq!(libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim), 0);
+        lim.rlim_cur = 128.min(lim.rlim_max);
+        assert_eq!(libc::setrlimit(libc::RLIMIT_NOFILE, &lim), 0);
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let top = dir.path().join("deep");
+    nested(&top, 1200, "level-dir"); // 1200 × 10 bytes: past PATH_MAX (4096)
+    let r = delete_permanently(&[s(&top)], no_locks()).remove(0);
+    assert_eq!(
+        (r.code, r.message.as_str()),
+        (OpCode::Ok, "已永久删除"),
+        "{r:?}"
+    );
+    assert!(std::fs::symlink_metadata(&top).is_err());
+}
+
+/// With one folder's descriptor open at a time, a tree with folders beside each other at every
+/// level is deleted whole: a folder whose descriptor was closed is reached again.
+#[cfg(unix)]
+#[test]
+fn a_tree_is_deleted_with_one_descriptor_kept_open() {
+    let (_, _g) = setup();
+    let _w = Walk;
+    trash::seams::OPEN_FOLDERS.store(1, Ordering::SeqCst);
+    let dir = tempfile::tempdir().unwrap();
+    let sel = dir.path().join("sel");
+    for p in ["a/b/c", "a/b/c2", "a/b2", "a2/x/y"] {
+        std::fs::create_dir_all(sel.join(p)).unwrap();
+        std::fs::write(sel.join(p).join("f.txt"), b"f").unwrap();
+    }
+    std::fs::write(sel.join("a").join("g.txt"), b"g").unwrap();
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert_eq!(r.code, OpCode::Ok, "{r:?}");
+    assert!(!sel.exists());
+}
+
+/// A folder whose descriptor was closed while the deletion went deeper is reached again by its
+/// identity (device and inode), never by its name alone: when the folders above were moved
+/// away and another folder now has their names, the other folder is not touched.
+#[cfg(unix)]
+#[test]
+fn a_folder_reached_again_must_be_the_one_left() {
+    let (_, _g) = setup();
+    let _w = Walk;
+    trash::seams::OPEN_FOLDERS.store(2, Ordering::SeqCst);
+    let dir = tempfile::tempdir().unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir_all(sel.join("a/b/c/d")).unwrap();
+    std::fs::write(sel.join("a/b/c/d/e.txt"), b"e").unwrap();
+    std::fs::write(sel.join("a/z.txt"), b"z").unwrap();
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    // every folder lists its names in order: `b` before `z.txt`
+    *trash::seams::LISTED.lock() = Some(std::sync::Arc::new(
+        |_: &Path, names: &mut Vec<std::ffi::OsString>| names.sort(),
+    ));
+    let (s_sel, s_out) = (sel.clone(), outside.clone());
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = done.clone();
+    // deep in d (a and b closed): c goes elsewhere, a too, and a new `a` holds what is not ours
+    *trash::seams::ENTERING.lock() = Some(std::sync::Arc::new(move |p: &Path| {
+        if named(p, "e.txt") && !once.swap(true, Ordering::SeqCst) {
+            std::fs::rename(s_sel.join("a/b/c"), s_out.join("c")).unwrap();
+            std::fs::rename(s_sel.join("a"), s_out.join("a")).unwrap();
+            std::fs::create_dir_all(s_sel.join("a/b")).unwrap();
+            std::fs::write(s_sel.join("a/z.txt"), b"keep").unwrap();
+            std::fs::write(s_sel.join("a/b/keep.txt"), b"keep").unwrap();
+        }
+    }));
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert!(done.load(Ordering::SeqCst));
+    assert!(!r.ok && r.message.contains("换成了别的项"), "{r:?}");
+    assert_eq!(std::fs::read(sel.join("a/z.txt")).unwrap(), b"keep");
+    assert_eq!(std::fs::read(sel.join("a/b/keep.txt")).unwrap(), b"keep");
 }
 
 /// A bind mount of a folder on the same file system inside a deleted folder is a mount point
