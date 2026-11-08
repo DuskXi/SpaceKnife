@@ -38,7 +38,7 @@ use sk_store::lookup::PathIndex;
 use sk_store::{Flags, Kind, NodeId, Nodes, Store, mutate};
 
 use super::poll::PollWatcher;
-use super::{Change, ChangeKind, Sink, WatchState, Watcher, create_watcher};
+use super::{Change, ChangeKind, LockExt, Sink, WatchState, Watcher, create_watcher, unpoison};
 use crate::scan::{IoGate, RootInfo, entry_batch, fold_slice, path_inside};
 use crate::volume;
 
@@ -257,13 +257,13 @@ impl MonitorHandle {
 
     /// List `path` and everything below it again, right away (F5 「重新扫描当前视图」).
     pub fn rescan(&self, path: &Path) {
-        self.inbox.rescans.lock().unwrap().push(path.to_path_buf());
+        self.inbox.rescans.locked().push(path.to_path_buf());
         self.inbox.wake();
     }
 
     /// Hand changes in as a watcher would.
     pub fn push(&self, changes: Vec<Change>) {
-        self.inbox.queue.lock().unwrap().extend(changes);
+        self.inbox.queue.locked().extend(changes);
         self.inbox.wake();
     }
 
@@ -283,16 +283,16 @@ impl MonitorHandle {
 
 impl Inbox {
     fn wake(&self) {
-        *self.woken.lock().unwrap() = true;
+        *self.woken.locked() = true;
         self.cv.notify_all();
     }
 
     /// Waits until woken or `timeout` (None: until woken); true when woken.
     fn wait(&self, timeout: Option<Duration>) -> bool {
-        let g = self.woken.lock().unwrap();
+        let g = self.woken.locked();
         let mut g = match timeout {
-            Some(t) => self.cv.wait_timeout_while(g, t, |w| !*w).unwrap().0,
-            None => self.cv.wait_while(g, |w| !*w).unwrap(),
+            Some(t) => unpoison(self.cv.wait_timeout_while(g, t, |w| !*w)).0,
+            None => unpoison(self.cv.wait_while(g, |w| !*w)),
         };
         std::mem::replace(&mut *g, false)
     }
@@ -476,7 +476,7 @@ impl ScanMonitor {
     pub fn sink(&self) -> Sink {
         let inbox = self.inbox.clone();
         Arc::new(move |batch: Vec<Change>| {
-            inbox.queue.lock().unwrap().extend(batch);
+            inbox.queue.locked().extend(batch);
             inbox.wake();
         })
     }
@@ -646,8 +646,7 @@ impl ScanMonitor {
         let mut names: Vec<&str> = states.iter().map(|(n, _)| *n).collect();
         names.sort_unstable();
         names.dedup();
-        let queued =
-            self.inbox.queue.lock().unwrap().len() + self.inbox.rescans.lock().unwrap().len();
+        let queued = self.inbox.queue.locked().len() + self.inbox.rescans.locked().len();
         MonitorStatus {
             state,
             detail,
@@ -712,16 +711,16 @@ impl ScanMonitor {
 
     /// One turn of the loop: hand new folders to the watchers, apply what came in.
     pub fn step(&mut self, hooks: &mut dyn MonitorHooks) {
-        let asked: Vec<PathBuf> = std::mem::take(&mut *self.inbox.rescans.lock().unwrap());
+        let asked: Vec<PathBuf> = std::mem::take(&mut *self.inbox.rescans.locked());
         if !asked.is_empty() {
             self.trees.extend(asked);
             self.last_event = None; // no quiet period to wait for: asked for by the user
         }
-        let batch = std::mem::take(&mut *self.inbox.queue.lock().unwrap());
+        let batch = std::mem::take(&mut *self.inbox.queue.locked());
         self.feed();
         if hooks.mft_running() {
             // the tree arrives at once at the end: keep everything for it
-            let mut q = self.inbox.queue.lock().unwrap();
+            let mut q = self.inbox.queue.locked();
             let later = std::mem::take(&mut *q);
             *q = batch;
             q.extend(later);

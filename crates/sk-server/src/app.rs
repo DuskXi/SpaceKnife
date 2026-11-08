@@ -95,6 +95,10 @@ pub struct Tuning {
     pub settings_file: Option<PathBuf>,
     /// the log bus the `log` topic reads (None: [`LogBus::global`])
     pub log_bus: Option<Arc<LogBus>>,
+    /// Test seam: every scan's [`sk_core::scan::ScanOptions::fault`] (a panic in a step of the
+    /// scan, to see the server go on).
+    #[doc(hidden)]
+    pub scan_fault: Option<sk_core::scan::ScanFault>,
 }
 
 impl Default for Tuning {
@@ -109,6 +113,7 @@ impl Default for Tuning {
             routes: None,
             settings_file: None,
             log_bus: None,
+            scan_fault: None,
         }
     }
 }
@@ -140,6 +145,8 @@ pub struct Config {
     pub install_kind: Option<String>,
     pub static_dir: Option<PathBuf>,
     pub secure: bool,
+    /// [`Tuning::scan_fault`]
+    pub scan_fault: Option<sk_core::scan::ScanFault>,
 }
 
 /// Everything the sessions share.
@@ -316,12 +323,11 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
             opts.host
         );
     }
-    if let Some(locale) = opts.system_locale.as_deref().filter(|l| !l.is_empty())
-        && std::env::var_os("SPACEKNIFE_SYSTEM_LOCALE").is_none()
-    {
-        // SAFETY: set once at startup, before any of the server's own threads read the environment.
-        unsafe { std::env::set_var("SPACEKNIFE_SYSTEM_LOCALE", locale) };
-        sk_core::i18n::clear_system_language_cache();
+    if let Some(locale) = opts.system_locale.as_deref().filter(|l| !l.is_empty()) {
+        // a value, never the environment: the server may run inside the GUI process, whose
+        // toolkit threads read the environment (getenv) meanwhile; a SPACEKNIFE_SYSTEM_LOCALE the
+        // process was started with still comes first
+        sk_core::i18n::set_system_locale(Some(locale));
     }
     let tls = match &opts.tls {
         Some((cert, key)) => Some(crate::http::tls_acceptor(cert, key)?),
@@ -346,6 +352,7 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
         install_kind: opts.install_kind.clone(),
         static_dir: opts.static_dir.clone(),
         secure: tls.is_some(),
+        scan_fault: tuning.scan_fault,
     };
     let server = build(config, tuning.routes, tuning.settings_file, tuning.log_bus);
     server.port.store(port, Ordering::SeqCst);

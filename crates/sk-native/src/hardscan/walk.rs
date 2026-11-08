@@ -506,6 +506,9 @@ fn build(threads: usize, name: &'static str) -> Result<ThreadPool, String> {
     ThreadPoolBuilder::new()
         .num_threads(threads)
         .thread_name(move |i| format!("{name}-{i}"))
+        // a panic in a scoped job reaches the caller; one in a spawned job (the tree freed after a
+        // call) would abort the process without a handler (the panic hook has logged it)
+        .panic_handler(|_| {})
         .build()
         .map_err(|e| e.to_string())
 }

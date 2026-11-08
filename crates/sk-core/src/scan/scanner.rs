@@ -75,6 +75,41 @@ pub struct ScanOptions {
     pub protect: Vec<PathBuf>,
     /// The disk-load limit (io governor), if any.
     pub gate: Option<Arc<dyn IoGate>>,
+    /// Test seam: called with `"list"` on a listing thread before each batch is listed and with
+    /// `"fold"` on the scan's thread before each fold into the tree; a panic there stands for a
+    /// bug in that step.
+    #[doc(hidden)]
+    pub fault: Option<ScanFault>,
+}
+
+/// [`ScanOptions::fault`].
+#[doc(hidden)]
+pub type ScanFault = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// One batch, listed on a listing thread. A panic while listing (a bug) is the batch's error:
+/// without an answer the scan would wait for the batch forever, «scanning» for good.
+fn list_batch(
+    tasks: Vec<Task>,
+    opts: &SliceOptions,
+    fault: Option<&ScanFault>,
+) -> Result<SliceResult, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if let Some(f) = fault {
+            f("list");
+        }
+        hardscan::scan_slice(tasks, opts)
+    }))
+    .map_err(|p| format!("listing failed: {}", panic_message(p.as_ref())))?
+    .map_err(|e| e.to_string())
+}
+
+/// The message of a panic's payload.
+pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".to_owned())
 }
 
 impl Default for ScanOptions {
@@ -87,6 +122,7 @@ impl Default for ScanOptions {
             count_links_each: false,
             protect: Vec::new(),
             gate: None,
+            fault: None,
         }
     }
 }
@@ -282,7 +318,8 @@ impl Shared {
 }
 
 enum Msg {
-    Done(Box<Result<SliceResult, hardscan::Error>>, Option<Permit>),
+    /// a listed batch, or why it failed (an error of the listing, or the panic that stopped it)
+    Done(Box<Result<SliceResult, String>>, Option<Permit>),
     Wake,
 }
 
@@ -599,6 +636,24 @@ impl Scanner {
         Shared::next_run(&mut st, Instant::now());
     }
 
+    /// The scan ended with a failure that [`Scanner::run`] could not record (a panic that
+    /// unwound out of it): failed, `message` saying why, nothing in flight, not paused.
+    pub fn fail(&self, message: &str) {
+        if self.paused() {
+            self.paused.store(false, Ordering::SeqCst);
+            if let Some(g) = &self.opts.gate {
+                g.resume();
+            }
+        }
+        let mut st = self.st();
+        Self::unpaused(&mut st);
+        st.state = ScanState::Failed;
+        st.message = message.to_owned();
+        st.finished = Some(Instant::now());
+        st.finished_at = Some(chrono::Utc::now());
+        st.inflight = 0;
+    }
+
     pub fn finish_external(&self, state: ScanState) {
         let mut st = self.st();
         st.state = state;
@@ -688,7 +743,7 @@ impl Scanner {
                                 Err(_) => return,
                             };
                             let Ok(job) = job else { return };
-                            let res = hardscan::scan_slice(job.tasks, &job.opts);
+                            let res = list_batch(job.tasks, &job.opts, self.opts.fault.as_ref());
                             if tx.send(Msg::Done(Box::new(res), job.permit)).is_err() {
                                 return;
                             }
@@ -845,7 +900,7 @@ impl Scanner {
                     self.st().inflight -= 1;
                     match *res {
                         Ok(r) => landed.push(r),
-                        Err(e) => *fail = Some(e.to_string()),
+                        Err(e) => *fail = Some(e),
                     }
                 }
             };
@@ -896,6 +951,9 @@ impl Scanner {
 
     /// Folds results that came in together as one slice (fewer, larger calls into the store).
     fn apply(&self, mut results: Vec<SliceResult>) -> Result<(), String> {
+        if let Some(f) = &self.opts.fault {
+            f("fold");
+        }
         let t0 = Instant::now();
         let n = results.len() as u64;
         let busy: Duration = results.iter().map(|r| r.elapsed).sum();

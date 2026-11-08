@@ -499,14 +499,16 @@ pub use imp::InotifyWatcher;
 mod imp {
     use std::collections::VecDeque;
     use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
     use super::super::poll::{Backlog, DirPoller, Emitter, Worker, listed_changed, stat_file};
     use super::super::{Change, ChangeKind, Sink, WatchState, WatchStatus, Watcher, t};
     use super::*;
+    use crate::monitor::LockExt;
 
     const READ_LIMIT: usize = 1 << 20;
     const PAIR_WAIT_MS: i32 = 2;
@@ -651,10 +653,15 @@ mod imp {
         st: Mutex<State>,
         /// from add_dirs, waiting for their watch (or polling)
         incoming: Mutex<Backlog>,
-        wake_w: AtomicI64,
+        /// The wake-up pipe (read end, write end), set by start(). Closed only when the last owner
+        /// (the watcher, its thread) is gone: a wake-up never writes into a descriptor that was
+        /// closed and handed to another file meanwhile.
+        wake: OnceLock<(OwnedFd, OwnedFd)>,
         emitter: Emitter,
         state: Mutex<(WatchState, String)>,
         stopped: AtomicBool,
+        /// the thread has ended
+        done: AtomicBool,
     }
 
     /// One scan root: inotify for the folders within the budget, mtime polling for the rest.
@@ -702,21 +709,29 @@ mod imp {
                     }),
                     root,
                     incoming: Mutex::new(Backlog::new()),
-                    wake_w: AtomicI64::new(-1),
+                    wake: OnceLock::new(),
                     emitter: Emitter::new(),
                     state: Mutex::new((WatchState::Starting, String::new())),
                     stopped: AtomicBool::new(false),
+                    done: AtomicBool::new(false),
                 }),
                 worker: Worker::new(),
             }
         }
 
         fn wake(sh: &Shared) {
-            let fd = sh.wake_w.load(Ordering::SeqCst);
-            if fd >= 0 {
-                // SAFETY: a pipe we own; a full pipe means the thread is awake anyway.
-                unsafe { libc::write(fd as i32, [0u8].as_ptr().cast(), 1) };
+            if let Some((_, w)) = sh.wake.get() {
+                #[cfg(test)]
+                hooks::before_wake(&sh.root, w.as_raw_fd(), &sh.done);
+                // SAFETY: our pipe, open as long as `sh` is; a full pipe means the thread is
+                // awake anyway.
+                unsafe { libc::write(w.as_raw_fd(), [0u8].as_ptr().cast(), 1) };
             }
+        }
+
+        /// Whether the watcher thread has ended.
+        pub fn finished(&self) -> bool {
+            self.sh.done.load(Ordering::SeqCst)
         }
     }
 
@@ -978,7 +993,7 @@ mod imp {
                     continue;
                 }
                 if root {
-                    *sh.state.lock().unwrap() = (
+                    *sh.state.locked() = (
                         WatchState::Failed,
                         t("扫描根目录已被删除或移走，实时监控已停止"),
                     );
@@ -1039,7 +1054,7 @@ mod imp {
                 }
             }
             if res.root_lost {
-                *sh.state.lock().unwrap() = (
+                *sh.state.locked() = (
                     WatchState::Failed,
                     t("扫描根目录已被删除或移走，实时监控已停止"),
                 );
@@ -1049,21 +1064,21 @@ mod imp {
     }
 
     fn run(sh: Arc<Shared>, wake_r: i32) {
-        let ino_fd = sh.st.lock().unwrap().ino.as_ref().map(|i| i.fd);
+        let ino_fd = sh.st.locked().ino.as_ref().map(|i| i.fd);
         let fds: Vec<i32> = std::iter::once(wake_r).chain(ino_fd).collect();
         while !sh.emitter.stopping.load(Ordering::SeqCst) {
             let mut emit = Vec::new();
             let timeout_ms;
             {
-                let mut st = sh.st.lock().unwrap();
+                let mut st = sh.st.locked();
                 // a batch leaves the backlog once all of it is placed
-                let fed = sh.incoming.lock().unwrap().peek(ADD_CHUNK);
+                let fed = sh.incoming.locked().peek(ADD_CHUNK);
                 let n = fed.len();
                 for (path, listed, since) in fed {
                     st.place(&sh, path, listed, since, &mut emit);
                 }
                 if n > 0 {
-                    sh.incoming.lock().unwrap().advance(n);
+                    sh.incoming.locked().advance(n);
                 }
                 if st.ino.is_some() && !st.recheck.is_empty() {
                     let (lost, ch) = st.recheck_some(&sh);
@@ -1076,13 +1091,13 @@ mod imp {
                 emit.extend(st.walk_some(&sh));
                 emit.extend(st.poller.step(Instant::now()));
                 if st.poller.root_lost {
-                    *sh.state.lock().unwrap() =
+                    *sh.state.locked() =
                         (WatchState::Failed, t("扫描根目录已不存在，实时监控已停止"));
                     drop(st);
                     sh.emitter.emit(emit);
                     return;
                 }
-                timeout_ms = if !sh.incoming.lock().unwrap().is_empty()
+                timeout_ms = if !sh.incoming.locked().is_empty()
                     || !st.walk.is_empty()
                     || !st.recheck.is_empty()
                 {
@@ -1105,7 +1120,7 @@ mod imp {
             if let Some(fd) = ino_fd
                 && ready.contains(&fd)
             {
-                let (lost, changes) = sh.st.lock().unwrap().handle(&sh);
+                let (lost, changes) = sh.st.locked().handle(&sh);
                 sh.emitter.emit(changes);
                 if lost {
                     return;
@@ -1123,15 +1138,19 @@ mod imp {
             if self.worker.started() {
                 return Err(std::io::Error::other(t("监视器已经启动")));
             }
-            *self.sh.emitter.sink.lock().unwrap() = Some(sink);
+            *self.sh.emitter.sink.locked() = Some(sink);
             let mut fds = [0i32; 2];
             // SAFETY: plain syscall.
             if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) } != 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            self.sh.wake_w.store(fds[1] as i64, Ordering::SeqCst);
+            // SAFETY: two fresh descriptors we own from here on.
+            let pipe = unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+            if self.sh.wake.set(pipe).is_err() {
+                return Err(std::io::Error::other(t("监视器已经启动")));
+            }
             {
-                let mut st = self.sh.st.lock().unwrap();
+                let mut st = self.sh.st.locked();
                 match Inotify::open() {
                     Ok(i) => st.ino = Some(i),
                     Err(e) => {
@@ -1158,7 +1177,7 @@ mod imp {
                     st.poller.add(r);
                 }
             }
-            *self.sh.state.lock().unwrap() = (WatchState::Running, String::new());
+            *self.sh.state.locked() = (WatchState::Running, String::new());
             let sh = self.sh.clone();
             let wake_r = fds[0];
             self.worker.spawn("sk-inotify", move || {
@@ -1171,28 +1190,23 @@ mod imp {
                             path = sh.root.display().to_string()
                         )
                     );
-                    *sh.state.lock().unwrap() = (WatchState::Failed, t("实时监控出错，已停止"));
+                    *sh.state.locked() = (WatchState::Failed, t("实时监控出错，已停止"));
                     sh.emitter.emit(vec![Change::overflow(sh.root.clone())]);
                 }
-                // close everything this watcher holds
-                let w = sh.wake_w.swap(-1, Ordering::SeqCst);
-                // SAFETY: our pipe ends.
-                unsafe {
-                    libc::close(wake_r);
-                    if w >= 0 {
-                        libc::close(w as i32);
-                    }
+                // give back what this watcher holds (the wake-up pipe goes with the shared state)
+                {
+                    let mut st = sh.st.locked();
+                    st.ino = None;
+                    st.tree = WatchTree::new(&bytes_of(&sh.root));
+                    let held = st.held;
+                    st.release(held);
                 }
-                let mut st = sh.st.lock().unwrap();
-                st.ino = None;
-                st.tree = WatchTree::new(&bytes_of(&sh.root));
-                let held = st.held;
-                st.release(held);
+                sh.done.store(true, Ordering::SeqCst);
             })
         }
 
         fn add_dirs(&self, dirs: Vec<PathBuf>, mtimes: Option<Vec<u32>>, since_ns: i64) {
-            self.sh.incoming.lock().unwrap().add(dirs, mtimes, since_ns);
+            self.sh.incoming.locked().add(dirs, mtimes, since_ns);
             InotifyWatcher::wake(&self.sh);
         }
 
@@ -1203,15 +1217,15 @@ mod imp {
             self.sh.emitter.stopping.store(true, Ordering::SeqCst);
             InotifyWatcher::wake(&self.sh);
             self.worker.finish(Duration::from_millis(900));
-            let mut s = self.sh.state.lock().unwrap();
+            let mut s = self.sh.state.locked();
             if s.0 != WatchState::Failed {
                 s.0 = WatchState::Stopped;
             }
         }
 
         fn status(&self) -> WatchStatus {
-            let (mut state, mut detail) = self.sh.state.lock().unwrap().clone();
-            let st = self.sh.st.lock().unwrap();
+            let (mut state, mut detail) = self.sh.state.locked().clone();
+            let st = self.sh.st.locked();
             let polled = st.poller.len();
             if state == WatchState::Running {
                 if !st.fallback.is_empty() {
@@ -1248,6 +1262,37 @@ mod imp {
     impl Drop for InotifyWatcher {
         fn drop(&mut self) {
             self.stop();
+        }
+    }
+
+    /// Test seams: run code at a chosen point of a watcher (one shot, matched by its root).
+    #[cfg(test)]
+    pub(crate) mod hooks {
+        use std::path::{Path, PathBuf};
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
+
+        type Hook = Box<dyn FnOnce(i32, &AtomicBool) + Send>;
+        static BEFORE_WAKE: Mutex<Vec<(PathBuf, Hook)>> = Mutex::new(Vec::new());
+
+        /// `f(the pipe's write end, thread ended)` runs once, in the next wake-up of the watcher
+        /// of `root`, just before it writes.
+        pub fn on_wake(root: &Path, f: impl FnOnce(i32, &AtomicBool) + Send + 'static) {
+            BEFORE_WAKE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((root.to_path_buf(), Box::new(f)));
+        }
+
+        pub(super) fn before_wake(root: &Path, fd: i32, done: &AtomicBool) {
+            let hook = {
+                let mut hooks = BEFORE_WAKE.lock().unwrap_or_else(|e| e.into_inner());
+                let at = hooks.iter().position(|(r, _)| r == root);
+                at.map(|i| hooks.remove(i).1)
+            };
+            if let Some(f) = hook {
+                f(fd, done);
+            }
         }
     }
 }
@@ -1652,5 +1697,66 @@ mod tests {
         assert_eq!(t.find(b"/usr/lib"), Some(3));
         assert_eq!(t.find(b"/"), Some(1));
         assert_eq!(t.wds(), vec![1, 2, 3]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_wake_up_never_writes_into_a_reused_descriptor() {
+        // stop() takes the wake-up pipe's descriptor, the watcher thread ends meanwhile (it sees
+        // the stop flag within a second): the descriptor it then writes to must still be that
+        // pipe, not one closed and handed to another file (a snapshot being written, a socket)
+        use crate::monitor::{WatchState, Watcher};
+        use std::sync::atomic::Ordering;
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        fn identity(fd: i32) -> Option<(u64, u64)> {
+            // SAFETY: zeroed POD out struct; a closed descriptor only makes fstat fail.
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            (unsafe { libc::fstat(fd, &mut st) } == 0).then_some((st.st_dev, st.st_ino))
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let w = InotifyWatcher::new(&root, 30.0, 2000, None);
+        w.start(Arc::new(|_| {})).unwrap();
+        assert_ne!(w.status().state, WatchState::Failed);
+        let files = Arc::new(Mutex::new(Vec::<(std::path::PathBuf, std::fs::File)>::new()));
+        let same = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (mine, same_seen, dir) = (files.clone(), same.clone(), tmp.path().to_path_buf());
+        imp::hooks::on_wake(&root, move |fd, done| {
+            let before = identity(fd);
+            let end = Instant::now() + Duration::from_secs(10);
+            while !done.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(
+                done.load(Ordering::SeqCst),
+                "the watcher thread did not end"
+            );
+            same_seen.store(before.is_some() && identity(fd) == before, Ordering::SeqCst);
+            // descriptors freed by now go to the next files opened (the lowest number first)
+            let mut v = mine.lock().unwrap();
+            for i in 0..8 {
+                let p = dir.join(format!("other-{i}"));
+                v.push((p.clone(), std::fs::File::create(&p).unwrap()));
+            }
+        });
+        w.stop();
+        assert!(
+            same.load(Ordering::SeqCst),
+            "the wake-up pipe was closed while a wake-up was about to write to it"
+        );
+        for (p, f) in files.lock().unwrap().drain(..) {
+            drop(f);
+            assert_eq!(
+                std::fs::metadata(&p).unwrap().len(),
+                0,
+                "a wake-up wrote into {}",
+                p.display()
+            );
+        }
+        assert!(w.finished());
     }
 }

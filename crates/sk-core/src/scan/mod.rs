@@ -26,7 +26,7 @@ use sk_store::{Appender, EntryBatch, Flags, NodeId, SliceRef, StoreError};
 pub use gate::{IoGate, Permit};
 pub use scanner::{
     BYTES_CEILING, ESTIMATE_AFTER_S, MAX_RECORDED_DENIED, RATE_WINDOW_S, RootInfo, ScanError,
-    ScanOptions, ScanProfile, ScanProgress, Scanner, scan_path,
+    ScanFault, ScanOptions, ScanProfile, ScanProgress, Scanner, panic_message, scan_path,
 };
 pub use sk_protocol::scan::ScanStateName as ScanState;
 

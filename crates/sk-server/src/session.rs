@@ -595,8 +595,25 @@ fn start_request(server: &Arc<Server>, session: &Arc<Session>, req: sk_protocol:
     let session = session.clone();
     let method = req.method;
     tokio::spawn(async move {
+        use futures_util::FutureExt as _;
         let id = call.id.clone();
-        let fut = handler(call, req.params);
+        // a panic in the handler (a bug) answers this request with an internal error; without
+        // this the task just ends: no answer, and the id stays "in flight" in the session
+        let params = req.params;
+        let fut = std::panic::AssertUnwindSafe(async move { handler(call, params).await })
+            .catch_unwind()
+            .map(|r| {
+                r.unwrap_or_else(|payload| {
+                    let what = payload
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_owned())
+                        .or_else(|| payload.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_owned());
+                    Err(RpcError::internal(format!(
+                        "internal error (panic: {what})"
+                    )))
+                })
+            });
         let out = tokio::select! {
             r = fut => Some(r),
             _ = &mut rx => None,

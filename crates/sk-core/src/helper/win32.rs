@@ -16,8 +16,9 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_IO_PENDING, ERROR_NO_DATA,
     ERROR_OPERATION_ABORTED, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
     GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
-    WAIT_OBJECT_0, WAIT_TIMEOUT,
+    STATUS_PENDING, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
+use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
@@ -26,10 +27,14 @@ use windows_sys::Win32::Security::{
     TOKEN_QUERY, TOKEN_USER, TokenUser, WinBuiltinAdministratorsSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_FIRST_PIPE_INSTANCE,
-    FILE_FLAG_OVERLAPPED, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceW, GetDriveTypeW,
-    GetVolumeInformationW, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, QueryDosDeviceW, ReadFile,
-    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile,
+    CREATE_NEW, CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_ATTRIBUTE_TEMPORARY, FILE_DISPOSITION_INFO,
+    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_OVERLAPPED,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileAttributeTagInfo,
+    FileDispositionInfo, GetDiskFreeSpaceW, GetDriveTypeW, GetFileInformationByHandleEx,
+    GetFinalPathNameByHandleW, GetLongPathNameW, GetVolumeInformationW, OPEN_EXISTING,
+    PIPE_ACCESS_DUPLEX, QueryDosDeviceW, ReadFile, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
+    SetFileInformationByHandle, WriteFile,
 };
 use windows_sys::Win32::System::Com::{
     COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
@@ -43,7 +48,7 @@ use windows_sys::Win32::System::Pipes::{
 };
 use windows_sys::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, GetExitCodeProcess, GetProcessId, INFINITE, OpenProcessToken,
-    SetEvent, TerminateProcess, WaitForMultipleObjects, WaitForSingleObject,
+    ResetEvent, SetEvent, TerminateProcess, WaitForMultipleObjects, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{SHELLEXECUTEINFOW, ShellExecuteExW};
 
@@ -159,6 +164,54 @@ impl Drop for Handle {
     fn drop(&mut self) {
         // SAFETY: we own the handle.
         unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Whether the overlapped operation of `ov` is still running (`HasOverlappedIoCompleted`, negated).
+///
+/// The operation's event alone does not prove that: an event can be signalled by anyone holding
+/// its handle value (a stale one included). Read before trusting a signalled event, and before
+/// releasing the OVERLAPPED or the buffer of an operation. Once it reports false, what the
+/// operation wrote is visible to this thread.
+///
+/// # Safety
+/// `ov` points to a live OVERLAPPED.
+pub(crate) unsafe fn io_pending(ov: *const OVERLAPPED) -> bool {
+    // SAFETY: the caller's live OVERLAPPED; the kernel writes `Internal` when the operation ends,
+    // hence the volatile read.
+    let status = unsafe { std::ptr::read_volatile(std::ptr::addr_of!((*ov).Internal)) };
+    if status == STATUS_PENDING as usize {
+        return true;
+    }
+    std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
+    false
+}
+
+/// Wait up to `timeout` for the overlapped operation of `ov`, whose event is `event`, to end; a
+/// signal that does not come from its completion is taken back and waited past. True once it has
+/// ended.
+///
+/// # Safety
+/// `ov` points to a live OVERLAPPED whose operation signals `event`, a valid event handle.
+pub(crate) unsafe fn wait_io(ov: *const OVERLAPPED, event: HANDLE, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        // SAFETY: the caller's live OVERLAPPED.
+        if !unsafe { io_pending(ov) } {
+            return true;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        // SAFETY: the operation's event and OVERLAPPED, alive while it runs.
+        if unsafe { WaitForSingleObject(event, millis(Some(left))) } == WAIT_OBJECT_0
+            && unsafe { io_pending(ov) }
+        {
+            // signalled, but not by the operation: reset, then look again (it may have ended
+            // between the two reads, setting the event we just reset)
+            unsafe { ResetEvent(event) };
+        }
     }
 }
 
@@ -290,6 +343,156 @@ pub fn write_private_file(path: &std::path::Path, data: &[u8]) -> io::Result<()>
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// `path` without the `\\?\` (`\\?\UNC\`) prefix that `GetFinalPathNameByHandleW` puts on it.
+fn without_verbatim(path: &[u16]) -> Vec<u16> {
+    let unc: Vec<u16> = r"\\?\UNC\".encode_utf16().collect();
+    let verbatim: Vec<u16> = r"\\?\".encode_utf16().collect();
+    if let Some(rest) = path.strip_prefix(unc.as_slice()) {
+        let mut out: Vec<u16> = r"\\".encode_utf16().collect();
+        out.extend_from_slice(rest);
+        return out;
+    }
+    path.strip_prefix(verbatim.as_slice())
+        .unwrap_or(path)
+        .to_vec()
+}
+
+/// The path of an open handle (`FILE_NAME_NORMALIZED`, drive letters), without `\\?\`.
+fn handle_path(h: HANDLE) -> Option<Vec<u16>> {
+    let mut size = 1024u32;
+    for _ in 0..3 {
+        let mut buf = vec![0u16; size as usize];
+        // SAFETY: a buffer of `size` units.
+        let got = unsafe { GetFinalPathNameByHandleW(h, buf.as_mut_ptr(), size, 0) };
+        if got == 0 {
+            return None;
+        }
+        if got < size {
+            return Some(without_verbatim(&buf[..got as usize]));
+        }
+        size = got + 1;
+    }
+    None
+}
+
+/// `path` with its short (8.3) names expanded, without `\\?\`; the path itself when that fails.
+fn long_path(path: &std::path::Path) -> Vec<u16> {
+    let w = wide(path);
+    let given = &w[..w.len() - 1];
+    // SAFETY: NUL-terminated input; a buffer of the stated size.
+    let need = unsafe { GetLongPathNameW(w.as_ptr(), null_mut(), 0) };
+    if need == 0 {
+        return without_verbatim(given);
+    }
+    let mut buf = vec![0u16; need as usize];
+    let got = unsafe { GetLongPathNameW(w.as_ptr(), buf.as_mut_ptr(), need) };
+    if got == 0 || got >= need {
+        return without_verbatim(given);
+    }
+    without_verbatim(&buf[..got as usize])
+}
+
+/// Read at most `max` bytes of the regular file at `path` through one handle that does not follow
+/// a reparse point, then delete the file through that same handle — but only when the handle's
+/// path is `path` itself: no junction, symbolic link or mount point on the way (a folder swapped
+/// for a junction meanwhile is never followed into a delete). Returns the bytes and whether the
+/// file was deleted. Whatever is swapped in, nothing but the file read can be deleted.
+pub fn read_file_once(path: &std::path::Path, max: usize) -> io::Result<(Vec<u8>, bool)> {
+    let w = wide(path);
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    let open = |access: u32| {
+        // SAFETY: NUL-terminated path; no security attributes or template.
+        let h = unsafe {
+            CreateFileW(
+                w.as_ptr(),
+                access,
+                share,
+                null(),
+                OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            )
+        };
+        valid(h).then_some(Handle(h))
+    };
+    // without the right to delete (someone holds it open without sharing that): read only
+    let (h, may_delete) = match open(GENERIC_READ | DELETE) {
+        Some(h) => (h, true),
+        None => match open(GENERIC_READ) {
+            Some(h) => (h, false),
+            None => return Err(io::Error::last_os_error()),
+        },
+    };
+    // SAFETY: zeroed POD out struct of the stated size.
+    let mut tag: FILE_ATTRIBUTE_TAG_INFO = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            h.0,
+            FileAttributeTagInfo,
+            (&mut tag as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+            std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if tag.FileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY) != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a regular file",
+        ));
+    }
+    let mut data = vec![0u8; max];
+    let mut have = 0usize;
+    while have < max {
+        let mut got = 0u32;
+        // SAFETY: the unfilled part of `data`; synchronous handle.
+        let ok = unsafe {
+            ReadFile(
+                h.0,
+                data[have..].as_mut_ptr(),
+                (max - have) as u32,
+                &mut got,
+                null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if got == 0 {
+            break;
+        }
+        have += got as usize;
+    }
+    data.truncate(have);
+    let in_place = handle_path(h.0).is_some_and(|opened| {
+        let asked = long_path(path);
+        // SAFETY: two buffers of the stated lengths.
+        unsafe {
+            CompareStringOrdinal(
+                opened.as_ptr(),
+                opened.len() as i32,
+                asked.as_ptr(),
+                asked.len() as i32,
+                1,
+            ) == CSTR_EQUAL
+        }
+    });
+    let deleted = may_delete && in_place && {
+        let info = FILE_DISPOSITION_INFO { DeleteFile: true };
+        // SAFETY: our handle (opened with DELETE) and a struct of the stated size.
+        unsafe {
+            SetFileInformationByHandle(
+                h.0,
+                FileDispositionInfo,
+                (&info as *const FILE_DISPOSITION_INFO).cast(),
+                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+            ) != 0
+        }
+    };
+    Ok((data, deleted))
 }
 
 /// Whether BUILTIN\Administrators is *enabled* in this process's token.
@@ -454,14 +657,32 @@ impl Pipe {
                 }
             }
             let waits = [ev.0, self.cancel];
-            // SAFETY: valid handles.
-            let outcome = unsafe { WaitForMultipleObjects(2, waits.as_ptr(), 0, millis(timeout)) };
+            let deadline = timeout.map(|t| std::time::Instant::now() + t);
+            let outcome = loop {
+                let left = deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+                // SAFETY: valid handles.
+                let r = unsafe { WaitForMultipleObjects(2, waits.as_ptr(), 0, millis(left)) };
+                // SAFETY (io_pending): `ov` lives on this frame until the operation ends.
+                if r == WAIT_OBJECT_0 && unsafe { io_pending(&ov) } {
+                    // signalled, but not by the completion: take the signal back and wait on
+                    // (unless the operation ended in between)
+                    unsafe { ResetEvent(ev.0) };
+                    if unsafe { io_pending(&ov) } {
+                        continue;
+                    }
+                }
+                break r;
+            };
             if outcome != WAIT_OBJECT_0 {
                 unsafe { CancelIoEx(handle, &ov) };
             }
+            // the OVERLAPPED and the buffer outlive the operation: wait until it has really ended
+            // (GetOverlappedResult's own wait trusts the event, which proves nothing)
+            // SAFETY: our OVERLAPPED and its event.
+            while !unsafe { wait_io(&ov, ev.0, Duration::from_secs(3600)) } {}
             let mut count = 0u32;
-            // SAFETY: waits for the operation to finish (bWait = TRUE): the OVERLAPPED is released after.
-            if unsafe { GetOverlappedResult(handle, &ov, &mut count, 1) } != 0 {
+            // SAFETY: the operation has ended.
+            if unsafe { GetOverlappedResult(handle, &ov, &mut count, 0) } != 0 {
                 return Ok(count as usize); // completed (possibly racing the cancel): keep the data
             }
             let err = last_error();

@@ -28,9 +28,11 @@ use sk_protocol::envelope::RequestId;
 
 use super::auth::{is_elevated, new_token, peer_is_launched, tokens_match, write_token_file};
 use super::errors::HelperError;
-use super::launch::{Elevator, HelperProcess, helper_command, start_elevated, start_subprocess};
+use super::launch::{
+    Elevator, HelperProcess, helper_command, helper_command_for, start_elevated, start_subprocess,
+};
 use super::messages::*;
-use super::service::{BulkTable, IDLE_TIMEOUT};
+use super::service::{BulkTable, IDLE_TIMEOUT, is_locale_tag};
 use super::transport::{ChanError, Channel, Listener};
 use super::usn::{UsnRows, UsnTable};
 use crate::i18n::t;
@@ -61,8 +63,12 @@ pub struct LaunchOptions {
     pub request_timeout: Duration,
     /// The helper exits after this long without a request.
     pub idle_timeout: Duration,
-    /// Replaces `[current_exe, "helper"]` (tests).
+    /// Replaces `[<spaceknife-cli>, "helper"]` (tests).
     pub command: Option<Vec<OsString>>,
+    /// Pretend this is the running program (tests): the helper is the `spaceknife-cli` next to it
+    /// ([`super::launch::helper_command_for`]).
+    #[doc(hidden)]
+    pub program: Option<PathBuf>,
     /// How an elevated helper is started (tests replace the UAC call).
     pub elevator: Elevator,
     /// Pretend this process's elevation (tests).
@@ -78,6 +84,7 @@ impl Default for LaunchOptions {
             request_timeout: REQUEST_TIMEOUT,
             idle_timeout: IDLE_TIMEOUT,
             command: None,
+            program: None,
             elevator: Elevator::default(),
             assume_elevated: None,
         }
@@ -173,9 +180,10 @@ impl HelperClient {
             };
             let path = write_token_file(&token, None).map_err(start_failed)?;
             token_path = Some(path.clone());
-            let mut argv = match &opts.command {
-                Some(c) => c.clone(),
-                None => helper_command().map_err(start_failed)?,
+            let mut argv = match (&opts.command, &opts.program) {
+                (Some(c), _) => c.clone(),
+                (None, Some(exe)) => helper_command_for(exe).map_err(start_failed)?,
+                (None, None) => helper_command().map_err(start_failed)?,
             };
             argv.extend(
                 [
@@ -190,6 +198,7 @@ impl HelperClient {
                 ]
                 .map(OsString::from),
             );
+            argv.extend(locale_args(crate::i18n::system_locale().as_deref()));
             let proc = if uac {
                 start_elevated(&argv, &opts.elevator, timeout)?
             } else {
@@ -728,6 +737,16 @@ fn add_checked<T: BulkTable>(table: &mut T, frame: &DecodedFrame<'_>) -> Result<
     Ok(())
 }
 
+/// `--system-locale <tag>` for the helper: the OS locale the launcher read (the language of its
+/// messages), passed as an argument since the backend never puts it into its environment; nothing
+/// without one, or for anything that is not a plain locale tag.
+fn locale_args(locale: Option<&str>) -> Vec<OsString> {
+    match locale.filter(|l| is_locale_tag(l)) {
+        Some(l) => vec!["--system-locale".into(), l.into()],
+        None => Vec::new(),
+    }
+}
+
 /// Wait for the helper to connect, giving up early if it exits.
 fn accept(
     listener: &mut Listener,
@@ -906,5 +925,21 @@ impl SharedHelper {
         if let Some(c) = self.client.lock().take() {
             c.close();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_launchers_locale_goes_to_the_helper_as_an_argument() {
+        assert_eq!(
+            locale_args(Some("zh_CN.UTF-8")),
+            [OsString::from("--system-locale"), "zh_CN.UTF-8".into()]
+        );
+        assert!(locale_args(None).is_empty());
+        assert!(locale_args(Some("")).is_empty());
+        assert!(locale_args(Some("en US; rm -rf")).is_empty());
     }
 }

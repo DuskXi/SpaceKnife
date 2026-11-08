@@ -69,6 +69,7 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 - 每个扫描根一个目录句柄（`FILE_LIST_DIRECTORY`，`FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED`，共享读写删），`bWatchSubtree=TRUE`，`ReadDirectoryNotifyExtendedInformation`（Windows 10 1709+）。第一次读取被拒时依次退回：Ex 64 KiB → 旧接口 `ReadDirectoryChangesW`（`modified` 不带大小，状态说明「此卷不提供扩展变化信息」）。
 - 关注：文件名、目录名、大小、最后写入时间、属性、创建。缓冲区 1 MiB（本地卷；网络卷 64 KiB）。读到 0 字节或 `ERROR_NOTIFY_ENUM_DIR` = 溢出：发 `overflow(root)`，继续监视。
 - 线程里用重叠 I/O + 事件等待；每次读取完成先复制数据、立即挂下一次读取，再解码交给 sink。`stop` 用 `CancelIoEx` 打断，1 秒内返回。
+- 停止事件由监视器和它的线程共有，两者都放手后才关闭：线程自己先结束了（比如根目录被删），`stop` 发的信号仍然落在自己的事件上，不会落到复用了这个句柄值的别的对象上（比如提权助手管道一次读写的事件）。事件被点亮不算完成：读取是否结束看 OVERLAPPED 本身（`helper/win32.rs` 的 `io_pending` / `wait_io`），取消后等它真正结束才释放缓冲区。
 - 动作映射：`ADDED` → created；`REMOVED` → deleted；文件的 `MODIFIED` → modified（`FileSize`、`AllocatedLength`、`LastModificationTime`；压缩/稀疏文件 alloc 为 None，云占位为 0，常驻文件为 0）；目录的 `MODIFIED` 忽略；`RENAMED_OLD_NAME` + `RENAMED_NEW_NAME` → renamed（旧名等不到新名 50 ms 则当作 deleted）。
 - 根目录每秒检查一次（`DeletePending` 与最终路径）：被删除、移动或改名 → 先发 `overflow(root)` 再 `failed`。第一次读取都没挂上的失败（打不开、文件系统不支持通知）只报 `failed`，由流水线改用轮询。
 - 8.3 短名的通知不展开：路径找不到节点时按「重新列出父目录」处理。
@@ -81,12 +82,16 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 - 扫描列不出的文件夹（`ACCESS_DENIED`，普通用户扫 `/` 时有几十个，如 `/root`）根本不交过来（§5 第 1 步），所以不占额度、不轮询，也不让状态变成「部分轮询」。路径达到 PATH_MAX（4,096 字节）的文件夹 inotify 按路径加不上（ENAMETOOLONG），交给轮询；轮询像扫描一样分段打开它取 mtime（`worker.open_dir`），这时「部分轮询」是真的。
 - `IN_Q_OVERFLOW`：发 `overflow(root)`，然后逐个校验 watch：过时的删掉、子树清理并重新遍历。根目录的 `IN_DELETE_SELF` / `IN_MOVE_SELF`：`overflow(root)` + `failed`。
 - 文件的 `IN_CLOSE_WRITE` / `IN_ATTRIB` → modified，大小与占用（`st_blocks × 512`）由监视器自己 stat。
+- 唤醒用的管道由监视器和它的线程共有，两者都放手后才关闭：线程先结束了，`stop` / `add_dirs` 的唤醒也只会写进这个管道，不会写进复用了这个描述符的文件或套接字。
 - fanotify（`FAN_MARK_FILESYSTEM`）需要 `CAP_SYS_ADMIN`，等 Linux 提权助手（见 TODO）。网络卷与 WSL 经 9P 挂的 Windows 盘：内核收不到对端的改动，流水线直接改用轮询。
 
 ### 2.3 macOS：FSEvents（`monitor/mac.rs`）
 
 - `FSEventStreamCreate`（`FileEvents | NoDefer | WatchRoot`，latency 0.05 s），专用线程跑 CFRunLoop；`MustScanSubDirs` / `UserDropped` / `KernelDropped` = overflow。
 - 构造失败（找不到框架）或一启动就 `failed` 时退回轮询。**未在 macOS 实机验证。**
+- 线程的 run loop 在共享状态里保留一份引用（`CFRetain`），线程结束时在锁里放掉；`stop` 在同一把锁里 `CFRunLoopStop`，不会碰到随线程一起释放的 run loop。
+
+- 各监视器的锁不怕「中毒」（`monitor::LockExt`）：线程里的 panic 被接住、报为 `failed` 后，之后的 `status` / `stop` / 下一批不会因为那把锁再 panic。
 
 ### 2.4 轮询（`monitor/poll.rs`）
 
