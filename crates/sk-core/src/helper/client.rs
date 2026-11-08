@@ -32,7 +32,7 @@ use super::launch::{
     Elevator, HelperProcess, helper_command, helper_command_for, start_elevated, start_subprocess,
 };
 use super::messages::*;
-use super::service::{BulkTable, IDLE_TIMEOUT};
+use super::service::{BulkTable, IDLE_TIMEOUT, is_locale_tag};
 use super::transport::{ChanError, Channel, Listener};
 use super::usn::{UsnRows, UsnTable};
 use crate::i18n::t;
@@ -198,6 +198,7 @@ impl HelperClient {
                 ]
                 .map(OsString::from),
             );
+            argv.extend(locale_args(crate::i18n::system_locale().as_deref()));
             let proc = if uac {
                 start_elevated(&argv, &opts.elevator, timeout)?
             } else {
@@ -736,6 +737,16 @@ fn add_checked<T: BulkTable>(table: &mut T, frame: &DecodedFrame<'_>) -> Result<
     Ok(())
 }
 
+/// `--system-locale <tag>` for the helper: the OS locale the launcher read (the language of its
+/// messages), passed as an argument since the backend never puts it into its environment; nothing
+/// without one, or for anything that is not a plain locale tag.
+fn locale_args(locale: Option<&str>) -> Vec<OsString> {
+    match locale.filter(|l| is_locale_tag(l)) {
+        Some(l) => vec!["--system-locale".into(), l.into()],
+        None => Vec::new(),
+    }
+}
+
 /// Wait for the helper to connect, giving up early if it exits.
 fn accept(
     listener: &mut Listener,
@@ -914,5 +925,21 @@ impl SharedHelper {
         if let Some(c) = self.client.lock().take() {
             c.close();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_launchers_locale_goes_to_the_helper_as_an_argument() {
+        assert_eq!(
+            locale_args(Some("zh_CN.UTF-8")),
+            [OsString::from("--system-locale"), "zh_CN.UTF-8".into()]
+        );
+        assert!(locale_args(None).is_empty());
+        assert!(locale_args(Some("")).is_empty());
+        assert!(locale_args(Some("en US; rm -rf")).is_empty());
     }
 }

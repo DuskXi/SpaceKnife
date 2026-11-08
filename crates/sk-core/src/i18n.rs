@@ -11,9 +11,10 @@
 //!
 //! The language: setting `general.language` = `system` | `zh-CN` | `en`; `system` resolves with
 //! [`system_language`] — `SPACEKNIFE_LANGUAGE` (tests, forced), then `SPACEKNIFE_SYSTEM_LOCALE` (the
-//! launcher passes the OS UI language it sees), then the platform: Windows
-//! `GetUserDefaultUILanguage`, macOS `AppleLanguages`, then `LANGUAGE` / `LC_ALL` / `LC_MESSAGES` /
-//! `LANG`. Any Chinese locale gives Simplified Chinese, everything else English.
+//! environment a launcher gave the process), then the OS locale the launcher read and passed as
+//! an argument ([`set_system_locale`]), then the platform: Windows `GetUserDefaultUILanguage`,
+//! macOS `AppleLanguages`, then `LANGUAGE` / `LC_ALL` / `LC_MESSAGES` / `LANG`. Any Chinese locale
+//! gives Simplified Chinese, everything else English. Nothing here changes the environment.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -36,6 +37,7 @@ const EN_FILES: &[(&str, &str)] = &[
 
 static LANGUAGE: AtomicU8 = AtomicU8::new(0); // 0 zh-CN, 1 en
 static SYSTEM: Mutex<Option<Language>> = Mutex::new(None);
+static LAUNCHER_LOCALE: Mutex<Option<String>> = Mutex::new(None);
 static MISSING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
 
 fn lang_code(l: Language) -> u8 {
@@ -114,11 +116,28 @@ pub fn clear_system_language_cache() {
     *SYSTEM.lock() = None;
 }
 
+/// The OS locale as the launcher read it (`ServeOptions::system_locale`, the helper's
+/// `--system-locale`); None or empty forgets it. [`system_language`] uses it after the
+/// `SPACEKNIFE_LANGUAGE` / `SPACEKNIFE_SYSTEM_LOCALE` variables: it is passed as a value, never put
+/// into the environment of a process whose other threads (a GUI toolkit's) may read it.
+pub fn set_system_locale(locale: Option<&str>) {
+    *LAUNCHER_LOCALE.lock() = locale.filter(|l| !l.is_empty()).map(str::to_owned);
+    clear_system_language_cache();
+}
+
+/// What [`set_system_locale`] was given (to pass it on to a helper process).
+pub fn system_locale() -> Option<String> {
+    LAUNCHER_LOCALE.lock().clone()
+}
+
 fn detect_system_language() -> Language {
     for var in ["SPACEKNIFE_LANGUAGE", "SPACEKNIFE_SYSTEM_LOCALE"] {
         if let Some(l) = env_language(var) {
             return l;
         }
+    }
+    if let Some(l) = normalize(LAUNCHER_LOCALE.lock().as_deref()) {
+        return l;
     }
     if let Some(l) = windows_ui_language().or_else(mac_language) {
         return l;

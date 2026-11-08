@@ -316,12 +316,11 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
             opts.host
         );
     }
-    if let Some(locale) = opts.system_locale.as_deref().filter(|l| !l.is_empty())
-        && std::env::var_os("SPACEKNIFE_SYSTEM_LOCALE").is_none()
-    {
-        // SAFETY: set once at startup, before any of the server's own threads read the environment.
-        unsafe { std::env::set_var("SPACEKNIFE_SYSTEM_LOCALE", locale) };
-        sk_core::i18n::clear_system_language_cache();
+    if let Some(locale) = opts.system_locale.as_deref().filter(|l| !l.is_empty()) {
+        // a value, never the environment: the server may run inside the GUI process, whose
+        // toolkit threads read the environment (getenv) meanwhile; a SPACEKNIFE_SYSTEM_LOCALE the
+        // process was started with still comes first
+        sk_core::i18n::set_system_locale(Some(locale));
     }
     let tls = match &opts.tls {
         Some((cert, key)) => Some(crate::http::tls_acceptor(cert, key)?),

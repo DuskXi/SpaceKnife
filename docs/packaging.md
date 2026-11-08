@@ -76,7 +76,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 - 应用在 `apps/desktop`：Nuxt 4 + Vue 3 的界面（`app/`），Tauri 2 的外壳（`src-tauri/`，crate `spaceknife-desktop`，可执行文件 `spaceknife`）。见 [apps/desktop/PORTING.md](../apps/desktop/PORTING.md)「Commands」「Bundles」。
 - `identifier` 是 `io.github.duskxi.spaceknife`。
 - 界面跑在系统的 WebView 里（Windows WebView2、macOS WKWebView、Linux WebKitGTK），不再自带 Chromium。
-- 外壳自己的文件（`theme.json`、WebView 的配置目录）：设了 `SPACEKNIFE_HOME`（便携版、演示、测试）时在 `<SPACEKNIFE_HOME>/desktop`，否则在 Tauri 的应用本地数据目录（按 identifier 命名），和后端的文件分开（`src-tauri/src/window.rs` 的 `ui_dir`）。
+- 外壳自己的文件（`theme.json`、WebView 的配置目录）：设了 `SPACEKNIFE_HOME`（演示、测试）或是便携版时在 `<SPACEKNIFE_HOME 或便携版的 data>/desktop`，否则在 Tauri 的应用本地数据目录（按 identifier 命名），和后端的文件分开（`src-tauri/src/window.rs` 的 `ui_dir`）。
 - 拖动窗口的元素带 `data-tauri-drag-region`。
 - Windows 上 release 构建的 `spaceknife.exe` 是 GUI 子系统；终端里用的无头模式是控制台程序 `spaceknife-cli headless`，不再需要 0.3.x 的 `SpaceKnife.com` 启动器。
 
@@ -91,7 +91,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 
 **便携版**（Windows zip、Linux tar.gz、macOS zip）：
 
-- 一个文件夹：`spaceknife[.exe]`、`spaceknife-cli[.exe]`、`licenses/` 和一个空的 `data` 文件夹（macOS 上是 `SpaceKnife.app` 加旁边的 `data`）。打包后的应用启动时，如果可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`（`src-tauri/src/portable.rs`，`lib.rs` 的 `prepare_environment`）：快照、设置、日志、缓存和 WebView 配置都存在里面，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。
+- 一个文件夹：`spaceknife[.exe]`、`spaceknife-cli[.exe]`、`licenses/` 和一个空的 `data` 文件夹（macOS 上是 `SpaceKnife.app` 加旁边的 `data`）。打包后的应用启动时，如果可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就像设了 `SPACEKNIFE_HOME` 那样用它（`src-tauri/src/portable.rs`，`lib.rs` 的 `prepare_environment` 调 `sk_core::paths::set_home`；不改进程的环境变量，所以程序启动的子进程不会继承它）：快照、设置、日志、缓存和 WebView 配置都存在里面，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。
 - 解压到用户可写的位置（解压到 Program Files 之类的位置会写不进去）。
 - Linux 的 tar.gz 不需要 FUSE。
 - 有 x64 和 arm64 两份（`win-arm64`、`linux-arm64`）。便携版更新时按处理器的架构挑包（`crates/sk-core/src/update/mod.rs` 的 `asset_templates`）：Windows on ARM 上先找 arm64 包，发布里没有时仍给 x64（Windows 能模拟运行）；ARM Linux 只取 arm64 包。arm64 版目前只在 GitHub 的 ARM 运行器上测过，还没在真机上用过。

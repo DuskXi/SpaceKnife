@@ -1,7 +1,8 @@
 //! Per-user application directories (the same places platformdirs gave the Python backend).
 //!
 //! `SPACEKNIFE_HOME` overrides everything (tests and isolated demos use it so they never touch the
-//! real user data): `<home>/data`, `<home>/config`, `<home>/cache`.
+//! real user data): `<home>/data`, `<home>/config`, `<home>/cache`. A portable copy's program sets
+//! the same from inside with [`set_home`] (never by changing its own environment).
 //!
 //! | | data | config | cache |
 //! |---|---|---|---|
@@ -35,11 +36,25 @@ pub fn expand_user(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Relocate every folder to `<dir>/data`, `<dir>/config`, `<dir>/cache` for this process, as
+/// `SPACEKNIFE_HOME` does (a portable copy's data folder next to its program); a `SPACEKNIFE_HOME`
+/// the process was started with still comes first. Call it once, before anything reads a folder;
+/// false (and nothing changes) when it was set already. It takes the place of setting the
+/// variable from inside the process, which a GUI toolkit's threads might be reading meanwhile.
+pub fn set_home(dir: PathBuf) -> bool {
+    HOME.set(dir).is_ok()
+}
+
 fn home_override() -> Option<PathBuf> {
-    let value = std::env::var("SPACEKNIFE_HOME")
+    let p = match std::env::var("SPACEKNIFE_HOME")
         .ok()
-        .filter(|v| !v.is_empty())?;
-    let p = expand_user(&value);
+        .filter(|v| !v.is_empty())
+    {
+        Some(value) => expand_user(&value),
+        None => HOME.get()?.clone(),
+    };
     Some(std::path::absolute(&p).unwrap_or(p))
 }
 

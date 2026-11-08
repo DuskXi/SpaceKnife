@@ -50,6 +50,27 @@ async fn generated_token_and_app_shutdown() {
 }
 
 #[tokio::test]
+async fn the_launchers_locale_is_a_value_not_the_environment() {
+    // the server may run inside the window program, whose toolkit threads read the environment:
+    // the locale the launcher read goes to the interface language as a value
+    let srv = server_with(
+        ServeOptions {
+            token: TOKEN.to_owned(),
+            system_locale: Some("en-US".into()),
+            ..ServeOptions::default()
+        },
+        |_| {},
+    )
+    .await;
+    assert_eq!(std::env::var_os("SPACEKNIFE_SYSTEM_LOCALE"), None);
+    assert_eq!(sk_core::i18n::system_locale().as_deref(), Some("en-US"));
+    srv.shutdown();
+    tokio::time::timeout(Duration::from_secs(10), srv.wait())
+        .await
+        .expect("stopped");
+}
+
+#[tokio::test]
 async fn short_tokens_are_refused() {
     init();
     let r = sk_server::start(ServeOptions {

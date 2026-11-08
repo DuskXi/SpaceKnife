@@ -22,8 +22,12 @@ pub const MAIN: &str = "main";
 /// for an isolated home (demos, tests, portable copies), else the app's local data folder; apart
 /// from the backend's files.
 pub fn ui_dir(app: &AppHandle) -> PathBuf {
-    match std::env::var_os("SPACEKNIFE_HOME").filter(|h| !h.is_empty()) {
-        Some(home) => PathBuf::from(home).join("desktop"),
+    let home = std::env::var_os("SPACEKNIFE_HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| crate::portable_dir().map(std::path::Path::to_path_buf));
+    match home {
+        Some(home) => home.join("desktop"),
         None => app
             .path()
             .app_local_data_dir()

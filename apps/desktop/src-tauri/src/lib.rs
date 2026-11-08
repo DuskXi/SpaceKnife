@@ -27,8 +27,9 @@ pub fn portable_dir() -> Option<&'static Path> {
 }
 
 /// A portable copy keeps its data next to the executable (on macOS next to the app bundle, also
-/// when macOS runs a translocated copy of it): SPACEKNIFE_HOME points there for the whole process
-/// (the backend included). Call first thing in main, before any thread starts.
+/// when macOS runs a translocated copy of it): everything the process writes goes there, the
+/// backend included (`sk_core::paths::set_home`, as SPACEKNIFE_HOME would; the environment is left
+/// alone). Call first thing in main.
 pub fn prepare_environment() {
     let Ok(exe) = std::env::current_exe() else {
         return;
@@ -41,8 +42,7 @@ pub fn prepare_environment() {
         home.as_deref(),
         portable::original_path,
     ) {
-        // SAFETY: called from main before the runtime or any other thread exists
-        unsafe { std::env::set_var("SPACEKNIFE_HOME", &dir) };
+        sk_core::paths::set_home(dir.clone());
         let _ = PORTABLE.set(dir);
     }
 }

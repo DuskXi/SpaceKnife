@@ -881,7 +881,7 @@ fn guess_id(body: &[u8]) -> Option<u64> {
 
 // --------------------------------------------------------------------------- entry point
 
-const USAGE: &str = "usage: spaceknife helper --pipe ADDRESS --token-file PATH --server-pid PID [--idle-timeout SECONDS] [--log-level LEVEL]";
+const USAGE: &str = "usage: spaceknife-cli helper --pipe ADDRESS --token-file PATH --server-pid PID [--idle-timeout SECONDS] [--log-level LEVEL] [--system-locale TAG]";
 
 struct Args {
     pipe: String,
@@ -889,6 +889,16 @@ struct Args {
     server_pid: u32,
     idle_timeout: f64,
     log_level: String,
+    /// the OS locale the backend's launcher read (the language of the helper's messages)
+    system_locale: Option<String>,
+}
+
+/// A locale tag as passed with `--system-locale` (`zh_CN.UTF-8`, `en-US`, `zh-Hans@x`).
+pub fn is_locale_tag(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.@".contains(&b))
 }
 
 fn parse_args(args: &[OsString]) -> Result<Args, String> {
@@ -897,6 +907,7 @@ fn parse_args(args: &[OsString]) -> Result<Args, String> {
     let mut server_pid = None;
     let mut idle_timeout = IDLE_TIMEOUT.as_secs_f64();
     let mut log_level = "INFO".to_owned();
+    let mut system_locale = None;
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         let flag = flag.to_string_lossy();
@@ -934,6 +945,13 @@ fn parse_args(args: &[OsString]) -> Result<Args, String> {
                 }
                 log_level = v;
             }
+            "--system-locale" => {
+                let v = value()?.to_string_lossy().into_owned();
+                if !is_locale_tag(&v) {
+                    return Err(format!("--system-locale: invalid tag {v:?}"));
+                }
+                system_locale = Some(v);
+            }
             other => return Err(format!("unrecognized argument {other:?}")),
         }
     }
@@ -943,6 +961,7 @@ fn parse_args(args: &[OsString]) -> Result<Args, String> {
         server_pid: server_pid.ok_or("--server-pid is required")?,
         idle_timeout,
         log_level,
+        system_locale,
     })
 }
 
@@ -973,9 +992,6 @@ pub fn run_main(args: &[OsString]) -> i32 {
 /// [`run_main`] with test seams.
 #[doc(hidden)]
 pub fn run_main_with(args: &[OsString], hooks: Hooks) -> i32 {
-    // Its own process, often elevated: the user's settings may not be readable, so the system's
-    // language; the backend shows the helper's error messages as they come.
-    i18n::set_language(i18n::system_language());
     let args = match parse_args(args) {
         Ok(a) => a,
         Err(why) => {
@@ -983,6 +999,11 @@ pub fn run_main_with(args: &[OsString], hooks: Hooks) -> i32 {
             return 2;
         }
     };
+    // Its own process, often elevated: the user's settings may not be readable, so the system's
+    // language (as the backend's launcher saw it, when it says); the backend shows the helper's
+    // error messages as they come.
+    i18n::set_system_locale(args.system_locale.as_deref());
+    i18n::set_language(i18n::system_language());
     setup_logging(&args.log_level);
     let token = match read_token_file(&args.token_file) {
         Ok(t) => t,
@@ -1192,6 +1213,22 @@ mod tests {
             (ok.pipe.as_str(), ok.server_pid, ok.idle_timeout),
             ("p", 12, 0.5)
         );
+        assert_eq!(ok.system_locale, None);
+        let base = ["--pipe", "p", "--token-file", "/t", "--server-pid", "12"];
+        let with = |extra: &[&str]| {
+            let all: Vec<OsString> = base.iter().chain(extra).map(OsString::from).collect();
+            parse_args(&all)
+        };
+        assert_eq!(
+            with(&["--system-locale", "zh_CN.UTF-8"])
+                .unwrap()
+                .system_locale
+                .as_deref(),
+            Some("zh_CN.UTF-8")
+        );
+        assert!(with(&["--system-locale", "en US"]).is_err());
+        assert!(with(&["--system-locale", ""]).is_err());
+        assert!(with(&["--system-locale"]).is_err());
         assert!(parse_args(&["--pipe", "p"].map(OsString::from)).is_err());
         assert!(parse_args(&["--bogus", "1"].map(OsString::from)).is_err());
         assert!(
