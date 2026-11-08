@@ -42,6 +42,10 @@ while IFS= read -r path; do
     docs/insights.md) # sk-core's insights tests check the rules library against it
       rust=true
       ;;
+    # the Windows console launcher (SpaceKnife.com) is a crate of the workspace
+    packaging/console-launcher/*)
+      rust=true
+      ;;
     # documentation, the website, artwork, packaging tests and repository meta: nothing in CI builds or
     # tests them (the packaging tests run in the Portable and macOS build workflows)
     docs/* | site/* | design/app-icon/* | design/social/* | design/README.md | packaging/* \

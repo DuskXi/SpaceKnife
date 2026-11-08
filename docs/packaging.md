@@ -73,20 +73,39 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 
 ## 3. Tauri 外壳
 
-- 应用在 `apps/desktop`：Nuxt 4 + Vue 3 的界面（`app/`），Tauri 2 的外壳（`src-tauri/`，crate `spaceknife-desktop`，可执行文件 `spaceknife`）。见 [apps/desktop/PORTING.md](../apps/desktop/PORTING.md)「Commands」「Bundles」。
+- 应用在 `apps/desktop`：Nuxt 4 + Vue 3 的界面（`app/`），Tauri 2 的外壳（`src-tauri/`，crate `spaceknife-desktop`，可执行文件在 Windows 和 macOS 上叫 `SpaceKnife`，和 0.3.4 一样——0.3.4 的「无缝更新」按这个名字找新版本；Linux 上叫 `spaceknife`；`tauri.{windows,macos}.conf.json` 的 `mainBinaryName`）。见 [apps/desktop/PORTING.md](../apps/desktop/PORTING.md)「Commands」「Bundles」。
 - `identifier` 是 `io.github.duskxi.spaceknife`。
 - 界面跑在系统的 WebView 里（Windows WebView2、macOS WKWebView、Linux WebKitGTK），不再自带 Chromium。
 - 外壳自己的文件（`theme.json`、WebView 的配置目录）：设了 `SPACEKNIFE_HOME`（便携版、演示、测试）时在 `<SPACEKNIFE_HOME>/desktop`，否则在 Tauri 的应用本地数据目录（按 identifier 命名），和后端的文件分开（`src-tauri/src/window.rs` 的 `ui_dir`）。
 - 拖动窗口的元素带 `data-tauri-drag-region`。
-- Windows 上 release 构建的 `SpaceKnife.exe` 是 GUI 子系统；终端里用的无头模式是控制台程序 `spaceknife-cli headless`，不再需要 0.3.x 的 `SpaceKnife.com` 启动器。
+- Windows 上 release 构建的 `SpaceKnife.exe` 是 GUI 子系统；终端里用的无头模式是控制台程序 `spaceknife-cli headless`。
+- 窗口只显示界面自己的页面（`src-tauri/src/navigation.rs`：`tauri://localhost`、`http(s)://tauri.localhost`，开发时加上 dev server），不开新窗口，项目的网页交给浏览器；CSP 在 `tauri.conf.json`，内联脚本的哈希由 Tauri 加上。
+- 0.3.4 的无头启动方式（`SpaceKnife --headless`、`--listen <地址>`、`--help`，参数在任意位置）不开窗口，在本进程里运行 `spaceknife-cli headless …`（`src-tauri/src/cli.rs`，`main.rs`）；只转无头模式的选项，其余参数忽略，和 0.3.4 一样。Windows 上从终端直接启动时附到那个终端的控制台。
+- 后端从环境变量 `SPACEKNIFE_SHELL`（`tauri`，`lib.rs` 的 `prepare_environment` 设置）知道是哪个外壳。
+
+## 3b. Electron 外壳
+
+Windows 安装包、RHEL 9 的 rpm 和 AppImage 用 Electron 外壳（`apps/electron-shell`），界面是同一份 Nuxt 构建；便携版、deb 和 macOS 用 Tauri 外壳。
+
+- 只有主进程和 preload（`src/main`、`src/preload`，electron-vite 构建到 `out/`），没有自己的界面。窗口从 `app://spaceknife` 提供 `apps/desktop/.output/public`（打包后是 `resources/ui`），页面带 Content-Security-Policy 头，内联脚本的 sha256 按页面计算（`src/main/csp.ts`），指令与 Tauri 的相同。来源和 userData（`<appData>/SpaceKnife/electron`，设了 `SPACEKNIFE_HOME` 时是 `<SPACEKNIFE_HOME>/electron`）与 0.3.4 相同，页面的存储和 `theme.json` 都还在。
+- preload 只暴露 `window.skElectron`（版本信息、白名单内的 IPC 通道、拖放文件的路径）；界面的 `app/lib/electronHost.ts` 在它上面实现 `window.sk`，`app/lib/installHost.ts` 依次选：已有的 `window.sk`、Electron、Tauri、浏览器 shim。
+- 后端是子进程 `spaceknife-cli serve --token-stdin --log-format plain`（与 0.3.4 的 Python 后端同一个契约：令牌走 stdin，stdout 一行 ready，stdin 关闭即退出）；版本、安装方式、系统语言和 `SPACEKNIFE_SHELL=electron` 经环境变量传；设了 `SPACEKNIFE_READY_FILE` 时加 `--ready-file`（`packaging/smoke-app.mjs` 两个外壳都能用）。
+- Windows 和 Linux 上没有菜单栏（`Menu.setApplicationMenu(null)`，也就没有默认的重载和开发者工具快捷键）；页面申请的权限一律拒绝；导航只限 `app://spaceknife`，新窗口一律不开。
+- 0.3.4 的无头启动方式转给 `spaceknife-cli headless …`，以继承终端的方式运行（`src/main/cli.ts`）。
+- 安装包里 `spaceknife-cli` 在主程序旁边（Windows 再加 `SpaceKnife.com`），界面在 `resources/ui`，`spaceknife-cli headless` 默认就在那里找界面。
+
+构建：`pnpm -C apps/electron-shell package [electron-builder 参数]`（[scripts/package.mjs](../apps/electron-shell/scripts/package.mjs)）：先用 `apps/desktop/scripts/prepare-bundle.mjs` 编 `spaceknife-cli`、写许可证，Windows 上再编 `SpaceKnife.com`（`packaging/console-launcher`），放进 `target/electron-shell/stage`；界面没有构建时先 `pnpm generate`；然后 `electron-vite build` 和 `electron-builder`，产物在 `target/electron-shell/dist`。配置是 [electron-builder.yml](../apps/electron-shell/electron-builder.yml)，与 0.3.4 的同一个 appId、产品名、安装目录、快捷方式、rpm 包名。
+
+**SpaceKnife.com**（Windows，`packaging/console-launcher`）：终端里输入 `SpaceKnife …` 时先找到它。参数是 0.3.4 的无头启动方式时直接在这个终端里运行旁边的 `spaceknife-cli.exe headless …`（Y/N 提问、Ctrl+C 都在这个终端）；否则按原样带参数启动 `SpaceKnife.exe` 并等它退出，和 0.3.4 一样。
 
 ## 4. 安装包
 
-**Windows（NSIS）**：Tauri 的 NSIS 安装程序，「仅当前用户」（`installMode: currentUser`，不需要管理员）；安装向导有中文和英文。没有代码签名证书：第一次运行时 SmartScreen 会提示「未知发布者」。卸载程序是安装目录里的 `uninstall.exe`（`install.rs` 据此认出 NSIS 安装）。<!-- TODO: confirm — 静默安装 / 卸载的参数、卸载时是否保留 / 删除扫描、快照与设置（Electron 版的 installer.nsh 清理逻辑没有移植），待 Tauri 的安装程序定下来再写 -->
+**Windows（NSIS）**：发布的安装包由 Electron 外壳的 electron-builder 出（第 3b 节），和 0.3.4 同一个 appId（卸载项 GUID 也就相同）、安装目录（当前用户 `%LOCALAPPDATA%\Programs\SpaceKnife`，或所有用户 `C:\Program Files\SpaceKnife`）和快捷方式，0.3.4 的「无缝更新」参数（`--updated /S --force-run /currentuser|/allusers`）照样适用。安装向导有中文和英文，可选当前用户或所有用户、可改目录。卸载程序是 `Uninstall SpaceKnife.exe`；`build/installer.nsh`：卸载时删掉界面缓存、后端的 `Cache` 和下载的更新，第二页「你的数据」勾选（或静默卸载带 `--delete-app-data`）才删快照、设置和日志；更新时旧版本的卸载程序带 `--updated`，什么都不删。没有代码签名证书：第一次运行时 SmartScreen 会提示「未知发布者」。Tauri 的 NSIS 包（`uninstall.exe`）仍能构建，但不发布。
 
 **Linux**：
 
-- deb / rpm：程序在 `/usr/bin/spaceknife`，`spaceknife-cli` 在旁边；desktop 文件与 hicolor 图标由 Tauri 生成；依赖是 WebKitGTK 4.1、GTK 3 等。`install.rs` 用 `/var/lib/dpkg/info/` 的文件列表区分 deb 与 rpm。
+- deb（Tauri 外壳）：程序在 `/usr/bin/spaceknife`，`spaceknife-cli` 在旁边；desktop 文件与 hicolor 图标由 Tauri 生成；依赖是 WebKitGTK 4.1、GTK 3 等。`install.rs` 用 `/var/lib/dpkg/info/` 的文件列表区分 deb 与 rpm。
+- rpm（Electron 外壳，RHEL 9 没有 WebKitGTK 4.1）：包名 `spaceknife`，程序在 `/opt/SpaceKnife`，`/usr/bin/spaceknife`（alternatives）和 `/usr/bin/spaceknife-cli` 两个链接；界面在 `/opt/SpaceKnife/resources/ui`。安装、卸载脚本在 `apps/electron-shell/build/linux/`：卸载脚本只在真正卸载时（`$1` 为 0）删链接；0.3.4 的卸载脚本不看 `$1`，从 0.3.4 升级时会在新包装好之后删掉 `/usr/bin/spaceknife`，`%posttrans`（`rpm-posttrans.sh`）在整个事务之后把缺的链接补回来。
 - AppImage：需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）；没有时用 `--appimage-extract-and-run` 运行。发布里不再有 `.AppImage.zsync`（Electron 版写过 zsync 更新信息；Tauri 的 AppImage 由 SpaceKnife 自己的更新检查替换）。
 
 **便携版**（Windows zip、Linux tar.gz、macOS zip）：

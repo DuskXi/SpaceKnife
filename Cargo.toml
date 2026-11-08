@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/desktop/src-tauri"]
+members = ["crates/*", "apps/desktop/src-tauri", "packaging/console-launcher"]
 default-members = ["crates/*"]
 
 [workspace.package]
