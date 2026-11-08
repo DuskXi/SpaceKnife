@@ -505,3 +505,129 @@ fn items_keep_the_scan_root_they_were_found_under() {
         .into()
     );
 }
+
+// --------------------------------------------------------------------------- twins in the basket
+
+/// Two entries that differ only in case are two items: the second is not taken for the first
+/// (which left it on disk, reported as already in the basket), and what lies below each is
+/// covered by that one only.
+#[test]
+fn case_twins_in_the_basket_stay_two_items() {
+    let _g = setup();
+    let store = twin_store();
+    let top = root_of(&store);
+    let (a, big_a) = (child(&store, top, "a"), child(&store, top, "A"));
+    let b = basket();
+    let first = b.add(&store.read(), "s1", &[a as i64], None).unwrap();
+    let second = b.add(&store.read(), "s1", &[big_a as i64], None).unwrap();
+    assert_eq!(first.added.len(), 1, "{first:?}");
+    assert_eq!(second.added.len(), 1, "{second:?}");
+    assert!(second.merged.is_empty(), "{second:?}");
+    assert_ne!(first.added, second.added);
+    assert_eq!(b.len(), 2);
+    // a file in `A` is covered by `A`, not by `a`
+    let inner = child(&store, big_a, "f");
+    let res = b.add(&store.read(), "s1", &[inner as i64], None).unwrap();
+    assert_eq!(res.merged.len(), 1, "{res:?}");
+    assert_eq!(res.merged[0].into, second.added[0]);
+    let got: std::collections::BTreeSet<String> =
+        b.targets(None).into_iter().map(|t| t.path).collect();
+    assert_eq!(got, [path_of(&store, a), path_of(&store, big_a)].into());
+    // their folder takes both in
+    let res = b.add(&store.read(), "s1", &[top as i64], None).unwrap();
+    assert_eq!(res.absorbed.len(), 2, "{res:?}");
+}
+
+/// A name no `String` can hold, as the file system names it: a lone UTF-16 surrogate on Windows,
+/// a byte that is not UTF-8 on Linux (None on macOS: its file systems take UTF-8 only).
+fn odd(stem: &str, unit: u16) -> Option<std::ffi::OsString> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        let mut w: Vec<u16> = stem.encode_utf16().collect();
+        w.push(0xDC00 | unit);
+        Some(std::ffi::OsString::from_wide(&w))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let mut b = stem.as_bytes().to_vec();
+        b.push(0x80 | unit as u8);
+        Some(std::ffi::OsString::from_vec(b))
+    }
+    #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+    {
+        let _ = (stem, unit);
+        None
+    }
+}
+
+/// Scan `top` (a small folder of the test's own).
+fn scanned(top: &Path) -> Store {
+    let (scanner, _) =
+        sk_core::scan::scan_path(top, sk_core::scan::ScanOptions::default()).unwrap();
+    scanner.store().clone()
+}
+
+fn node_at(store: &Store, p: &Path) -> i64 {
+    store
+        .read()
+        .find_path(p)
+        .unwrap_or_else(|| panic!("{p:?} not in the tree")) as i64
+}
+
+/// Add `paths` one by one, delete what the basket then holds, and take the results back in.
+fn add_and_delete(store: &Store, top: &Path, paths: &[PathBuf]) {
+    let b = basket();
+    for p in paths {
+        let res = b
+            .add(&store.read(), "s1", &[node_at(store, p)], None)
+            .unwrap();
+        assert_eq!(res.added.len(), 1, "{p:?}: {res:?}");
+    }
+    assert_eq!(b.len(), paths.len());
+    let targets = b.targets(None);
+    assert_eq!(targets.len(), paths.len());
+    let os: Vec<PathBuf> = targets.iter().map(|t| t.os_path.clone()).collect();
+    let roots: HashMap<String, String> = targets.iter().map(|t| (t.path.clone(), s(top))).collect();
+    let results = delete_permanently(&os, opts(&roots));
+    assert!(results.iter().all(|r| r.ok), "{results:?}");
+    let left = b.apply_results(targets.iter().zip(&results));
+    assert_eq!(left.len(), paths.len());
+    assert!(b.is_empty(), "{:?}", b.items());
+}
+
+/// Two names that show the same once their bytes that are not Unicode became U+FFFD: two items,
+/// each deleting its own, and both leave the basket.
+#[test]
+fn names_that_lost_different_bytes_stay_two_items() {
+    let _g = setup();
+    let (Some(one), Some(two)) = (odd("x", 0), odd("x", 1)) else {
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().join("scan");
+    std::fs::create_dir(&top).unwrap();
+    if std::fs::write(top.join(&one), b"1").is_err() {
+        return; // a file system that refuses such names
+    }
+    std::fs::write(top.join(&two), b"2").unwrap();
+    std::fs::write(top.join("keep.txt"), b"k").unwrap();
+    let store = scanned(&top);
+    add_and_delete(&store, &top, &[top.join(&one), top.join(&two)]);
+    assert!(!top.join(&one).exists() && !top.join(&two).exists());
+    assert!(top.join("keep.txt").exists());
+}
+
+/// Case twins on disk, both put into the basket: each deletes its own, both leave the basket.
+#[test]
+fn case_twins_on_disk_each_leave_the_basket() {
+    let _g = setup();
+    let tmp = tempfile::tempdir().unwrap();
+    let Some((root, a, big_a)) = twins(tmp.path()) else {
+        return;
+    };
+    let store = scanned(&root);
+    add_and_delete(&store, &root, &[a.clone(), big_a.clone()]);
+    assert!(!a.exists() && !big_a.exists());
+}

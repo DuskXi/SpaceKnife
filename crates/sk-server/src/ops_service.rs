@@ -19,7 +19,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use sk_core::ops::{Basket, BasketItem, OpOptions, OpResult, Refused, TrashStatus};
+use sk_core::ops::{Basket, BasketItem, OpOptions, OpResult, Refused, Target, TrashStatus};
 use sk_core::settings::SettingsStore;
 use sk_core::tr;
 use sk_protocol::ErrorCode;
@@ -76,6 +76,8 @@ pub struct OpRun {
     pub mode: OpMode,
     session: Weak<Session>,
     pub total: i64,
+    /// what is executed, in order (results come back in this order)
+    targets: Vec<Target>,
     /// as the file system names them (results and the maps below: as shown)
     paths: Vec<std::path::PathBuf>,
     sizes: HashMap<String, i64>,
@@ -538,6 +540,7 @@ impl OpsService {
                 .filter(|t| !t.root.is_empty())
                 .map(|t| (t.path.clone(), t.root.clone()))
                 .collect(),
+            targets,
             st: Mutex::new(RunState {
                 done: 0,
                 current: String::new(),
@@ -629,7 +632,8 @@ impl OpsService {
         .await;
         match results {
             Ok(results) => {
-                let left = self.basket.apply_results(&results);
+                // matched by target: two targets can show the same path
+                let left = self.basket.apply_results(run.targets.iter().zip(&results));
                 let ok = results.iter().filter(|r| r.ok).count();
                 let failed: Vec<&OpResult> = results
                     .iter()
