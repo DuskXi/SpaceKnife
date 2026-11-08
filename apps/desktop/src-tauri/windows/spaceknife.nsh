@@ -648,12 +648,14 @@ FunctionEnd
 
 ; One staged file (its path in $INSTDIR on the stack) into place: renamed (the same drive), else
 ; copied; a few tries (a scanner may hold a new file for a moment). $SkPlaceFailed when it can't.
+; The installed file is only taken out for a staged one that is there to take its place.
 Function SkPlaceOne
   Exch $R0
   Push $R1
   StrCpy $R1 0
   sk_place_again:
   ${If} $SkStageMove = 1
+  ${AndIf} ${FileExists} "$SkStage\$R0"
     ${If} ${FileExists} "$INSTDIR\$R0"
       Delete "$INSTDIR\$R0"
     ${EndIf}
@@ -695,6 +697,13 @@ FunctionEnd
   CreateDirectory "$INSTDIR\${REL}"
 !macroend
 
+!macro SK_PLACED_CHECK REL
+  ${IfNot} ${FileExists} "$INSTDIR\${REL}"
+  ${AndIf} $SkPlaceFailed == ""
+    StrCpy $SkPlaceFailed "${REL}"
+  ${EndIf}
+!macroend
+
 ; Every staged file into $INSTDIR (the earlier version is gone, or this is its own update in
 ; place); then the staging folder goes. $SkPlaceFailed = the first file that could not be placed.
 Function SkPlaceAll
@@ -707,9 +716,16 @@ Function SkPlaceAll
     ClearErrors
     Rename "$SkStage" "$INSTDIR"
     ${IfNot} ${Errors}
-    ${AndIf} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
-      ${SkLog} "the staged folder became $INSTDIR"
+      ; the staging folder is $INSTDIR now: what is in it stays, whatever is missing (a scanner
+      ; may have taken a file meanwhile) is reported, and nothing falls back to the placement file
+      ; by file below, which would take out the files that just arrived
       StrCpy $SkStage ""
+      !insertmacro SK_EACH_FILE SK_PLACED_CHECK
+      ${If} $SkPlaceFailed == ""
+        ${SkLog} "the staged folder became $INSTDIR"
+      ${Else}
+        ${SkLog} "the staged folder became $INSTDIR without $SkPlaceFailed: kept as it is"
+      ${EndIf}
       ClearErrors
       Return
     ${EndIf}
