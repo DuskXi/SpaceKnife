@@ -11,6 +11,7 @@ pub mod events;
 pub mod files;
 pub mod install;
 pub mod links;
+pub mod navigation;
 pub mod portable;
 pub mod terminal;
 pub mod text;
