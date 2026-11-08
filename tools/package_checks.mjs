@@ -101,8 +101,9 @@ const cstr = (data, at, len) => {
   return raw.subarray(0, nul < 0 ? raw.length : nul).toString("utf8");
 };
 
-/** The members of a zip file: {name, data()} (stored or deflated; ZIP64 sizes and offsets read). */
-function zipMembers(data, label) {
+/** The members of a zip file: {name, data()} (stored or deflated; ZIP64 sizes and offsets read;
+ * folders left out). tools/nsis_fork.mjs unpacks Tauri's NSIS with it. */
+export function zipMembers(data, label) {
   let eocd = -1;
   for (let i = data.length - 22; i >= Math.max(0, data.length - 22 - 0xffff); i--) {
     if (data.readUInt32LE(i) === 0x06054b50) {
