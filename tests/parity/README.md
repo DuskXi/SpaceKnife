@@ -168,13 +168,20 @@ and compare with `listing.json`:
 | folders listed as recorded, or no differences | compared exactly | compared exactly |
 | listed otherwise, and differences | not counted, with the reason (`SKIP`) | replayed again in that folder, which must list them as recorded (else a failure), and compared exactly there |
 
+That folder must also lie in a temp folder of the system, as the recording's did, else it is a
+failure before the replay there. The backend takes a folder for a temp folder by its path, through the
+built-in insight rule `posix-temp` (`/tmp`, `/var/tmp`, `/private/tmp`, `/private/var/tmp`) or
+`windows-temp` (`…\AppData\Local\Temp`, `?:\Windows\Temp`), not by `TMPDIR` or `TEMP`; so every
+fixture of the goldens is a temporary file, and `compare` gives that note as a change's reason
+("Temporary files"). A fixture outside those paths has no reason.
+
 CI's Linux job makes an ext4 with the recording's hash seed (`mkfs.ext4 -E hash_seed=…`,
-`.github/workflows/ci.yml`), mounts it and sets `SPACEKNIFE_PARITY_TMP` to it; Windows needs
-nothing (NTFS). On the machine the Linux goldens were recorded on (WSL's ext4) the system's temp
-folder already lists them as recorded. ext4's order is its directory hash (`debugfs` `dx_hash -h
-half_md4 -s <seed>` of each name gives the recorded order), so any ext4 made with that seed lists
-the same names alike. A scenario that needed both the recording's order and its volume (a
-basket's mount point) could not pass anywhere but there; none does.
+`.github/workflows/ci.yml`), mounts it at `/tmp/sk-parity` and sets `SPACEKNIFE_PARITY_TMP` to
+it; Windows needs nothing (NTFS). On the machine the Linux goldens were recorded on (WSL's ext4)
+the system's temp folder already lists them as recorded. ext4's order is its directory hash
+(`debugfs` `dx_hash -h half_md4 -s <seed>` of each name gives the recorded order), so any ext4
+made with that seed lists the same names alike. A scenario that needed both the recording's order
+and its volume (a basket's mount point) could not pass anywhere but there; none does.
 
 ## Known differences
 

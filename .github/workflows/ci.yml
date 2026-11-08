@@ -117,7 +117,10 @@ jobs:
       # listed alike. The runner's ext4 has another seed: a scenario that differs in the runner's
       # temp folder while it lists the fixture folders otherwise is replayed again in an ext4 made
       # with the recording's seed (golden/linux/listing.json, SPACEKNIFE_PARITY_TMP), where it
-      # must find them listed as recorded.
+      # must find them listed as recorded. It is mounted inside /tmp: the goldens were recorded in
+      # the system's temp folder, and the backend takes a folder for a temp folder by its path (the
+      # insight rule posix-temp: /tmp, /var/tmp, …; compare gives its note as a change's reason),
+      # not by TMPDIR, so a mount elsewhere loses those reasons.
       - name: An ext4 that lists folders as the Linux goldens' did
         if: runner.os == 'Linux'
         run: |
@@ -133,10 +136,10 @@ jobs:
           grep -Eq "^Directory Hash Seed: +$seed\$" <<< "$head"
           grep -Eq "^Default directory hash: +$(jq -r .filesystem.hash "$fs")\$" <<< "$head"
           grep -Eq "^Filesystem flags: +$(jq -r .filesystem.flags "$fs")" <<< "$head"
-          sudo mkdir -p /mnt/sk-parity
-          sudo mount -o loop "$img" /mnt/sk-parity
-          sudo chown "$(id -u):$(id -g)" /mnt/sk-parity
-          echo "SPACEKNIFE_PARITY_TMP=/mnt/sk-parity" >> "$GITHUB_ENV"
+          sudo mkdir -p /tmp/sk-parity
+          sudo mount -o loop "$img" /tmp/sk-parity
+          sudo chown "$(id -u):$(id -g)" /tmp/sk-parity
+          echo "SPACEKNIFE_PARITY_TMP=/tmp/sk-parity" >> "$GITHUB_ENV"
 
       - name: Tests
         run: cargo test --workspace --locked

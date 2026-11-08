@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
 import time
+import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -123,6 +125,37 @@ def temp_parent() -> str | None:
     """SPACEKNIFE_PARITY_TMP: a folder on a file system that lists folders as the goldens' did,
     where `check` replays what differs where the system's temp folder lists them otherwise."""
     return os.environ.get(PARITY_TMP) or None
+
+
+# The built-in insight rule of the system's temp folders, by their paths. The goldens' fixture
+# folders were recorded in the system's temp folder, so the backend took every fixture for a
+# temporary file, and `compare` gives that rule's note as a change's reason ("Temporary files"). The
+# backend reads no TMPDIR or TEMP for it: a replay folder outside those paths gets no reason, so
+# SPACEKNIFE_PARITY_TMP has to lie inside one of them (parity_replay.rs TEMP_RULE, which asks
+# sk-core itself; CI mounts its ext4 at /tmp/sk-parity).
+TEMP_RULE = "windows-temp" if sys.platform == "win32" else "posix-temp"
+BUILTIN_RULES = HERE.parent.parent / "crates" / "sk-core" / "src" / "insights" / "builtin.toml"
+
+
+def not_a_temp_folder(folder: str) -> str | None:
+    """Why the backend would not take `folder` for one of the system's temp folders, as it took the
+    recording's (inside none of the paths of TEMP_RULE: absolute ones, `?:/…` on any drive, others
+    anywhere in the path; without case on Windows); None when it would."""
+    rules = tomllib.loads(BUILTIN_RULES.read_text(encoding="utf-8"))["rule"]
+    patterns = next(r["paths"] for r in rules if r["id"] == TEMP_RULE)
+    win = sys.platform == "win32"
+    real = os.path.realpath(folder).replace("\\", "/").rstrip("/")
+    real = real.lower() if win else real
+    for pattern in patterns:
+        p = pattern.lower() if win else pattern
+        drive = p.startswith("?:/")
+        rest = p[2:] if drive else p
+        if any(c in rest for c in "*?[{"):
+            raise ValueError(f"{BUILTIN_RULES}: {TEMP_RULE} names {pattern}, a pattern this check does not follow")
+        head = "[a-z]:" if drive else "" if p.startswith("/") else "(?:.*/)?"
+        if re.fullmatch(head + re.escape(rest.rstrip("/")) + "(?:/.*)?", real):
+            return None
+    return f"{real} is inside none of the folders {TEMP_RULE} names ({', '.join(patterns)})"
 
 
 def listing(root: Path) -> dict[str, list[str]]:

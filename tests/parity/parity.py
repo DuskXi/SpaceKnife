@@ -330,6 +330,12 @@ async def cmd_check(args: argparse.Namespace) -> int:
                 if not parent:
                     print(f"SKIP   {name}  ({len(bad)} differences not counted: this file system lists the fixture folders otherwise than the recording's ({moved}), and 0.3.4 keeps that order for entries of equal size)")
                     continue
+                # in a temp folder of the system, as the recording's were (fixtures.TEMP_RULE)
+                why = engine.fixtures.not_a_temp_folder(parent)
+                if why:
+                    print(f"FAIL   {name}  ({engine.fixtures.PARITY_TMP} is not in a temp folder of the system: {why}; a fixture's insight there, a change's reason in compare, comes from the folder's path, not from TMPDIR)")
+                    failed += 1
+                    continue
                 bad, known, moved = await replay_in(parent)
                 if moved:
                     print(f"FAIL   {name}  ({engine.fixtures.PARITY_TMP} lists the fixture folders otherwise than {LISTING.relative_to(HERE)}: {moved})")

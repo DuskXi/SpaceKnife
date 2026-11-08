@@ -857,6 +857,37 @@ fn build_fixture(root: &Path, name: &str) {
 /// "Directory order").
 const PARITY_TMP: &str = "SPACEKNIFE_PARITY_TMP";
 
+/// The built-in insight rule of the system's temp folders, by their paths (`posix-temp`: /tmp,
+/// /var/tmp, …; `windows-temp`: …\AppData\Local\Temp, ?:\Windows\Temp). The goldens' fixture
+/// folders were recorded in the system's temp folder, so the backend took every fixture for a
+/// temporary file, and `compare` gives that rule's note as a change's reason ("Temporary files").
+/// The backend reads no TMPDIR or TEMP for it: a replay folder outside those paths gets no reason,
+/// so SPACEKNIFE_PARITY_TMP has to lie inside one of them (CI mounts its ext4 at /tmp/sk-parity).
+const TEMP_RULE: &str = if cfg!(windows) {
+    "windows-temp"
+} else {
+    "posix-temp"
+};
+
+/// Why the backend would not take `folder` for one of the system's temp folders, as it took the
+/// recording's ([`TEMP_RULE`]); None when it would.
+fn not_a_temp_folder(folder: &Path) -> Option<String> {
+    // the long name, as Places::make takes it
+    let real = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+    let real = real.to_string_lossy();
+    let real = real.strip_prefix(r"\\?\").unwrap_or(&real);
+    match sk_core::insights::match_path(real, sk_store::Kind::Dir, None, Some("en")) {
+        Some(i) if i.rule == TEMP_RULE => None,
+        Some(i) => Some(format!(
+            "the backend takes {real} for {} (\"{}\"), not for {TEMP_RULE}",
+            i.rule, i.note
+        )),
+        None => Some(format!(
+            "no insight rule applies to {real}, where {TEMP_RULE} applied to the recording's folder"
+        )),
+    }
+}
+
 /// How this file system lists a built fixture tree (fixtures.py `listing`): each folder ("" for
 /// the top, `a/b` below) with its entries in the order `read_dir` gives them, which is the order
 /// 0.3.4 (and the candidate) keep for entries of equal size.
@@ -2116,6 +2147,11 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
             );
             return None;
         };
+        if let Some(why) = not_a_temp_folder(Path::new(&parent)) {
+            panic!(
+                "{name}: {PARITY_TMP} is not in a temp folder of the system: {why}. The goldens were recorded in the system's temp folder, and a fixture's insight there (compare: a change's reason, \"Temporary files\") comes from the folder's path, not from TMPDIR: name a folder inside one ({TEMP_RULE} in crates/sk-core/src/insights/builtin.toml; tests/parity/README.md, \"Directory order\")"
+            );
+        }
         eprintln!(
             "{name}: the temp folder lists the fixture folders otherwise ({at}): replayed in {PARITY_TMP}"
         );
