@@ -144,6 +144,71 @@ async fn duplicate_request_id_is_rejected() {
 }
 
 #[tokio::test]
+async fn a_panicking_handler_answers_and_frees_its_id() {
+    // a bug in a handler: the request still gets an answer (an internal error), its id does not
+    // stay "in flight", and the session and the server go on
+    let srv = server_with(
+        sk_server::ServeOptions {
+            token: TOKEN.to_owned(),
+            ..sk_server::ServeOptions::default()
+        },
+        |r| {
+            r.add_raw("test.panic", |_call, _raw| async move {
+                if std::hint::black_box(true) {
+                    panic!("injected handler bug");
+                }
+                Ok(String::new())
+            });
+        },
+    )
+    .await;
+    let mut ws = raw_session(&srv.url).await;
+    let send = |method: &str| {
+        json!({"jsonrpc": "2.0", "id": 7, "method": method, "params": {"seconds": 0}}).to_string()
+    };
+    ws.send(Message::text(send("test.panic"))).await.unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(10), next_json(&mut ws))
+        .await
+        .expect("an answer to the request whose handler panicked");
+    assert_eq!(reply["id"], 7);
+    assert_eq!(reply["error"]["code"], code(ErrorCode::InternalError));
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("injected handler bug"),
+        "{reply}"
+    );
+    // the same id again: not "already in flight"
+    ws.send(Message::text(send("test.sleep"))).await.unwrap();
+    let again = tokio::time::timeout(Duration::from_secs(10), next_json(&mut ws))
+        .await
+        .unwrap();
+    assert_eq!(again, json!({"jsonrpc": "2.0", "id": 7, "result": {}}));
+}
+
+#[tokio::test]
+async fn a_tiny_rate_limit_is_accepted() {
+    // 1e-20 Hz passes the protocol's check (> 0); one over it is a gap no Duration can hold, which
+    // made the subscribe handler panic (no answer, the id left in the session)
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let r = tokio::time::timeout(
+        Duration::from_secs(10),
+        c.call("$/subscribe", json!({"topic": "io", "rate_hz": 1e-20})),
+    )
+    .await
+    .expect("an answer")
+    .expect("subscribed");
+    let sub = r["sub"].as_str().unwrap().to_owned();
+    c.ok("$/unsubscribe", json!({"sub": sub})).await;
+    assert_eq!(
+        c.ok("system.ping", json!({"payload": "x"})).await["payload"],
+        "x"
+    );
+}
+
+#[tokio::test]
 async fn malformed_frame_after_handshake_gets_error() {
     let srv = server().await;
     let mut ws = raw_session(&srv.url).await;

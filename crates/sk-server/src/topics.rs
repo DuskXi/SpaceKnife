@@ -64,9 +64,11 @@ impl Subscription {
         let flag = Arc::new(SubFlag {
             id: id.clone(),
             closed: AtomicBool::new(false),
+            // a tiny rate (1e-20 Hz passes the protocol's check) is a gap no Duration holds:
+            // forced events only, as the Python backend's float gap did
             min_gap: rate_hz
                 .filter(|r| *r > 0.0)
-                .map(|r| Duration::from_secs_f64(1.0 / r)),
+                .map(|r| Duration::try_from_secs_f64(1.0 / r).unwrap_or(Duration::MAX)),
             last: Mutex::new(None),
         });
         Subscription {
@@ -161,4 +163,22 @@ pub fn open_log(
     }
     sub.on_close(move || bus.unsubscribe(token));
     Ok(sub)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tiny_rate_lets_only_forced_events_through() {
+        for rate in [1e-20, f64::MIN_POSITIVE, 5e-324] {
+            let s = Subscription::new("io", Some(rate));
+            assert!(s.flag.admit(false), "{rate}: the first event goes");
+            assert!(!s.flag.admit(false), "{rate}");
+            assert!(s.flag.admit(true), "{rate}: a final status always goes");
+        }
+        let s = Subscription::new("io", Some(120.0));
+        assert_eq!(s.flag.min_gap, Some(Duration::from_secs_f64(1.0 / 120.0)));
+        assert_eq!(Subscription::new("io", None).flag.min_gap, None);
+    }
 }
