@@ -2,7 +2,7 @@
 // binary, the built interface for headless mode (`ui`, spaceknife-cli's default --ui), the licences
 // and an empty "data" folder (what makes it portable: lib.rs prepare_environment,
 // src-tauri/src/portable.rs), packed as the update checks expect it (crates/sk-core update
-// asset_template, src-tauri/src/update.rs) and as install.rs unpacks it (one folder at the top):
+// asset_templates, src-tauri/src/update.rs) and as install.rs unpacks it (one folder at the top):
 //
 //   target/portable/SpaceKnife-<v>-win-<x64|arm64>-portable.zip       (Windows; bsdtar's zip)
 //   target/portable/SpaceKnife-<v>-linux-<x64|arm64>-portable.tar.gz  (Linux)
@@ -10,10 +10,19 @@
 //       holds spaceknife-cli, next to data; ditto's zip, which keeps the bundle's links, attributes
 //       and signature, as the app's own ditto unpacks it)
 //
+// The layout is also a contract with every 0.3.x portable copy, whose 「无缝更新」 unpacks the newest
+// release's archive and checks it before anything moves (v0.3.4 apps/electron/src/main index.ts
+// replacePortable, update.ts swapHelper): one folder at the top holding the program under the name
+// 0.3.x runs (SpaceKnife.exe on Windows, spaceknife on Linux, SpaceKnife.app on macOS, whose
+// executable is Contents/MacOS/SpaceKnife), and the program that swaps the files at
+// resources/backend/spaceknife-backend[.exe] (Contents/Resources/backend/spaceknife-backend in the
+// app bundle on macOS). That is a copy of spaceknife-cli: it takes `--apply-update <plan>` (plan
+// version 1, sk_core::update::swap) as its first argument. Every later archive keeps both.
+//
 //   node scripts/portable.mjs      (CARGO_TARGET_DIR respected)
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,19 +37,37 @@ const exe = process.platform === "win32" ? ".exe" : "";
 const targetDir = process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(root, "target");
 const release = join(targetDir, "release");
 
+/** The program's name in the folder: what a 0.3.x copy starts again after its update. */
+const PROGRAM = { win: "SpaceKnife.exe", linux: "spaceknife", mac: "SpaceKnife.app" };
+/** The swap helper, relative to the folder (on macOS inside the app bundle, tauri.bundle.macos.json). */
+const HELPER = {
+  win: join("resources", "backend", "spaceknife-backend.exe"),
+  linux: join("resources", "backend", "spaceknife-backend"),
+  mac: join("SpaceKnife.app", "Contents", "Resources", "backend", "spaceknife-backend"),
+};
+
 const name = `SpaceKnife-${version}-${os}-${arch}-portable`;
 const work = join(root, "target", "portable");
 const folder = join(work, name);
 rmSync(folder, { recursive: true, force: true });
 mkdirSync(join(folder, "data"), { recursive: true });
 if (os === "mac") {
-  // the app bundle `pnpm bundle` made (spaceknife-cli and the licences are inside it)
+  // the app bundle `pnpm bundle` made (spaceknife-cli, the licences and the swap helper are inside it)
   const app = join(release, "bundle", "macos", "SpaceKnife.app");
   if (!existsSync(app)) throw new Error(`${app} is missing: run pnpm bundle first`);
   execFileSync("/usr/bin/ditto", [app, join(folder, "SpaceKnife.app")], { stdio: "inherit" });
+  for (const inside of [join("SpaceKnife.app", "Contents", "MacOS", "SpaceKnife"), HELPER.mac]) {
+    if (!existsSync(join(folder, inside))) throw new Error(`the app bundle has no ${inside} (tauri.macos.conf.json mainBinaryName, tauri.bundle.macos.json)`);
+  }
 } else {
-  copyFileSync(join(release, `spaceknife${exe}`), join(folder, `spaceknife${exe}`));
+  // the cargo binary under the program's name (Windows: SpaceKnife.exe, as 0.3.x checks it, case and all)
+  copyFileSync(join(release, `spaceknife${exe}`), join(folder, PROGRAM[os]));
   copyFileSync(join(release, `spaceknife-cli${exe}`), join(folder, `spaceknife-cli${exe}`));
+  mkdirSync(dirname(join(folder, HELPER[os])), { recursive: true });
+  copyFileSync(join(release, `spaceknife-cli${exe}`), join(folder, HELPER[os]));
+  if (os === "linux") {
+    for (const p of [PROGRAM.linux, "spaceknife-cli", HELPER.linux]) chmodSync(join(folder, p), 0o755);
+  }
   cpSync(join(desktop, "src-tauri", "target-bundle", "licenses"), join(folder, "licenses"), { recursive: true });
   // `spaceknife-cli headless` serves the interface from `ui` next to it
   cpSync(join(desktop, ".output", "public"), join(folder, "ui"), { recursive: true, dereference: true });

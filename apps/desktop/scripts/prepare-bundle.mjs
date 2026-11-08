@@ -7,12 +7,14 @@
 // - src-tauri/target-bundle/licenses/: LICENSE.txt (SpaceKnife, MIT), THIRD-PARTY-rust.txt (the crates linked
 //   into spaceknife and spaceknife-cli, from `cargo metadata`) and THIRD-PARTY-ui.txt (the npm
 //   packages of the interface: the production dependencies, a superset of what is bundled, and the
-//   fonts, OFL-1.1). Identical licence texts are printed once, with the packages that share them.
+//   fonts, OFL-1.1). Identical licence texts are printed once, with the packages that share them;
+// - macOS: src-tauri/target-bundle/backend/spaceknife-backend, the swap helper of the app bundle
+//   (macHelper; the portable archives of the other systems get theirs from portable.mjs).
 //
 //   node scripts/prepare-bundle.mjs [--no-cli]      (TAURI_ENV_TARGET_TRIPLE / CARGO_TARGET_DIR respected)
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +54,23 @@ function buildCli() {
   const dest = join(out, `spaceknife-cli-${triple}${exe}`);
   copyFileSync(built, dest);
   console.log(`[bundle] ${dest}`);
+  if (triple.includes("apple-darwin")) macHelper(built);
+}
+
+/** macOS: src-tauri/target-bundle/backend/spaceknife-backend, the program a 0.3.x portable copy
+ * runs from the new version's app bundle to swap the files (Contents/Resources/backend; a copy of
+ * spaceknife-cli, which takes --apply-update; tauri.bundle.macos.json puts it there). Signed with
+ * the app's identity before the bundle is sealed, so it is code of its own in the bundle. */
+function macHelper(cli) {
+  const helper = join(out, "backend", "spaceknife-backend");
+  mkdirSync(dirname(helper), { recursive: true });
+  copyFileSync(cli, helper);
+  chmodSync(helper, 0o755);
+  const identity = process.env.APPLE_SIGNING_IDENTITY;
+  if (identity) {
+    execFileSync("/usr/bin/codesign", ["--force", "--sign", identity, "--identifier", "io.github.duskxi.spaceknife.backend", helper], { stdio: "inherit" });
+  }
+  console.log(`[bundle] ${helper}${identity ? ` (signed: ${identity === "-" ? "ad hoc" : identity})` : ""}`);
 }
 
 // ------------------------------------------------------------------ licences
