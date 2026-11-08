@@ -236,11 +236,15 @@ pub fn install_refusal(
 /// data, the shortcuts and the folder and skips the pages, `/S` silent, `--force-run` starts the
 /// new version afterwards (with `--updated`). The scope only where the folder makes it plain —
 /// under Program Files `/allusers`, under LOCALAPPDATA `/currentuser`, elsewhere none (the
-/// installer reads it from the registry). `env` reads the environment.
+/// installer reads it from the registry). `env` reads the environment. The paths are a Windows
+/// installation's and are taken by Windows' rules on every host, as 0.3.4 took them
+/// (`win32.dirname`, `within(win32, …)`): the tests say the same on Linux and macOS, whose `Path`
+/// knows no `\`.
 pub fn nsis_update_args(exe: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Vec<String> {
     let mut args = vec!["--updated".to_owned(), "/S".into(), "--force-run".into()];
-    let dir = exe.parent().unwrap_or(exe);
-    let within = |var: &str| env(var).is_some_and(|root| path_within(Path::new(&root), dir));
+    let exe = exe.to_string_lossy().replace('/', "\\");
+    let dir = exe.rsplit_once('\\').map_or("", |(dir, _)| dir);
+    let within = |var: &str| env(var).is_some_and(|root| path_within(&root.to_string_lossy(), dir));
     if ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
         .iter()
         .any(|v| within(v))
@@ -254,9 +258,9 @@ pub fn nsis_update_args(exe: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> V
 
 /// Whether `path` lies inside `root` (not `root` itself), as Windows compares paths: without case,
 /// `/` as `\`, no trailing separator, no `\\?\` prefix.
-fn path_within(root: &Path, path: &Path) -> bool {
-    let norm = |p: &Path| {
-        let s = p.to_string_lossy().replace('/', "\\").to_lowercase();
+fn path_within(root: &str, path: &str) -> bool {
+    let norm = |p: &str| {
+        let s = p.replace('/', "\\").to_lowercase();
         let s = s.strip_prefix("\\\\?\\").unwrap_or(&s).to_owned();
         s.trim_end_matches('\\').to_owned()
     };
@@ -677,6 +681,16 @@ mod tests {
         // a name that only starts like Program Files is not in it
         assert_eq!(
             args("C:\\Program Files Extra\\SpaceKnife\\SpaceKnife.exe"),
+            ["--updated", "/S", "--force-run"]
+        );
+        // the extended-length form; a program right in Program Files, whose folder is Program Files
+        // itself and not one inside it (0.3.4: no scope either)
+        assert_eq!(
+            args("\\\\?\\C:\\Program Files\\SpaceKnife\\SpaceKnife.exe"),
+            ["--updated", "/S", "--force-run", "/allusers"]
+        );
+        assert_eq!(
+            args("C:\\Program Files\\SpaceKnife.exe"),
             ["--updated", "/S", "--force-run"]
         );
         // nothing known: no scope
