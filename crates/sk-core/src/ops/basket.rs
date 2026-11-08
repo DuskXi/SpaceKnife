@@ -84,13 +84,28 @@ pub struct BasketItem {
 }
 
 impl BasketItem {
-    /// The protocol model.
+    /// The protocol model: the path and the name as 0.3.4 sent them, a name that is not Unicode
+    /// escaped ([`printable_path`]; the item keeps its shown form for comparing).
     pub fn to_protocol(&self) -> sk_protocol::ops::BasketItem {
+        let path = printable_path(&self.os_path);
+        let name = if !self.members.is_empty() {
+            let folder = self.os_path.file_name().map(Path::new);
+            group_label(
+                &printable_path(folder.unwrap_or(&self.os_path)),
+                self.members.len(),
+            )
+        } else if self.name == self.path {
+            path.clone() // a scan root is named by its path
+        } else {
+            self.os_path
+                .file_name()
+                .map_or_else(|| self.name.clone(), |n| printable_path(Path::new(n)))
+        };
         sk_protocol::ops::BasketItem {
             id: self.id.clone(),
             scan_id: self.scan_id.clone(),
-            path: self.path.clone(),
-            name: self.name.clone(),
+            path,
+            name,
             kind: self.kind,
             members: self.members.len() as i64,
             alloc: self.alloc,
@@ -281,6 +296,12 @@ fn shown(os: &Path) -> String {
     os.to_string_lossy().into_owned()
 }
 
+/// A path as the protocol writes it: what is not Unicode escaped as 0.3.4 sent it
+/// ([`sk_store::names::printable`]); for the front ends only, never compared.
+pub fn printable_path(os: &Path) -> String {
+    sk_store::names::printable(encode_name(os.as_os_str())).into_owned()
+}
+
 /// A group's members as the file system names them (items made without them: from the shown).
 fn os_members_of(item: &BasketItem) -> Vec<PathBuf> {
     if item.os_members.len() == item.members.len() {
@@ -394,6 +415,11 @@ fn group_name(folder_path: &str, count: usize) -> String {
     };
     let base = norm.rsplit(['\\', '/']).next().unwrap_or("");
     let folder = if base.is_empty() { folder_path } else { base };
+    group_label(folder, count)
+}
+
+/// 「<folder> 里的 <count> 个小项」 for the folder's name as shown.
+fn group_label(folder: &str, count: usize) -> String {
     fill(
         text("group_name"),
         &[("folder", folder.into()), ("count", count.into())],
@@ -1162,13 +1188,16 @@ impl Inner {
         let (path, os_path) = Self::node_path(nodes, node);
         if let Some(bad) = bad {
             result.refused.push(Refused {
-                path,
+                path: printable_path(&os_path),
                 reason: bad.to_string(),
             });
             return;
         }
         if let Some(reason) = protected_reason(&path) {
-            result.refused.push(Refused { path, reason });
+            result.refused.push(Refused {
+                path: printable_path(&os_path),
+                reason,
+            });
             return;
         }
         let id = node as NodeId;
@@ -1223,7 +1252,7 @@ impl Inner {
         }
         if let Some(bad) = bad {
             result.refused.push(Refused {
-                path: folder_path,
+                path: printable_path(&folder_os),
                 reason: bad.to_string(),
             });
             return;
@@ -1248,7 +1277,10 @@ impl Inner {
                 bad = Some(text("not_member").to_string());
             }
             if let Some(reason) = bad.or_else(|| protected_reason(&path)) {
-                result.refused.push(Refused { path, reason });
+                result.refused.push(Refused {
+                    path: printable_path(&os),
+                    reason,
+                });
                 continue;
             }
             let key = self.node_key(nodes, m as NodeId);

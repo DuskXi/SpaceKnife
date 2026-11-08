@@ -303,7 +303,7 @@ fn generic(name: &str) -> bool {
 /// A file: its name. A folder with a generic name: the nearest distinctive folder above it in
 /// front — 「SoftwareDistribution\Download」, 「WeChat Files\…\Video」 (UI-W6-32).
 pub fn short_label(nodes: &Nodes, node: NodeId, scope: NodeId) -> String {
-    let name = nodes.name(node).into_owned();
+    let name = nodes.name_printable(node).into_owned();
     if !nodes.is_dir(node) || !generic(&name) {
         return name;
     }
@@ -311,7 +311,7 @@ pub fn short_label(nodes: &Nodes, node: NodeId, scope: NodeId) -> String {
     let mut skipped = false;
     // never the root itself (a whole path)
     while p > 0 && p as NodeId != scope && nodes.parent(p as NodeId) > 0 {
-        let pn = nodes.name(p as NodeId);
+        let pn = nodes.name_printable(p as NodeId);
         if !generic(&pn) {
             let mid = if skipped {
                 format!("…{MAIN_SEPARATOR}")
@@ -359,7 +359,7 @@ pub fn change_item(
     let i = node as usize;
     ChangeItem {
         node,
-        path: nodes.path_lossy(node),
+        path: nodes.path_printable(node),
         label: short_label(&nodes, node, scope),
         kind: change_kind(nodes.kind(node)),
         delta: tree.diff.delta[i],

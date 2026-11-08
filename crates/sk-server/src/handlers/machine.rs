@@ -104,7 +104,7 @@ pub fn live_full(server: &Server, h: &ScanHandle) -> Result<(VolumeScan, Vec<Cla
             .filter(|&i| nodes.kind(i) == Kind::Dir)
             .take(TOP_FOLDERS)
             .map(|i| FolderStat {
-                name: nodes.name(i).into_owned(),
+                name: nodes.name_printable(i).into_owned(),
                 bytes: nodes.tot_alloc(i),
             })
             .collect();

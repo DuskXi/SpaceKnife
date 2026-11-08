@@ -315,7 +315,7 @@ impl DiffTree {
         };
         Change {
             node,
-            path: nodes.path_lossy(node),
+            path: nodes.path_printable(node),
             kind: nodes.kind(node),
             status: if rest.is_some() {
                 Status::Changed

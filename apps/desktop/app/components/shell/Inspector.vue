@@ -13,12 +13,12 @@ import { fmtAgo, fmtInt, fmtShare, fmtSize, plural, sizeParts } from "@/lib/form
 import { inBrowser } from "@/lib/host";
 import { t } from "@/lib/i18n";
 import type { IconName } from "@/lib/icons";
-import { handable, notOnDisk, revealLabel } from "@/lib/reveal";
+import { handOff, handable, notOnDisk, notOpenable, revealLabel } from "@/lib/reveal";
 import { isRunning } from "@/lib/scanProgress";
 import { tagLabel } from "@/lib/tags";
 import { summaryInterval } from "@/lib/throttle";
 import type { SummaryGap, TreeSummaryResult } from "@/protocol/generated";
-import { basketAdd, cancellable, viewCall } from "@/state/actions";
+import { basketAdd, call, cancellable, viewCall } from "@/state/actions";
 import { set, toast, useApp } from "@/state/store";
 import { Kind } from "@/visual/frame";
 
@@ -96,13 +96,27 @@ const gaps = computed<SummaryGap[]>(() => summary.value?.gaps ?? []);
 const className = (id: string) => vocab.value?.classes.find((c) => c.id === id)?.name ?? id;
 const hexOf = (id: string) => classHex(vocab.value, id);
 
+async function revealSummary(s: TreeSummaryResult): Promise<void> {
+  const scan = scanId.value;
+  if (!scan) return;
+  try {
+    const path = handOff(await call("path.forms", { scan_id: scan, node: s.node.id }));
+    if (path == null) toast(notOpenable());
+    else window.sk.shell.showItemInFolder(path);
+  } catch (err) {
+    toast(err instanceof Error ? err.message : String(err));
+  }
+}
+
 const moreActions = () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true }));
 
 const actions = computed(() => {
   const s = summary.value;
   if (!s) return [];
   const list: { icon: IconName; label: string; keys: string; danger?: boolean; disabled?: boolean; run: () => void }[] = [];
-  if (!inBrowser()) list.push({ icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: !s.on_disk || !handable(s.path), run: () => window.sk.shell.showItemInFolder(s.path) });
+  // the system is handed path.forms' text, which must name it (a name written escaped, not valid
+  // Unicode, does not: told when asked)
+  if (!inBrowser()) list.push({ icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: !s.on_disk || !handable(s.path), run: () => void revealSummary(s) });
   list.push({
     icon: "copy",
     label: t("复制路径"),

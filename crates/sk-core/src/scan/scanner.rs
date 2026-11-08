@@ -49,7 +49,8 @@ pub struct RootInfo {
 impl RootInfo {
     pub fn to_protocol(&self) -> sk_protocol::scan::ScanRootInfo {
         sk_protocol::scan::ScanRootInfo {
-            path: self.path.to_string_lossy().into_owned(),
+            path: sk_store::names::printable(sk_store::names::encode_name(self.path.as_os_str()))
+                .into_owned(),
             node: self.node,
             whole_volume: self.whole_volume,
             volume: self.volume.as_ref().map(VolumeInfo::to_protocol),
@@ -994,12 +995,14 @@ impl Scanner {
         for (_, path, msg) in folded.denied {
             st.errors += 1;
             if st.denied.len() < MAX_RECORDED_DENIED {
-                st.denied.push(path.to_string_lossy().into_owned());
+                st.denied.push(
+                    sk_store::names::printable(path.as_os_str().as_encoded_bytes()).into_owned(),
+                );
                 st.denied_reasons.push(msg);
             }
         }
         if let Some(p) = folded.last_path {
-            st.current = p.to_string_lossy().into_owned();
+            st.current = sk_store::names::printable(p.as_os_str().as_encoded_bytes()).into_owned();
         }
         st.folded += folded.entries as u64;
         st.ingest += t0.elapsed();

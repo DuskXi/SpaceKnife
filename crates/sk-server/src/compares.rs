@@ -741,7 +741,7 @@ impl CompareManager {
                 let d = &tree.diff;
                 let item = ChangeItem {
                     node: folder,
-                    path: nodes.path_lossy(folder),
+                    path: nodes.path_printable(folder),
                     label,
                     kind: ChangeKind::Group,
                     delta: ids.iter().map(|&i| d.delta[i as usize]).sum(),
@@ -935,7 +935,7 @@ fn summary(
         }
     }
     let scope = if z.node > 0 {
-        tree.store().read().path_lossy(z.node)
+        tree.store().read().path_printable(z.node)
     } else {
         String::new()
     };

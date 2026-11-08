@@ -36,6 +36,10 @@ describe("basket drawer helpers", () => {
     expect(statusText("ready")).toBe("");
     expect(parentOf("C:\\Users\\me\\a.txt")).toBe("C:\\Users\\me");
     expect(parentOf("/home/me/dir/")).toBe("/home/me");
+    // a name written escaped (not valid Unicode): its backslash is no separator
+    expect(parentOf("C:\\x\\a\\udc80b", "a\\udc80b")).toBe("C:\\x");
+    expect(parentOf("C:\\x\\a.txt", "a.txt")).toBe("C:\\x");
+    expect(parentOf("C:\\x\\a.txt", "other")).toBe("C:\\x");
   });
 });
 

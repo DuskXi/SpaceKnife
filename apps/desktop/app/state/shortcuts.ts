@@ -4,7 +4,7 @@
 import { basketAdd, call, clearFilter, closeTab, moveActiveTab, newStartTab, openSettingsTab, settingsHistory, setViewSettings, viewCall } from "@/state/actions";
 import { activeTab, focusedViewId, get, set, setting, toast, toggleLog } from "@/state/store";
 import { focusFilter } from "@/lib/filterInput";
-import { folderOf, handable, notOnDisk, notOpenable, revealLabel } from "@/lib/reveal";
+import { handOff, notOnDisk, notOpenable, revealLabel } from "@/lib/reveal";
 import { t } from "@/lib/i18n";
 import { Kind } from "@/visual/frame";
 import { hosts } from "@/visual/hosts";
@@ -148,16 +148,17 @@ export function onKey(e: KeyboardEvent): unknown {
         return;
       }
       if (!r.on_disk) return toast(notOnDisk());
-      // the system is handed path.forms' text: a name that is not valid Unicode shows as U+FFFD
-      // there (refused), escaped in tree.node's path (which then names nothing, or another item)
-      const path = (await call("path.forms", { scan_id: st.scan_id, node })).raw;
+      // the system is handed path.forms' text, the terminal its folder's (its own name may be
+      // written escaped): where that text names nothing or another item it is refused (handOff)
       const dir = r.node.kind === "dir";
-      if (!handable(lower === "e" ? path : folderOf(path, dir))) {
+      const forms = await call("path.forms", { scan_id: st.scan_id, node: lower === "e" || dir ? node : r.node.parent });
+      const path = handOff(forms);
+      if (path == null) {
         toast(notOpenable());
       } else if (lower === "e") {
         window.sk.shell.showItemInFolder(path);
         toast(revealLabel());
-      } else window.sk.shell.openTerminal(folderOf(path, dir));
+      } else window.sk.shell.openTerminal(path);
     })();
   }
 }

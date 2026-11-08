@@ -29,28 +29,55 @@ pub fn decode_lossy(raw: &[u8]) -> Cow<'_, str> {
 /// not UTF-8 on POSIX), never U+FFFD. Not a path the system can be handed back: the escape is
 /// text (a POSIX name may hold `\xff` itself).
 pub fn printable(raw: &[u8]) -> Cow<'_, str> {
+    printable_for(raw, cfg!(windows))
+}
+
+/// [`printable`] as Windows (`windows`: the bytes are WTF-8, a lone surrogate is `\udc80`) or a
+/// POSIX system (a byte that is not UTF-8 is `\xff`) writes it, whichever this one is.
+pub fn printable_for(raw: &[u8], windows: bool) -> Cow<'_, str> {
     if let Ok(s) = std::str::from_utf8(raw) {
         return Cow::Borrowed(s);
     }
-    #[cfg(windows)]
-    {
-        let mut out = String::with_capacity(raw.len() + 8);
+    let mut out = String::with_capacity(raw.len() + 8);
+    if windows {
         for r in char::decode_utf16(wtf8_to_wide(raw)) {
             match r {
                 Ok(c) => out.push(c),
                 Err(e) => out.push_str(&format!("\\u{:04x}", e.unpaired_surrogate())),
             }
         }
-        Cow::Owned(out)
-    }
-    #[cfg(not(windows))]
-    {
-        let mut out = String::with_capacity(raw.len() + 8);
+    } else {
         for chunk in raw.utf8_chunks() {
             out.push_str(chunk.valid());
             for b in chunk.invalid() {
                 out.push_str(&format!("\\x{b:02x}"));
             }
+        }
+    }
+    Cow::Owned(out)
+}
+
+/// A name as 0.3.4 put it in a binary frame's `names` blob (`name.encode("utf-8", "replace")`):
+/// valid UTF-8 as it is, each part that is not Unicode as one `?` (a lone surrogate on Windows, a
+/// byte that is not UTF-8 on POSIX: what [`printable`] escapes).
+pub fn frame_label(raw: &[u8]) -> Cow<'_, str> {
+    if let Ok(s) = std::str::from_utf8(raw) {
+        return Cow::Borrowed(s);
+    }
+    #[cfg(windows)]
+    {
+        Cow::Owned(
+            char::decode_utf16(wtf8_to_wide(raw))
+                .map(|r| r.unwrap_or('?'))
+                .collect(),
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let mut out = String::with_capacity(raw.len());
+        for chunk in raw.utf8_chunks() {
+            out.push_str(chunk.valid());
+            out.extend(std::iter::repeat_n('?', chunk.invalid().len()));
         }
         Cow::Owned(out)
     }
@@ -79,7 +106,6 @@ pub fn name_to_os(raw: &[u8]) -> OsString {
 }
 
 /// Generalised UTF-8 (surrogates allowed) to UTF-16; invalid bytes as U+FFFD.
-#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn wtf8_to_wide(raw: &[u8]) -> Vec<u16> {
     let mut out = Vec::with_capacity(raw.len());
     let mut i = 0;
@@ -254,6 +280,29 @@ mod tests {
             assert_eq!(shown, "a\\xffb");
         }
         assert!(!shown.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn frame_labels_replace_what_is_not_unicode_with_a_question_mark() {
+        // 0.3.4's binary frames: name.encode("utf-8", "replace")
+        assert!(matches!(
+            frame_label("普通 🙂".as_bytes()),
+            Cow::Borrowed("普通 🙂")
+        ));
+        assert_eq!(frame_label(encode_name(&odd_name())), "a?b");
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            // two lone surrogates, and a pair between them that is a character
+            let os = OsString::from_wide(&[0xD800, 0x41, 0xD83D, 0xDE42, 0xDC80]);
+            assert_eq!(frame_label(encode_name(&os)), "?A🙂?");
+        }
+        #[cfg(unix)]
+        {
+            // surrogateescape: one per byte, also of a sequence cut short or an encoded surrogate
+            assert_eq!(frame_label(b"\xf0\x9f\x98a"), "???a");
+            assert_eq!(frame_label(b"\xed\xa0\x80"), "???");
+        }
     }
 
     /// `a`, something that is not valid Unicode, `b`.

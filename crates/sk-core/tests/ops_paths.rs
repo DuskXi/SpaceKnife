@@ -78,6 +78,19 @@ fn windows_forms_lone_surrogate_is_encoded() {
     // WTF-8 of U+DC80, as NTFS names may hold it
     let f = path_forms_bytes(b"C:\\bad\xed\xb2\x80name", Some(System::Windows));
     assert_eq!(f.uri, "file:///C:/bad%ED%B2%80name");
+    // the text forms write it escaped, as 0.3.4 did; the escape's backslash is no separator
+    assert_eq!(f.raw, "C:\\bad\\udc80name");
+    assert_eq!(f.quoted, "\"C:\\bad\\udc80name\"");
+    assert_eq!(f.posix, "/mnt/c/bad\\udc80name");
+}
+
+#[test]
+fn posix_forms_escape_undecodable_bytes() {
+    let f = path_forms_bytes(b"/tmp/a\xffb", Some(System::Linux));
+    assert_eq!(f.raw, "/tmp/a\\xffb");
+    assert_eq!(f.posix, "/tmp/a\\xffb");
+    assert_eq!(f.quoted, "'/tmp/a\\xffb'");
+    assert_eq!(f.uri, "file:///tmp/a%FFb");
 }
 
 #[test]

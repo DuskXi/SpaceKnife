@@ -1099,7 +1099,7 @@ impl Reason {
         sk_protocol::scan::FolderClassInfo {
             class_id: self.class_id.clone(),
             reason: self.reason.clone(),
-            folder: nodes.path_lossy(self.folder),
+            folder: nodes.path_printable(self.folder),
             user: self.user,
             fallback: self.fallback,
         }

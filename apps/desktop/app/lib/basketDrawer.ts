@@ -75,5 +75,12 @@ export function confirmation(confirmed: Confirmed, now: readonly BasketItem[]): 
 export const opUndoable = (op: Pick<OpProgressEvent, "can_undo" | "phase">): boolean =>
   op.can_undo && (op.phase === "done" || op.phase === "waiting" || op.phase === "cancelled");
 
-/** The folder an item lies in (its path without the last name). */
-export const parentOf = (path: string): string => path.replace(/[\\/][^\\/]*[\\/]?$/, "");
+/** The folder an item lies in (its path without the last name). With the item's `name`, that is
+ *  what is cut when the path ends in it: a name that is not valid Unicode is written escaped
+ *  (`\udc80`), and on Windows that backslash is no separator. */
+export function parentOf(path: string, name?: string): string {
+  if (name && path.length > name.length && path.endsWith(name) && /[\\/]/.test(path[path.length - name.length - 1]!)) {
+    return path.slice(0, path.length - name.length - 1);
+  }
+  return path.replace(/[\\/][^\\/]*[\\/]?$/, "");
+}

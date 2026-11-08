@@ -246,7 +246,7 @@ fn build(
         };
         if e.kind == RecentKind::Jump {
             match (nodes, &sizes) {
-                (Some(n), Some(sz)) => match n.find_path(Path::new(&e.text)) {
+                (Some(n), Some(sz)) => match n.find_shown(Path::new(&e.text)) {
                     Some(node) => {
                         r.node = Some(node);
                         r.is_dir = n.is_dir(node);
@@ -345,11 +345,11 @@ fn find_paths(
         let expanded = ppaths::expand(q);
         let (base, partial) = ppaths::split_last(&expanded);
         match (!base.is_empty())
-            .then(|| nodes.find_path(Path::new(base)))
+            .then(|| nodes.find_shown(Path::new(base)))
             .flatten()
         {
             Some(node) if nodes.is_dir(node) => {
-                folder = Some(nodes.path_lossy(node));
+                folder = Some(nodes.path_printable(node));
                 ppaths::children(&nodes, &sizes, node, partial, limit)
             }
             _ => (Vec::new(), 0),

@@ -1450,7 +1450,7 @@ impl View {
                     if k == 0 {
                         String::new()
                     } else {
-                        nodes.name(k).into_owned()
+                        nodes.name_printable(k).into_owned()
                     },
                 )
             })
