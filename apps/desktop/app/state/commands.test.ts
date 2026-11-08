@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PaletteCommand } from "@/protocol/generated";
 
+import type { SkApi } from "@/shared/api";
+
 import { call, rescanFolder, startScan } from "./actions";
-import { runShortcut, shortcutCommand } from "./commands";
+import { runCommand, runShortcut, shortcutCommand } from "./commands";
 import { get, set } from "./store";
 
 vi.mock(import("./actions"), async (original) => ({ ...(await original()), call: vi.fn(), rescanFolder: vi.fn(), startScan: vi.fn() }));
@@ -76,5 +78,55 @@ describe("runShortcut", () => {
     set({ scans: { s1: { roots: [{ path: "C:\\" }, { path: "D:\\" }] } } as never });
     await runShortcut("scan.rescan_all");
     expect(startScan).toHaveBeenCalledWith({ roots: ["C:\\", "D:\\"] }, "t1");
+  });
+});
+
+describe("the selection handed to the system", () => {
+  const mocked = vi.mocked(call);
+  const shell = { showItemInFolder: vi.fn(), openTerminal: vi.fn(), copyText: vi.fn() };
+
+  // tree.node writes a name that is not valid Unicode escaped, as 0.3.4 did; path.forms' text shows
+  // it as U+FFFD: what the system is handed must be the latter, which handable refuses
+  const answer = (shown: string, raw: string) =>
+    mocked.mockImplementation(
+      async (method) =>
+        (method === "tree.node"
+          ? { node: { id: 7, kind: "file" }, path: shown, on_disk: true }
+          : method === "path.forms"
+            ? { raw, quoted: `"${raw}"`, posix: raw, uri: "file:///x", on_disk: true }
+            : null) as never,
+    );
+
+  beforeEach(() => {
+    vi.stubGlobal("window", { sk: { platform: "win32", shell } as unknown as SkApi });
+    set({
+      tabs: [{ id: "t1", kind: "scan", scanId: "s1", viewIds: ["v1"], focusedPane: 0, title: "C:" }],
+      active: "t1",
+      toast: null,
+      views: { v1: { state: { scan_id: "s1" }, frame: { info: { selected_row: 0 }, kind: [0], node: [7] } } } as never,
+    });
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("is path.forms' text, not tree.node's escaped path", async () => {
+    answer("C:\\x\\a.txt", "C:\\x\\a.txt");
+    await runCommand("item.reveal");
+    expect(shell.showItemInFolder).toHaveBeenCalledWith("C:\\x\\a.txt");
+    await runCommand("item.terminal");
+    expect(shell.openTerminal).toHaveBeenCalledWith("C:\\x");
+  });
+
+  it("refuses a name that is not valid Unicode, and copies the escaped path", async () => {
+    answer("C:\\x\\a\\udc80b", "C:\\x\\a\uFFFDb");
+    await runCommand("item.reveal");
+    expect(shell.showItemInFolder).not.toHaveBeenCalled();
+    expect(get().toast).toContain("不能在这里打开");
+    await runCommand("item.terminal"); // its folder is fine
+    expect(shell.openTerminal).toHaveBeenCalledWith("C:\\x");
+    await runCommand("item.copy_path");
+    expect(shell.copyText).toHaveBeenCalledWith("C:\\x\\a\\udc80b");
   });
 });

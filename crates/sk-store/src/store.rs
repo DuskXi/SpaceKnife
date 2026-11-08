@@ -512,6 +512,11 @@ impl Nodes {
         decode_lossy(self.name_bytes(id))
     }
 
+    /// The name as the protocol shows it ([`names::printable`]: undecodable parts escaped).
+    pub fn name_printable(&self, id: NodeId) -> std::borrow::Cow<'_, str> {
+        names::printable(self.name_bytes(id))
+    }
+
     /// `(start, stop)` of a folder's children; safe while a scan adds listings.
     ///
     /// The count is read before the start (ingest publishes them the other way round), and a
@@ -597,6 +602,11 @@ impl Nodes {
     /// The path for display.
     pub fn path_lossy(&self, id: NodeId) -> String {
         decode_lossy(&self.path_bytes(id)).into_owned()
+    }
+
+    /// The path as the protocol shows it ([`names::printable`]: undecodable parts escaped).
+    pub fn path_printable(&self, id: NodeId) -> String {
+        names::printable(&self.path_bytes(id)).into_owned()
     }
 
     /// Children sorted by effective allocation or by name (stable).

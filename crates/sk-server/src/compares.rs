@@ -615,6 +615,25 @@ impl CompareManager {
 
     /// `tree.node` on a comparison's change tree (None: not a comparison).
     pub fn tree_node(&self, id: &str, node: NodeId) -> Option<RpcResult<TreeNodeResult>> {
+        self.with_node(id, node, |nodes, on_disk| TreeNodeResult {
+            node: node_info(nodes, node),
+            path: nodes.path_printable(node),
+            on_disk,
+        })
+    }
+
+    /// (path as the store keeps it, on disk) of a change tree row: `path.forms` of a comparison
+    /// (None: not a comparison).
+    pub fn path_bytes(&self, id: &str, node: NodeId) -> Option<RpcResult<(Vec<u8>, bool)>> {
+        self.with_node(id, node, |nodes, on_disk| (nodes.path_bytes(node), on_disk))
+    }
+
+    fn with_node<T>(
+        &self,
+        id: &str,
+        node: NodeId,
+        f: impl FnOnce(&sk_store::Nodes, bool) -> T,
+    ) -> Option<RpcResult<T>> {
         let h = self.lookup(id)?;
         let Some(r) = h.ready() else {
             return Some(Err(not_ready()));
@@ -626,11 +645,7 @@ impl CompareManager {
             )));
         }
         let nodes = r.tree.store().read();
-        Some(Ok(TreeNodeResult {
-            node: node_info(&nodes, node),
-            path: nodes.path_lossy(node),
-            on_disk: h.on_disk(&r.tree, node),
-        }))
+        Some(Ok(f(&nodes, h.on_disk(&r.tree, node))))
     }
 
     /// The same item in the tab's live tree (file operations from a compare view).

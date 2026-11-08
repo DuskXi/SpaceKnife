@@ -417,7 +417,7 @@ fn build(
     keys.par_sort_unstable(); // Short (as integers) before Long (as bytes)
     let lowered: Vec<String> = keys
         .par_iter()
-        .map(|k| String::from_utf8_lossy(&lower_ext(&ext_bytes(k))).into_owned())
+        .map(|k| sk_store::names::printable(&lower_ext(&ext_bytes(k))).into_owned())
         .collect();
     let mut ext_table: Vec<String> = vec![String::new()];
     let mut numbered: HashMap<String, u16> = HashMap::from([(String::new(), 0)]);

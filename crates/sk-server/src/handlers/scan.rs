@@ -472,7 +472,7 @@ pub fn install(r: &mut Router, t: &mut TopicRegistry) {
             let nodes = h.store.read();
             TreeNodeResult {
                 node: node_info(&nodes, p.node),
-                path: nodes.path(p.node).display().to_string(),
+                path: nodes.path_printable(p.node),
                 on_disk: on_disk(&nodes, p.node),
             }
         })

@@ -24,6 +24,38 @@ pub fn decode_lossy(raw: &[u8]) -> Cow<'_, str> {
     String::from_utf8_lossy(raw)
 }
 
+/// A name or path for the protocol and the logs, as 0.3.4 wrote it: valid UTF-8 as it is, the
+/// parts that are not escaped (`\udc80` for a lone surrogate on Windows, `\xff` for a byte that is
+/// not UTF-8 on POSIX), never U+FFFD. Not a path the system can be handed back: the escape is
+/// text (a POSIX name may hold `\xff` itself).
+pub fn printable(raw: &[u8]) -> Cow<'_, str> {
+    if let Ok(s) = std::str::from_utf8(raw) {
+        return Cow::Borrowed(s);
+    }
+    #[cfg(windows)]
+    {
+        let mut out = String::with_capacity(raw.len() + 8);
+        for r in char::decode_utf16(wtf8_to_wide(raw)) {
+            match r {
+                Ok(c) => out.push(c),
+                Err(e) => out.push_str(&format!("\\u{:04x}", e.unpaired_surrogate())),
+            }
+        }
+        Cow::Owned(out)
+    }
+    #[cfg(not(windows))]
+    {
+        let mut out = String::with_capacity(raw.len() + 8);
+        for chunk in raw.utf8_chunks() {
+            out.push_str(chunk.valid());
+            for b in chunk.invalid() {
+                out.push_str(&format!("\\x{b:02x}"));
+            }
+        }
+        Cow::Owned(out)
+    }
+}
+
 /// The OS string a name's bytes encode. Never trusts the bytes: on Windows, WTF-8 is decoded by
 /// hand (lone surrogates kept, invalid bytes as U+FFFD); on POSIX the bytes are the name.
 pub fn name_to_os(raw: &[u8]) -> OsString {
@@ -204,6 +236,37 @@ mod tests {
             let os = OsString::from(name);
             assert_eq!(name_to_os(encode_name(&os)), os);
             assert_eq!(decode_lossy(encode_name(&os)), name);
+        }
+    }
+
+    #[test]
+    fn printable_escapes_what_is_not_unicode() {
+        // what 0.3.4 sent for such names (events::printable): never U+FFFD
+        assert!(matches!(
+            printable("普通 a/b".as_bytes()),
+            Cow::Borrowed("普通 a/b")
+        ));
+        let os = odd_name();
+        let shown = printable(encode_name(&os));
+        if cfg!(windows) {
+            assert_eq!(shown, "a\\udc80b");
+        } else {
+            assert_eq!(shown, "a\\xffb");
+        }
+        assert!(!shown.contains('\u{FFFD}'));
+    }
+
+    /// `a`, something that is not valid Unicode, `b`.
+    fn odd_name() -> OsString {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            OsString::from_wide(&[0x61, 0xDC80, 0x62])
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            OsString::from_vec(vec![b'a', 0xFF, b'b'])
         }
     }
 

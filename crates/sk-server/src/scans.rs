@@ -439,7 +439,8 @@ pub fn node_info(nodes: &Nodes, node: NodeId) -> NodeInfo {
     NodeInfo {
         id: node,
         parent: i64::from(nodes.parent(node)),
-        name: nodes.name(node).into_owned(),
+        // a name that is not valid Unicode escaped, as 0.3.4 sent it (never U+FFFD)
+        name: nodes.name_printable(node).into_owned(),
         kind: match kind {
             Kind::File => NodeKindName::File,
             Kind::Dir => NodeKindName::Dir,
