@@ -385,3 +385,26 @@ fn needs_compaction_counts_gone_rows() {
     mutate::relist(&mut w, 1, &half).unwrap(); // every old row is GONE now
     assert!(mutate::needs_compaction(&w));
 }
+
+/// A folder relisted with two entries of the very same name (WinBtrfs shows invalid UTF-8 as
+/// U+FFFD; the scan lists each by its id) keeps each one's own subtree: they pair in listing
+/// order, never both with one old row's children (port of test_case_twins.py
+/// `relisting_pairs_names_held_twice_in_order`).
+#[test]
+fn relisting_pairs_names_held_twice_in_order() {
+    let spec = d([
+        ("n\u{FFFD}", d([("one", f(1))])),
+        ("n\u{FFFD}", d([("two", f(2))])),
+    ]);
+    let store = scan_spec(&spec, "/root", 1);
+    let rel = relist_path(&store, &spec, "");
+    assert!(rel.removed.is_empty(), "{rel:?}");
+    let r = store.read();
+    let root = r.roots().next().unwrap();
+    let kept: Vec<Vec<String>> = r
+        .children(root)
+        .filter(|&c| !r.flags(c).intersects(Flags::GONE))
+        .map(|c| r.children(c).map(|g| r.name(g).into_owned()).collect())
+        .collect();
+    assert_eq!(kept, [vec!["one".to_string()], vec!["two".to_string()]]);
+}

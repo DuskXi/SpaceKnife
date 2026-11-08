@@ -289,3 +289,178 @@ async fn errors() {
         i64::from(sk_protocol::ErrorCode::UnknownScan.code())
     );
 }
+
+// ---------------------------------------------------------------------------------- the delete basket
+
+fn key_of(frame: &Frame, name: &str) -> u32 {
+    frame.keys[frame
+        .names
+        .iter()
+        .position(|n| n == name)
+        .unwrap_or_else(|| panic!("{name} not in the frame: {:?}", frame.names))]
+}
+
+fn basket_paths(state: &Value) -> Vec<String> {
+    state["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["path"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+/// Blocks of a compare view go into the delete basket as the same items of the tab's live tree:
+/// one still on disk is added (to the live scan), one the comparison shows as deleted is refused.
+/// (They were all refused.)
+#[tokio::test]
+async fn compare_view_blocks_go_into_the_basket() {
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    build_tree(&root);
+    let first = scan_saved(&c, &root).await;
+    let snap = first["snapshot"]
+        .as_str()
+        .expect("auto snapshot")
+        .to_owned();
+    change_files(&root);
+    tokio::time::sleep(Duration::from_millis(1100)).await; // snapshot names have a 1 s resolution
+    let now = scan_saved(&c, &root).await;
+    let scan_id = now["scan_id"].as_str().unwrap().to_owned();
+    let info = compared(&c, &scan_id, &snap, "now").await;
+    let cmp = info["compare_id"].as_str().unwrap().to_owned();
+    let (up, frame) = view_call(
+        &c,
+        "view.open",
+        json!({"scan_id": cmp, "viewport": {"width": 900, "height": 600}}),
+    )
+    .await;
+    let frame = frame.expect("a frame");
+    let view_id = up["state"]["view_id"].as_str().unwrap().to_owned();
+    c.ok("basket.clear", json!({})).await;
+
+    // by node: the new folder is on disk, the deleted file is not
+    let summary = c.ok("compare.summary", json!({"view_id": view_id})).await;
+    let gone = &summary["shrink_items"][0];
+    assert!(
+        gone["path"].as_str().unwrap().ends_with("two.bin"),
+        "{summary}"
+    );
+    let (new_key, gone_key) = (key_of(&frame, "new"), gone["node"].as_u64().unwrap());
+    let added = c
+        .ok(
+            "basket.add",
+            json!({"scan_id": cmp, "nodes": [new_key, gone_key]}),
+        )
+        .await;
+    assert_eq!(added["added"], 1, "{added}");
+    let refused = added["refused"].as_array().unwrap();
+    assert_eq!(refused.len(), 1, "{added}");
+    assert!(refused[0]["path"].as_str().unwrap().ends_with("two.bin"));
+    assert_eq!(refused[0]["reason"], "只能操作「现在」还在磁盘上的项");
+    let state = c.ok("basket.list", json!({})).await;
+    assert_eq!(
+        basket_paths(&state),
+        [root.join("new").to_string_lossy().into_owned()]
+    );
+    assert_eq!(state["items"][0]["scan_id"], scan_id.as_str()); // the live scan's item
+    assert!(state["items"][0]["alloc"].as_i64().unwrap() > 0);
+
+    // by block of the view
+    c.ok("basket.clear", json!({})).await;
+    let a_key = key_of(&frame, "a");
+    let added = c
+        .ok(
+            "basket.add",
+            json!({"scan_id": cmp, "view_id": view_id, "key": a_key}),
+        )
+        .await;
+    assert_eq!(added["added"], 1, "{added}");
+    let state = c.ok("basket.list", json!({})).await;
+    assert_eq!(
+        basket_paths(&state),
+        [root.join("a").to_string_lossy().into_owned()]
+    );
+    c.ok("basket.clear", json!({})).await;
+}
+
+/// Makes `folder` hold names that differ only in case, or says it cannot (Windows: a
+/// case-sensitive NTFS folder; elsewhere the file system decides).
+fn case_sensitive(folder: &Path) -> bool {
+    std::fs::create_dir_all(folder).unwrap();
+    if cfg!(windows) {
+        let _ = std::process::Command::new("fsutil")
+            .args(["file", "setCaseSensitiveInfo"])
+            .arg(folder)
+            .arg("enable")
+            .output();
+    }
+    std::fs::create_dir(folder.join("probe")).unwrap();
+    let twin = std::fs::create_dir(folder.join("PROBE")).is_ok();
+    std::fs::remove_dir(folder.join("probe")).unwrap();
+    if twin {
+        std::fs::remove_dir(folder.join("PROBE")).unwrap();
+    }
+    twin
+}
+
+/// A compare view shows `A/f` beside `a/f` (names that differ only in case): put into the
+/// basket, it is the `A/f` of the live tree, not its twin.
+#[tokio::test]
+async fn a_compare_view_finds_the_twin_it_shows() {
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    if !case_sensitive(&root) {
+        eprintln!(
+            "skipped: {} cannot hold names that differ only in case",
+            root.display()
+        );
+        return;
+    }
+    make_tree(&root, &[("a/f", 10), ("A/f", 20), ("keep.txt", 1)]);
+    let first = scan_saved(&c, &root).await;
+    let snap = first["snapshot"]
+        .as_str()
+        .expect("auto snapshot")
+        .to_owned();
+    std::fs::write(root.join("A").join("f"), vec![b'x'; 50_000]).unwrap();
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let now = scan_saved(&c, &root).await;
+    let scan_id = now["scan_id"].as_str().unwrap().to_owned();
+    let info = compared(&c, &scan_id, &snap, "now").await;
+    let cmp = info["compare_id"].as_str().unwrap().to_owned();
+    let (_, frame) = view_call(
+        &c,
+        "view.open",
+        json!({"scan_id": cmp, "viewport": {"width": 900, "height": 600}}),
+    )
+    .await;
+    let frame = frame.expect("a frame");
+    // the changed folder is `A` (only it grew); its file is `f`
+    let a_key = key_of(&frame, "A");
+    let f_key = key_of(&frame, "f");
+    c.ok("basket.clear", json!({})).await;
+    let added = c
+        .ok("basket.add", json!({"scan_id": cmp, "nodes": [f_key]}))
+        .await;
+    assert_eq!(added["added"], 1, "{added}");
+    let state = c.ok("basket.list", json!({})).await;
+    assert_eq!(
+        basket_paths(&state),
+        [root.join("A").join("f").to_string_lossy().into_owned()]
+    );
+    c.ok("basket.clear", json!({})).await;
+    let added = c
+        .ok("basket.add", json!({"scan_id": cmp, "nodes": [a_key]}))
+        .await;
+    assert_eq!(added["added"], 1, "{added}");
+    let state = c.ok("basket.list", json!({})).await;
+    assert_eq!(
+        basket_paths(&state),
+        [root.join("A").to_string_lossy().into_owned()]
+    );
+    c.ok("basket.clear", json!({})).await;
+}

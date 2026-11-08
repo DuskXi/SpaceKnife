@@ -62,8 +62,25 @@ pub fn task_is(stored: &str, root: Option<&str>, below: &[String]) -> bool {
     }
 }
 
+/// Test seams: what the file system stores for the item a path opens (tests stand in for
+/// WinBtrfs, where the path of `a` opens its sibling `A`, on every system).
+#[doc(hidden)]
+pub mod seams {
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
+
+    /// path → its stored name (None: unknown); None here: the real lookup.
+    pub type FinalNameFn = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+    pub static FINAL_NAME: Mutex<Option<FinalNameFn>> = Mutex::new(None);
+}
+
 /// The stored name of what `path` opens (Windows), else None.
 pub fn final_name(path: &str) -> Option<String> {
+    let seam = seams::FINAL_NAME.lock().clone();
+    if let Some(f) = seam {
+        return f(path);
+    }
     #[cfg(windows)]
     {
         super::win::final_name(path)

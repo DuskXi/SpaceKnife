@@ -2,7 +2,7 @@
 // status and availability (palette.query); this file only maps an id to what it does here.
 
 import { focusFilter } from "@/lib/filterInput";
-import { revealLabel } from "@/lib/reveal";
+import { folderOf, handable, notOpenable, revealLabel } from "@/lib/reveal";
 import { t } from "@/lib/i18n";
 import { Kind } from "@/visual/frame";
 import { registeredLayouts } from "@/visual/registry";
@@ -221,7 +221,8 @@ export async function runCommand(id: string): Promise<void> {
     }
     case "item.reveal": {
       const p = await selectionPath();
-      if (p) {
+      if (p && !handable(p.path)) toast(notOpenable());
+      else if (p) {
         window.sk.shell.showItemInFolder(p.path);
         toast(revealLabel());
       }
@@ -229,7 +230,9 @@ export async function runCommand(id: string): Promise<void> {
     }
     case "item.terminal": {
       const p = await selectionPath();
-      if (p) window.sk.shell.openTerminal(p.dir ? p.path : p.path.replace(/[\\/][^\\/]*$/, ""));
+      const here = p && folderOf(p.path, p.dir);
+      if (here && !handable(here)) toast(notOpenable());
+      else if (here) window.sk.shell.openTerminal(here);
       return;
     }
     case "tab.new":

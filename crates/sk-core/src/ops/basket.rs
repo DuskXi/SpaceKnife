@@ -3,6 +3,11 @@
 //! Items are kept by **path**, not node id: a file change gives a relisted folder's entries new
 //! ids, so [`Basket::refresh`] finds every item again by its path and recomputes it.
 //!
+//! Paths are compared by their key ([`path_key`]: case folded on Windows), except where a folder
+//! holds two names that compare the same: case twins on Windows, names that lost different bytes
+//! to U+FFFD anywhere. Such a name is kept exactly in the key, so the two are two items, each
+//! covering what lies below it (merged into one, the second would stay on disk unnoticed).
+//!
 //! Containment: an item covers its path and everything below it (a small-item group covers
 //! exactly its members). Adding a path that an item already covers merges it into that item;
 //! adding an ancestor of items absorbs them. Covered paths are kept sorted, so "what lies below
@@ -69,6 +74,10 @@ pub struct BasketItem {
     pub status: ItemStatus,
     /// who holds it open, hard links, what failed …
     pub note: String,
+    /// how the basket compares its path (see the module docs); filled in when handed out
+    pub key: String,
+    /// group: its members' keys, parallel to `members`
+    pub member_keys: Vec<String>,
 }
 
 impl BasketItem {
@@ -139,6 +148,11 @@ pub struct Target {
     pub size: i64,
     /// the scan root it was found under
     pub root: String,
+    /// the key the basket covers it by: what [`Basket::apply_results`] matches results to
+    pub key: String,
+    /// a folder (Windows): the longest path below it as last scanned, in UTF-16 units after
+    /// its own (None: not known, e.g. a group's member)
+    pub longest: Option<usize>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -158,6 +172,8 @@ struct Measure {
     link_alloc: Vec<i64>,
     nlink: Vec<i64>,
     member_sizes: Vec<i64>,
+    /// one item (Windows): the longest path below it, in UTF-16 units after its own
+    longest: Option<usize>,
 }
 
 impl Measure {
@@ -172,6 +188,7 @@ impl Measure {
             link_alloc: cat(&a.link_alloc, &b.link_alloc),
             nlink: cat(&a.nlink, &b.nlink),
             member_sizes: cat(&a.member_sizes, &b.member_sizes),
+            longest: None,
         }
     }
 }
@@ -220,6 +237,23 @@ impl Entry {
             self.member_keys.clone()
         } else {
             vec![self.key.clone()]
+        }
+    }
+
+    /// The item as handed out: with its keys.
+    fn out(&self) -> BasketItem {
+        let mut item = self.item.clone();
+        item.key = self.key.clone();
+        item.member_keys = self.member_keys.clone();
+        item
+    }
+
+    /// The paths it covers as shown, compared as paths are ([`path_key`]): what lock checks name.
+    fn shown_keys(&self) -> Vec<String> {
+        if self.group() {
+            self.item.members.iter().map(|m| path_key(m)).collect()
+        } else {
+            vec![path_key(&self.item.path)]
         }
     }
 }
@@ -279,6 +313,33 @@ fn ancestors_or_self(key: &str) -> Vec<String> {
         out.push(up.clone());
         cur = up;
     }
+}
+
+/// One name as [`path_key`] compares it.
+fn fold_name(name: &str) -> String {
+    if cfg!(windows) {
+        nt_normcase(name)
+    } else {
+        name.to_string()
+    }
+}
+
+/// A name kept exactly in a key: NUL (no name holds one) and its bytes in hex.
+fn exact_name(raw: &[u8]) -> String {
+    let mut out = String::with_capacity(1 + raw.len() * 2);
+    out.push('\0');
+    for b in raw {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+/// `key` followed by one more name.
+fn push_name(key: &mut String, part: &str) {
+    if !key.ends_with(SEP) {
+        key.push(SEP);
+    }
+    key.push_str(part);
 }
 
 fn item_id(key: &str, group: bool) -> String {
@@ -360,6 +421,28 @@ fn fingerprint(nodes: &Nodes, ids: &[NodeId]) -> [u8; 16] {
     h.finalize()[..16].try_into().unwrap()
 }
 
+/// The longest path below `top` (its subtree `below`, parents before children: breadth first),
+/// in UTF-16 units after `top`'s own path.
+fn longest_below(nodes: &Nodes, top: NodeId, below: &[NodeId]) -> usize {
+    let mut rel: HashMap<NodeId, usize> = HashMap::from([(top, 0)]);
+    let mut best = 0;
+    for &n in below {
+        let parent = nodes.parent(n);
+        let Some(&at) = (parent >= 0)
+            .then(|| rel.get(&(parent as NodeId)))
+            .flatten()
+        else {
+            continue;
+        };
+        let len = at + 1 + nodes.name(n).encode_utf16().count();
+        if nodes.is_dir(n) {
+            rel.insert(n, len);
+        }
+        best = best.max(len);
+    }
+    best
+}
+
 /// Size, counts and freeable bytes of `ids` (each with its subtree), §2.3. `members`: the
 /// nodes are a group's members, so a member folder counts as a folder itself.
 fn measure(nodes: &Nodes, ids: &[NodeId], members: bool) -> Measure {
@@ -368,7 +451,11 @@ fn measure(nodes: &Nodes, ids: &[NodeId], members: bool) -> Measure {
     for &node in ids {
         let dup = nodes.flags(node).intersects(Flags::HARDLINK_DUP);
         if nodes.is_dir(node) {
-            covered.extend(subtree_ids(nodes, node).unwrap_or_default());
+            let below = subtree_ids(nodes, node).unwrap_or_default();
+            if cfg!(windows) && !members && ids.len() == 1 {
+                out.longest = Some(longest_below(nodes, node, &below));
+            }
+            covered.extend(below);
             let (size, alloc) = (nodes.tot_size(node), nodes.tot_alloc(node));
             out.files += nodes.tot_files(node) as i64;
             out.dirs += nodes.tot_dirs(node) as i64 + members as i64;
@@ -376,6 +463,9 @@ fn measure(nodes: &Nodes, ids: &[NodeId], members: bool) -> Measure {
             out.size += size;
             out.base += alloc;
             continue;
+        }
+        if !members && ids.len() == 1 {
+            out.longest = Some(0);
         }
         covered.push(node);
         let size = nodes.size(node);
@@ -421,10 +511,12 @@ struct Inner {
     volume_of: VolumeOf,
     /// scan root path → mount point
     volumes: HashMap<String, String>,
-    /// during one add(): absorbed id → its path
-    absorbed_paths: HashMap<String, String>,
+    /// during one add(): absorbed id → its path and key
+    absorbed_paths: HashMap<String, (String, String)>,
     /// during one add(): folder → names it holds twice
     shared: HashMap<NodeId, HashSet<Vec<u8>>>,
+    /// during one add(): folder → its names that compare the same as another one's
+    twins: HashMap<NodeId, HashSet<String>>,
     version: u64,
 }
 
@@ -451,6 +543,7 @@ impl Basket {
                 volumes: HashMap::new(),
                 absorbed_paths: HashMap::new(),
                 shared: HashMap::new(),
+                twins: HashMap::new(),
                 version: 0,
             }),
         }
@@ -473,23 +566,16 @@ impl Basket {
 
     /// Copies of the items, in the order they were added.
     pub fn items(&self) -> Vec<BasketItem> {
-        self.inner
-            .lock()
-            .entries
-            .iter()
-            .map(|e| e.item.clone())
-            .collect()
+        self.inner.lock().entries.iter().map(Entry::out).collect()
     }
 
     pub fn get(&self, id: &str) -> Option<BasketItem> {
         let g = self.inner.lock();
-        g.entries
-            .iter()
-            .find(|e| e.item.id == id)
-            .map(|e| e.item.clone())
+        g.entries.iter().find(|e| e.item.id == id).map(Entry::out)
     }
 
-    /// Id of the item that covers `path` (it or an ancestor is in the basket), else None.
+    /// Id of the item that covers `path` (it or an ancestor is in the basket), else None. By the
+    /// path alone: an item kept apart from a case twin is found by its key only.
     pub fn contains(&self, path: &str) -> Option<String> {
         self.inner.lock().covering(&path_key(path))
     }
@@ -529,13 +615,16 @@ impl Basket {
                 } else {
                     vec![0; n]
                 };
-                for ((p, os), s) in e.item.members.iter().zip(os_members_of(&e.item)).zip(sizes) {
+                let members = e.item.members.iter().zip(os_members_of(&e.item));
+                for (((p, os), s), k) in members.zip(sizes).zip(&e.member_keys) {
                     out.push(Target {
                         item: e.item.id.clone(),
                         path: p.clone(),
                         os_path: os,
                         size: s,
                         root: e.item.root.clone(),
+                        key: k.clone(),
+                        longest: None,
                     });
                 }
             } else {
@@ -545,6 +634,8 @@ impl Basket {
                     os_path: e.item.os_path.clone(),
                     size: e.item.size.max(e.measure.base).max(e.item.alloc),
                     root: e.item.root.clone(),
+                    key: e.key.clone(),
+                    longest: e.measure.longest,
                 });
             }
         }
@@ -595,9 +686,9 @@ impl Basket {
             let mut gone: Vec<&String> = gone.iter().collect();
             gone.sort();
             for id in gone {
-                let path = g.absorbed_paths.get(id).cloned().unwrap_or_default();
+                let (path, key) = g.absorbed_paths.get(id).cloned().unwrap_or_default();
                 if !path.is_empty()
-                    && let Some(into) = g.covering(&path_key(&path))
+                    && let Some(into) = g.covering(&key)
                 {
                     result.merged.push(Merged { path, into });
                 }
@@ -605,6 +696,7 @@ impl Basket {
         }
         g.absorbed_paths.clear();
         g.shared.clear();
+        g.twins.clear();
         g.settle();
         Ok(result)
     }
@@ -723,7 +815,7 @@ impl Basket {
             .collect();
         for e in g.entries.iter_mut() {
             let mut names: Vec<String> = Vec::new();
-            for k in e.covered() {
+            for k in e.shown_keys() {
                 for n in held.get(&k).map(|v| v.as_slice()).unwrap_or(&[]) {
                     if !names.contains(n) {
                         names.push(n.clone());
@@ -746,15 +838,17 @@ impl Basket {
     }
 
     /// Take executed paths out of the basket: done items leave it, groups lose done members,
-    /// failures stay with their reason (UI-W5-43). Returns what left (for undo: [`Basket::reinstate`]).
+    /// failures stay with their reason (UI-W5-43). Each result comes with the [`Target`] it is
+    /// for (by its key: two targets can show the same path). Returns what left (for undo:
+    /// [`Basket::reinstate`]).
     pub fn apply_results<'r>(
         &self,
-        results: impl IntoIterator<Item = &'r OpResult>,
+        results: impl IntoIterator<Item = (&'r Target, &'r OpResult)>,
     ) -> Vec<BasketItem> {
         let mut g = self.inner.lock();
         let by_key: HashMap<String, &OpResult> = results
             .into_iter()
-            .map(|r| (path_key(&r.path), r))
+            .map(|(t, r)| (t.key.clone(), r))
             .collect();
         let mut left = Vec::new();
         let ids: Vec<String> = g.entries.iter().map(|e| e.item.id.clone()).collect();
@@ -774,9 +868,10 @@ impl Basket {
                 continue;
             };
             if res.ok {
-                let mut item = g.entries[pos].item.clone();
+                let mut item = g.entries[pos].out();
                 item.members.clear();
                 item.os_members.clear();
+                item.member_keys.clear();
                 left.push(item);
                 g.drop_at(pos);
                 continue;
@@ -807,10 +902,19 @@ impl Basket {
                 ..Measure::default()
             };
             if item.kind == ChangeKind::Group {
-                let keys: Vec<String> = item.members.iter().map(|m| path_key(m)).collect();
+                let keys: Vec<String> = if item.member_keys.len() == item.members.len() {
+                    item.member_keys.clone()
+                } else {
+                    item.members.iter().map(|m| path_key(m)).collect()
+                };
                 known.member_sizes = vec![0; keys.len()];
+                let folder_key = if item.key.is_empty() {
+                    path_key(&item.path)
+                } else {
+                    item.key.clone()
+                };
                 g.insert_group(
-                    (&item.path, &item.os_path),
+                    (&item.path, &item.os_path, &folder_key),
                     &item.scan_id,
                     &item.volume,
                     &item.root,
@@ -826,7 +930,12 @@ impl Basket {
             let mut copy = item.clone();
             copy.status = ItemStatus::Ready;
             copy.note.clear();
-            let mut entry = Entry::new(copy, path_key(&item.path));
+            let key = if item.key.is_empty() {
+                path_key(&item.path)
+            } else {
+                item.key.clone()
+            };
+            let mut entry = Entry::new(copy, key);
             entry.measure = known;
             g.insert(entry, &mut result, true);
         }
@@ -913,6 +1022,51 @@ impl Inner {
         })
     }
 
+    /// Names of `folder` that compare the same as another of its names (folded as paths are,
+    /// shown with U+FFFD for what is not Unicode) without being the same bytes (cached for one
+    /// add).
+    fn twin_names(&mut self, nodes: &Nodes, folder: NodeId) -> &HashSet<String> {
+        self.twins.entry(folder).or_insert_with(|| {
+            let mut first: HashMap<String, &[u8]> = HashMap::new();
+            let mut twins: HashSet<String> = HashSet::new();
+            for c in nodes.children(folder) {
+                let folded = fold_name(&nodes.name(c));
+                let raw = nodes.name_bytes(c);
+                match first.get(&folded) {
+                    Some(seen) if *seen != raw => {
+                        twins.insert(folded);
+                    }
+                    Some(_) => {}
+                    None => {
+                        first.insert(folded, raw);
+                    }
+                }
+            }
+            twins
+        })
+    }
+
+    /// The key of a node (module docs): its path as [`path_key`] compares it, with each name its
+    /// folder holds in another spelling that compares the same kept exactly.
+    fn node_key(&mut self, nodes: &Nodes, node: NodeId) -> String {
+        let mut line: Vec<NodeId> = std::iter::once(node).chain(nodes.ancestors(node)).collect();
+        line.reverse();
+        // the scan root's own name is a path
+        let mut key = path_key(&nodes.name(line[0]));
+        for &n in &line[1..] {
+            let name = nodes.name(n);
+            let folded = fold_name(&name);
+            let parent = nodes.parent(n);
+            let twin = parent >= 0 && self.twin_names(nodes, parent as NodeId).contains(&folded);
+            if twin {
+                push_name(&mut key, &exact_name(nodes.name_bytes(n)));
+            } else {
+                push_name(&mut key, &folded);
+            }
+        }
+        key
+    }
+
     fn check_node(&mut self, nodes: &Nodes, node: i64) -> Option<&'static str> {
         if node <= 0
             || node as usize >= nodes.len()
@@ -979,12 +1133,12 @@ impl Inner {
             result.refused.push(Refused { path, reason });
             return;
         }
-        let key = path_key(&path);
+        let id = node as NodeId;
+        let key = self.node_key(nodes, id);
         if let Some(into) = self.covering(&key) {
             result.merged.push(Merged { path, into });
             return;
         }
-        let id = node as NodeId;
         let item = BasketItem {
             id: item_id(&key, false),
             path: path.clone(),
@@ -1006,6 +1160,8 @@ impl Inner {
             root: root_path(nodes, id),
             status: ItemStatus::Ready,
             note: String::new(),
+            key: String::new(),
+            member_keys: Vec::new(),
         };
         let mut entry = Entry::new(item, key);
         entry.measure = measure(nodes, &[id], false);
@@ -1033,7 +1189,7 @@ impl Inner {
             });
             return;
         }
-        let folder_key = path_key(&folder_path);
+        let folder_key = self.node_key(nodes, folder as NodeId);
         if let Some(into) = self.covering(&folder_key) {
             result.merged.push(Merged {
                 path: folder_path,
@@ -1056,7 +1212,7 @@ impl Inner {
                 result.refused.push(Refused { path, reason });
                 continue;
             }
-            let key = path_key(&path);
+            let key = self.node_key(nodes, m as NodeId);
             if !seen.insert(key.clone()) {
                 continue;
             }
@@ -1077,7 +1233,7 @@ impl Inner {
         let m = measure(nodes, &ids, true);
         let fp = fingerprint(nodes, &ids);
         self.insert_group(
-            (&folder_path, &folder_os),
+            (&folder_path, &folder_os, &folder_key),
             scan_id,
             &volume,
             &root_path(nodes, f),
@@ -1090,13 +1246,13 @@ impl Inner {
         );
     }
 
-    /// Add members to the group of `folder` (shown, as the file system names it; made if needed).
-    /// `os_paths` parallel to `paths`. `measure` covers the given members; `fp` is None when they
-    /// are not known in a store right now.
+    /// Add members to the group of `folder` (shown, as the file system names it, its key; made if
+    /// needed). `os_paths` and `keys` parallel to `paths`. `measure` covers the given members;
+    /// `fp` is None when they are not known in a store right now.
     #[allow(clippy::too_many_arguments)]
     fn insert_group(
         &mut self,
-        folder: (&str, &Path),
+        folder: (&str, &Path, &str),
         scan_id: &str,
         volume: &str,
         root: &str,
@@ -1112,8 +1268,8 @@ impl Inner {
         } else {
             vec![0; paths.len()]
         };
-        let (folder_path, folder_os) = folder;
-        let folder_key = path_key(folder_path);
+        let (folder_path, folder_os, folder_key) = folder;
+        let folder_key = folder_key.to_string();
         if let Some(into) = self.covering(&folder_key) {
             result.merged.extend(paths.iter().map(|p| Merged {
                 path: p.clone(),
@@ -1141,8 +1297,9 @@ impl Inner {
                     && self.entries[pos].key != folder_key
                 {
                     result.absorbed.push(below.clone());
-                    let path = self.entries[pos].item.path.clone();
-                    self.absorbed_paths.insert(below.clone(), path);
+                    let e = &self.entries[pos];
+                    let gone = (e.item.path.clone(), e.key.clone());
+                    self.absorbed_paths.insert(below.clone(), gone);
                     self.drop_at(pos);
                 }
             }
@@ -1168,6 +1325,8 @@ impl Inner {
                     root: root.to_string(),
                     status: ItemStatus::Ready,
                     note: String::new(),
+                    key: String::new(),
+                    member_keys: Vec::new(),
                 };
                 self.groups.insert(folder_key.clone(), item.id.clone());
                 self.entries.push(Entry::new(item, folder_key.clone()));
@@ -1220,8 +1379,9 @@ impl Inner {
         for below in self.below(&entry.key) {
             if let Some(pos) = self.pos(&below) {
                 result.absorbed.push(below.clone());
-                let path = self.entries[pos].item.path.clone();
-                self.absorbed_paths.insert(below, path);
+                let e = &self.entries[pos];
+                let gone = (e.item.path.clone(), e.key.clone());
+                self.absorbed_paths.insert(below, gone);
                 self.drop_at(pos);
             }
         }
@@ -1255,10 +1415,11 @@ impl Inner {
             let e = &self.entries[pos];
             let os_members = os_members_of(&e.item);
             let moved: Vec<String> = done.iter().map(|&i| e.item.members[i].clone()).collect();
-            let mut gone_item = e.item.clone();
+            let mut gone_item = e.out();
             gone_item.name = group_name(&e.item.path, moved.len());
             gone_item.members = moved;
             gone_item.os_members = done.iter().map(|&i| os_members[i].clone()).collect();
+            gone_item.member_keys = done.iter().map(|&i| e.member_keys[i].clone()).collect();
             left.push(gone_item);
             let n = e.member_keys.len();
             let sizes = if e.member_sizes.len() == n {
@@ -1419,6 +1580,36 @@ fn root_path(nodes: &Nodes, node: NodeId) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Without twins a node's key is its path's key (ids stay what they were); a case twin (on
+    /// Windows) and a name that lost other bytes than its sibling are kept exactly.
+    #[test]
+    fn node_keys() {
+        use sk_store::testing::{build_with, d, f};
+        let root = if cfg!(windows) { "C:\\r" } else { "/r" };
+        let store = build_with(
+            &d([
+                ("Docs", d([("A.txt", f(1)), ("b", d([("c", f(2))]))])),
+                ("x", d([("X", f(1)), ("x", d([("in", f(1))]))])),
+            ]),
+            root,
+            1,
+            &[],
+        );
+        let nodes = store.read();
+        let b = Basket::default();
+        let mut g = b.inner.lock();
+        for id in 1..nodes.len() as NodeId {
+            let key = g.node_key(&nodes, id);
+            let path = nodes.path(id).to_string_lossy().into_owned();
+            let in_twins = path.contains(&format!("x{SEP}"));
+            if !cfg!(windows) || !in_twins {
+                assert_eq!(key, path_key(&path), "{path}");
+            } else {
+                assert!(key.contains('\0'), "{path} {key:?}");
+            }
+        }
+    }
 
     #[test]
     fn keys_and_ids() {

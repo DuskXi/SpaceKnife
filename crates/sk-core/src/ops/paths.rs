@@ -806,10 +806,26 @@ pub fn is_mount(path: &Path) -> bool {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return false;
     };
-    if !meta.is_dir() {
+    if !is_folder_entry(&meta) {
         return false;
     }
     is_mount_dir(path)
+}
+
+/// A folder as the entry itself is (links not followed). On Windows a folder mount point is a
+/// directory reparse point, which Rust reports as a symlink and not as a directory: the
+/// directory attribute tells.
+fn is_folder_entry(meta: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+        meta.file_attributes() & FILE_ATTRIBUTE_DIRECTORY != 0
+    }
+    #[cfg(not(windows))]
+    {
+        meta.is_dir()
+    }
 }
 
 #[cfg(windows)]
@@ -836,7 +852,8 @@ fn is_mount_dir(path: &Path) -> bool {
     let Ok(up) = std::fs::symlink_metadata(path.join("..")) else {
         return false;
     };
-    me.dev() != up.dev() || me.ino() == up.ino()
+    // a bind mount of the same file system keeps its device: its mount tells
+    me.dev() != up.dev() || me.ino() == up.ino() || super::remove::other_mount_than_parent(path)
 }
 
 #[cfg(not(any(windows, unix)))]
@@ -851,12 +868,23 @@ fn is_mount_dir(_path: &Path) -> bool {
 /// folders resolved, so a link into `/usr` or `C:\Windows` does not open a way around the list.
 pub fn protected_key(path: &str) -> Option<&'static str> {
     let rules = current_rules();
-    let mut reason = match_rules(path, &rules);
-    if reason.is_none() {
-        let real = path_string(&resolved(Path::new(path)));
-        if rules.key(&real) != rules.key(path) {
-            reason = match_rules(&real, &rules);
-        }
+    let named = |p: &str| -> Option<&'static str> {
+        match_rules(p, &rules).or_else(|| {
+            let real = path_string(&resolved(Path::new(p)));
+            (rules.key(&real) != rules.key(p))
+                .then(|| match_rules(&real, &rules))
+                .flatten()
+        })
+    };
+    let mut reason = named(path);
+    // Windows: a name typed as its 8.3 short form (`C:\PROGRA~1`), the last one too, is the
+    // long one for the rules
+    #[cfg(windows)]
+    if reason.is_none()
+        && let Some(long) = super::win::long_names(path)
+        && rules.key(&long) != rules.key(path)
+    {
+        reason = named(&long);
     }
     if reason.is_none() && is_mount(Path::new(path)) {
         reason = Some("mount");

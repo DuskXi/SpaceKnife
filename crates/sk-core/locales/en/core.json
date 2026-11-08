@@ -45,6 +45,8 @@
  "其中 {count} 个文件在别处还有硬链接，删除后不释放这部分空间": "{count} files inside have hard links elsewhere; deleting doesn't free their space",
  "其中 {count} 项已不存在": "{count} of them no longer exist",
  "其中有另一个卷的挂载点，未进入": "Contains another volume's mount point, which wasn't entered",
+ "其中有名字里带路径分隔符的项，按路径找不到它，未删除": "Contains an item whose name holds a path separator, so no path reaches it; it wasn't deleted",
+ "删除过程中其中一项被换成了别的项或链接，未进入、未删除": "An item inside was replaced by another item or a link during the deletion; it wasn't entered or deleted",
  "内存不足": "Out of memory",
  "内核不支持": "Not supported by the kernel",
  "写不了 {path}：{reason}": "Can't write {path}: {reason}",

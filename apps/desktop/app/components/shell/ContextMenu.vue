@@ -11,7 +11,7 @@ import { fmtInt, fmtSize } from "@/lib/format";
 import { inBrowser } from "@/lib/host";
 import { t } from "@/lib/i18n";
 import type { IconName } from "@/lib/icons";
-import { revealLabel } from "@/lib/reveal";
+import { folderOf, notOpenable, openableByPath, revealLabel } from "@/lib/reveal";
 import { tagLabel } from "@/lib/tags";
 import type { PathForms } from "@/protocol/generated";
 import { basketAdd, basketAddBlock, call, rescanFolder, viewCall } from "@/state/actions";
@@ -155,19 +155,24 @@ const items = computed<Item[]>(() => {
   const gone = fm && !fm.on_disk ? t("NTFS 元数据与孤立文件只在 MFT 快速扫描里可见，没有对应的位置") : undefined;
   const noPath = group.value ? t("小项聚合块不是一个具体位置") : gone;
   const path = fm?.raw ?? "";
+  // what the system is handed is this text: it must name the item (W5-14)
+  const win = window.sk.platform === "win32";
+  const folderPath = folderOf(path, folder.value);
+  const noOpen = noPath ?? (fm && !openableByPath(path, win) ? notOpenable() : undefined);
+  const noTerminal = noPath ?? (fm && !openableByPath(folderPath, win) ? notOpenable() : undefined);
   const parentRow = r >= 0 ? f.parent[r]! : -1;
   const n = node.value;
   const folderNode = folder.value ? n : parentRow >= 0 ? f.node[parentRow]! : null;
   const all: Item[] = [
-    { id: "open", icon: folder.value ? "folder" : "file", label: t("打开"), disabled: noPath, run: () => void window.sk.shell.openPath(path) },
-    { id: "reveal", icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: noPath, run: () => window.sk.shell.showItemInFolder(path) },
+    { id: "open", icon: folder.value ? "folder" : "file", label: t("打开"), disabled: noOpen, run: () => void window.sk.shell.openPath(path) },
+    { id: "reveal", icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: noOpen, run: () => window.sk.shell.showItemInFolder(path) },
     {
       id: "terminal",
       icon: "terminal",
       label: t("在此打开终端"),
       keys: "Ctrl+`",
-      disabled: noPath,
-      run: () => window.sk.shell.openTerminal(folder.value ? path : path.replace(/[\\/][^\\/]*$/, "")),
+      disabled: noTerminal,
+      run: () => window.sk.shell.openTerminal(folderPath),
     },
     { id: "copy", icon: "copy", label: t("复制路径"), sub: "copy", disabled: noPath },
     { id: "tag", icon: "tag", label: t("加标签"), sub: "tag", disabled: group.value ? t("小项聚合块不能加标签") : undefined },

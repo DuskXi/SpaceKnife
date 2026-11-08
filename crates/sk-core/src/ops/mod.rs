@@ -12,6 +12,7 @@ pub mod basket;
 pub mod locks;
 pub mod names;
 pub mod paths;
+mod remove;
 mod text;
 pub mod trash;
 #[cfg(windows)]

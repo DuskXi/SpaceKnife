@@ -4,6 +4,7 @@
 import { computed, ref, watch } from "vue";
 
 import Icon from "@/components/ui/Icon.vue";
+import { opUndoable } from "@/lib/basketDrawer";
 import { fmtInt, fmtSize, plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { opCancel, opUndo } from "@/state/actions";
@@ -15,8 +16,9 @@ const op = useApp((s) => s.op);
 const since = ref(0);
 const now = ref(0);
 
-// the undo window starts when the operation is done (trash) or the moment it waits (delete)
-const undoable = computed(() => !!op.value && op.value.can_undo && (op.value.phase === "done" || op.value.phase === "waiting"));
+// the undo window starts when the operation is done or stopped (trash) or the moment it waits
+// (delete)
+const undoable = computed(() => !!op.value && opUndoable(op.value));
 watch(
   [undoable, () => op.value?.task_id, () => op.value?.phase],
   (_, __, onCleanup) => {

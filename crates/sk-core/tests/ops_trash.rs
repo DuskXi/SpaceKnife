@@ -441,6 +441,57 @@ mod windows {
         std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
     }
 
+    /// A folder whose scanned size is far below the bin's capacity is not measured again, but its
+    /// paths still have to fit the bin: without the longest path inside as scanned, it is walked
+    /// (the shortcut used to skip that check too, leaving it to the engine guard); with it, that
+    /// decides without a walk.
+    #[test]
+    fn a_trusted_size_still_checks_path_lengths() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let top = dir.path().join("deep");
+        let leaf = deep_tree(&top);
+        let sizes = HashMap::from([(s(&top), 1i64)]); // far below a quarter of any bin
+        let r = move_to_trash(
+            &[s(&top)],
+            OpOptions {
+                sizes: Some(&sizes),
+                ..OpOptions::default()
+            },
+        )
+        .remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(
+            (r.code, r.message.clone()),
+            (OpCode::NoTrash, text("too_long")),
+            "{r:?}"
+        );
+        assert!(Path::new(&format!("{LP}{}", s(&leaf))).exists());
+        std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
+        // the scan's longest path decides without a walk: here it says too long
+        let plain = dir.path().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        std::fs::write(plain.join("f.txt"), b"f").unwrap();
+        let sizes = HashMap::from([(s(&plain), 1i64)]);
+        let longest = HashMap::from([(s(&plain), 400usize)]);
+        let r = move_to_trash(
+            &[s(&plain)],
+            OpOptions {
+                sizes: Some(&sizes),
+                longest: Some(&longest),
+                ..OpOptions::default()
+            },
+        )
+        .remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(
+            (r.code, r.message.clone()),
+            (OpCode::NoTrash, text("too_long")),
+            "{r:?}"
+        );
+        assert!(plain.join("f.txt").exists());
+    }
+
     /// With the checks out of the way, the shell itself may want to destroy a tree that cannot
     /// fit the bin (paths too long): the sink refuses, nothing is lost, the next item still goes.
     /// (Newer Windows builds recycle such trees fine: then it must come back whole.)
@@ -500,6 +551,69 @@ mod windows {
         drop(handle);
         assert_eq!(r.code, OpCode::Locked, "{r:?}");
         assert!(held.exists());
+    }
+
+    /// The junction only (never what it points to).
+    struct Unmount(PathBuf);
+    impl Drop for Unmount {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
+
+    /// `link` mounting the volume that holds `near` (what `mountvol` writes: a junction to
+    /// `\\?\Volume{…}\`; made with `mklink /J`, it needs no privilege). None: the volume has no
+    /// GUID.
+    fn mount_volume_at(link: &Path, near: &Path) -> Option<Unmount> {
+        let root = sk_core::ops::win::volume_root(&s(near)).unwrap();
+        let guid = sk_core::ops::win::volume_guid(&root);
+        if guid.is_empty() {
+            return None;
+        }
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(format!("\\\\?\\Volume{guid}\\"))
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "mklink /J to the volume");
+        Some(Unmount(link.to_path_buf()))
+    }
+
+    /// A folder that mounts a volume is never removed: not as an item (protected), not inside a
+    /// deleted folder (`mount_inside`): either would quietly unmount the volume from it. Nothing
+    /// on the mounted volume is touched.
+    #[test]
+    fn folder_mount_points_are_never_removed() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let holder = dir.path().join("holder");
+        std::fs::create_dir(&holder).unwrap();
+        std::fs::write(holder.join("x.txt"), b"x").unwrap();
+        let mnt = holder.join("mnt");
+        let Some(_mounted) = mount_volume_at(&mnt, dir.path()) else {
+            return;
+        };
+        assert!(sk_core::ops::paths::is_mount(&mnt));
+        assert_eq!(sk_core::ops::paths::protected_key(&s(&mnt)), Some("mount"));
+        let r = delete_permanently(&[s(&mnt)], OpOptions::default()).remove(0);
+        assert_eq!(r.code, OpCode::Protected, "{r:?}");
+        let r = trash_all(&[s(&mnt)]).remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(r.code, OpCode::Protected, "{r:?}");
+        assert!(std::fs::symlink_metadata(&mnt).is_ok());
+        let r = delete_permanently(&[s(&holder)], OpOptions::default()).remove(0);
+        assert_eq!(r.code, OpCode::Error, "{r:?}");
+        assert!(r.message.contains("挂载点"), "{r:?}");
+        assert!(sk_core::ops::paths::is_mount(&mnt), "still mounted");
+        assert!(!holder.join("x.txt").exists()); // the rest went
+        // a junction to a plain folder is only a name: it may go
+        let plain = dir.path().join("plain");
+        make_link(&holder, &plain);
+        assert!(!sk_core::ops::paths::is_mount(&plain));
+        assert_eq!(sk_core::ops::paths::protected_key(&s(&plain)), None);
     }
 
     /// The 8.3 short name of an existing path (cmd's `%~sI`), None when the volume has none.
@@ -878,4 +992,359 @@ fn plain_paths_reach_themselves() {
     assert!(!trash::reaches_another(&s(&root), &s(&root), &mut names)); // the root itself
     assert!(!trash::win32_trims(&s(&root.join("Sub"))));
     assert_eq!(trash::win32_trims(r"C:\odd.\x"), WIN);
+}
+
+// --------------------------------------------------------------------------- what a deleted folder holds
+
+/// The deletion seams, unset again when dropped.
+struct Walk;
+
+impl Drop for Walk {
+    fn drop(&mut self) {
+        *trash::seams::ENTERING.lock() = None;
+        *trash::seams::LISTED.lock() = None;
+    }
+}
+
+fn named(p: &Path, name: &str) -> bool {
+    p.file_name().is_some_and(|n| n == name)
+}
+
+fn no_locks() -> OpOptions<'static> {
+    OpOptions {
+        check_locks: false,
+        ..OpOptions::default()
+    }
+}
+
+/// A name listed in a folder that a path cannot hold (WinBtrfs lists a Linux file `..\x` as it
+/// is; joined to its folder's path that is a way out of it) is never joined into a path: nothing
+/// outside the folder is touched, the rest of it goes.
+#[test]
+fn a_listed_name_that_climbs_out_is_never_followed() {
+    let (_, _g) = setup();
+    let _w = Walk;
+    let dir = tempfile::tempdir().unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir_all(sel.join("sub")).unwrap();
+    std::fs::write(sel.join("sub").join("a.txt"), b"a").unwrap();
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::fs::write(outside.join("important.txt"), b"keep").unwrap();
+    let climb = if WIN { "..\\outside" } else { "../outside" };
+    *trash::seams::LISTED.lock() = Some(std::sync::Arc::new(
+        move |folder: &Path, names: &mut Vec<std::ffi::OsString>| {
+            if named(folder, "sel") {
+                names.push(climb.into());
+            }
+        },
+    ));
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert_eq!(
+        std::fs::read(outside.join("important.txt")).unwrap(),
+        b"keep"
+    );
+    assert_eq!(r.code, OpCode::Error, "{r:?}");
+    assert!(r.message.contains("路径"), "{r:?}");
+    assert!(!sel.join("sub").exists()); // the rest went
+}
+
+/// The folder about to be listed is replaced by a link to somewhere else: the link is not
+/// followed (the old walk listed the target and deleted what it held).
+#[test]
+fn a_folder_swapped_for_a_link_is_not_entered() {
+    let (_, _g) = setup();
+    let _w = Walk;
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("precious.txt"), b"keep").unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir_all(sel.join("sub")).unwrap();
+    std::fs::write(sel.join("sub").join("a.txt"), b"a").unwrap();
+    let (s_sel, s_target) = (sel.clone(), target.clone());
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = done.clone();
+    *trash::seams::ENTERING.lock() = Some(std::sync::Arc::new(move |folder: &Path| {
+        if named(folder, "sub") && !once.swap(true, Ordering::SeqCst) {
+            std::fs::rename(s_sel.join("sub"), s_sel.join("moved")).unwrap();
+            make_link(&s_target, &s_sel.join("sub"));
+        }
+    }));
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    eprintln!("{r:?}");
+    assert!(done.load(Ordering::SeqCst));
+    assert_eq!(std::fs::read(target.join("precious.txt")).unwrap(), b"keep");
+    assert!(!r.ok, "{r:?}");
+}
+
+/// A folder above the one being listed is replaced by a link meanwhile: what is listed and
+/// deleted is still the folder the deletion started in, never the link's target.
+#[test]
+fn a_parent_swapped_for_a_link_is_not_followed() {
+    let (_, _g) = setup();
+    let _w = Walk;
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target");
+    std::fs::create_dir_all(target.join("deeper")).unwrap();
+    std::fs::write(target.join("deeper").join("precious.txt"), b"keep").unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir_all(sel.join("sub").join("deeper")).unwrap();
+    std::fs::write(sel.join("sub").join("deeper").join("a.txt"), b"a").unwrap();
+    let (s_sel, s_target) = (sel.clone(), target.clone());
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = done.clone();
+    *trash::seams::ENTERING.lock() = Some(std::sync::Arc::new(move |folder: &Path| {
+        if named(folder, "deeper") && !once.swap(true, Ordering::SeqCst) {
+            std::fs::rename(s_sel.join("sub"), s_sel.join("moved")).unwrap();
+            make_link(&s_target, &s_sel.join("sub"));
+        }
+    }));
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    eprintln!("{r:?}");
+    assert!(done.load(Ordering::SeqCst));
+    assert_eq!(
+        std::fs::read(target.join("deeper").join("precious.txt")).unwrap(),
+        b"keep"
+    );
+    assert!(!r.ok, "{r:?}");
+}
+
+/// On POSIX a backslash is an ordinary character of a name: such entries are deleted as they
+/// are, and nothing a Windows reading of the name would point at is touched.
+#[cfg(unix)]
+#[test]
+fn names_with_a_backslash_are_deleted_as_they_are() {
+    let (_, _g) = setup();
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::fs::write(outside.join("important.txt"), b"keep").unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir(&sel).unwrap();
+    std::fs::write(sel.join("..\\outside"), b"x").unwrap();
+    std::fs::create_dir(sel.join("a\\b")).unwrap();
+    std::fs::write(sel.join("a\\b").join("c"), b"c").unwrap();
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert!(r.ok, "{r:?}");
+    assert!(!sel.exists());
+    assert_eq!(
+        std::fs::read(outside.join("important.txt")).unwrap(),
+        b"keep"
+    );
+}
+
+/// Names Win32 would rewrite (a trailing dot or space), names that are not Unicode and paths
+/// past MAX_PATH inside a deleted folder are deleted exactly as they are named; the sibling a
+/// rewritten name would reach is deleted for itself, not instead.
+#[cfg(windows)]
+#[test]
+fn odd_names_inside_a_folder_are_deleted_exactly() {
+    use std::os::windows::ffi::OsStringExt;
+    let (_, _g) = setup();
+    let dir = tempfile::tempdir().unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir(&sel).unwrap();
+    let long = format!("\\\\?\\{}", s(&sel));
+    std::fs::write(format!("{long}\\odd."), b"dot").unwrap();
+    std::fs::write(format!("{long}\\odd"), b"plain").unwrap();
+    std::fs::create_dir(format!("{long}\\space ")).unwrap();
+    std::fs::write(format!("{long}\\space \\in.txt"), b"in").unwrap();
+    let mut w: Vec<u16> = "lone".encode_utf16().collect();
+    w.push(0xDC00);
+    let lone = sel.join(std::ffi::OsString::from_wide(&w));
+    std::fs::write(&lone, b"lone").unwrap();
+    let mut p = s(&sel.join("deep"));
+    std::fs::create_dir(&p).unwrap();
+    while p.len() < 300 {
+        p = format!("{p}\\{}", "n".repeat(40));
+        std::fs::create_dir(format!("\\\\?\\{p}")).unwrap();
+    }
+    std::fs::write(format!("\\\\?\\{p}\\leaf.txt"), b"x").unwrap();
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert_eq!(
+        (r.code, r.message.as_str()),
+        (OpCode::Ok, "已永久删除"),
+        "{r:?}"
+    );
+    assert!(std::fs::symlink_metadata(&long).is_err());
+}
+
+/// A bind mount of a folder on the same file system inside a deleted folder is a mount point
+/// like any other: protected, and not entered (its source keeps everything). Needs root (CI's
+/// Linux job: passwordless sudo); skipped otherwise.
+#[cfg(target_os = "linux")]
+#[test]
+fn bind_mounts_inside_are_not_entered() {
+    let (_, _g) = setup();
+    let Some(root) = privileged() else {
+        eprintln!("skipped: mount --bind needs root or passwordless sudo");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir(&src).unwrap();
+    std::fs::write(src.join("data.txt"), b"keep").unwrap();
+    let sel = dir.path().join("sel");
+    let mnt = sel.join("mnt");
+    std::fs::create_dir_all(&mnt).unwrap();
+    std::fs::write(sel.join("own.txt"), b"x").unwrap();
+    let Some(_bound) = BindMount::new(&root, &src, &mnt) else {
+        eprintln!("skipped: mount --bind failed (no CAP_SYS_ADMIN here)");
+        return;
+    };
+    assert_eq!(sk_core::ops::paths::protected_key(&s(&mnt)), Some("mount"));
+    let r = delete_permanently(&[s(&mnt)], no_locks()).remove(0);
+    assert_eq!(r.code, OpCode::Protected, "{r:?}");
+    let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
+    assert_eq!(r.code, OpCode::Error, "{r:?}");
+    assert!(r.message.contains("挂载点"), "{r:?}");
+    assert_eq!(std::fs::read(src.join("data.txt")).unwrap(), b"keep");
+    assert!(!sel.join("own.txt").exists()); // the rest went
+}
+
+/// The command prefix that runs as root (empty: already root), or None.
+#[cfg(target_os = "linux")]
+fn privileged() -> Option<Vec<&'static str>> {
+    // SAFETY: always succeeds
+    if unsafe { libc::geteuid() } == 0 {
+        return Some(Vec::new());
+    }
+    let sudo = std::process::Command::new("sudo")
+        .args(["-n", "true"])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    sudo.then(|| vec!["sudo", "-n"])
+}
+
+/// `mount --bind src at`, undone when dropped.
+#[cfg(target_os = "linux")]
+struct BindMount {
+    prefix: Vec<&'static str>,
+    at: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl BindMount {
+    fn new(prefix: &[&'static str], src: &Path, at: &Path) -> Option<BindMount> {
+        let run = |args: &[&std::ffi::OsStr]| {
+            let (cmd, rest) = match prefix.split_first() {
+                Some((c, r)) => (*c, r),
+                None => (args[0].to_str().unwrap(), &[][..]),
+            };
+            let mut c = std::process::Command::new(cmd);
+            c.args(rest);
+            if prefix.is_empty() {
+                c.args(&args[1..]);
+            } else {
+                c.args(args);
+            }
+            c.output().is_ok_and(|o| o.status.success())
+        };
+        run(&[
+            "mount".as_ref(),
+            "--bind".as_ref(),
+            src.as_os_str(),
+            at.as_os_str(),
+        ])
+        .then(|| BindMount {
+            prefix: prefix.to_vec(),
+            at: at.to_path_buf(),
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for BindMount {
+    fn drop(&mut self) {
+        let mut c = match self.prefix.split_first() {
+            Some((cmd, rest)) => {
+                let mut c = std::process::Command::new(cmd);
+                c.args(rest).arg("umount");
+                c
+            }
+            None => std::process::Command::new("umount"),
+        };
+        if !c.arg(&self.at).output().is_ok_and(|o| o.status.success()) {
+            eprintln!("could not unmount {}", self.at.display());
+        }
+    }
+}
+
+// --------------------------------------------------------------------------- names that are not Unicode
+
+/// `stem` with a name no `String` can hold in it: a lone UTF-16 surrogate on Windows, a byte
+/// that is not UTF-8 elsewhere; then `ext`.
+fn odd_os_name(stem: &str, ext: &str) -> std::ffi::OsString {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        let mut w: Vec<u16> = stem.encode_utf16().collect();
+        w.push(0xDC00);
+        w.extend(ext.encode_utf16());
+        std::ffi::OsString::from_wide(&w)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let mut b = stem.as_bytes().to_vec();
+        b.push(0xFF);
+        b.extend_from_slice(ext.as_bytes());
+        std::ffi::OsString::from_vec(b)
+    }
+}
+
+/// An item whose own name and whose folder's name are not valid Unicode goes to the trash and
+/// comes back under exactly those names (not U+FFFD in their place, a new folder beside).
+#[test]
+fn names_that_are_not_unicode_come_back_as_they_were() {
+    if MAC {
+        return; // macOS file systems hold UTF-8 names only
+    }
+    let (_, _g) = setup();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join(odd_os_name("folder", ""));
+    if std::fs::create_dir(&folder).is_err() {
+        return; // a file system that refuses such names
+    }
+    // the second one has it in its extension too, which the item keeps in the trash
+    let ext = odd_os_name(".b", "");
+    let files = [
+        folder.join(odd_os_name("file", ".bin")),
+        folder.join({
+            let mut n = odd_os_name("other", "");
+            n.push(&ext);
+            n
+        }),
+    ];
+    for (i, f) in files.iter().enumerate() {
+        std::fs::write(f, [b'0' + i as u8]).unwrap();
+    }
+    let res = move_to_trash(&files, OpOptions::default());
+    let mut trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
+    assert!(res.iter().all(|r| r.code == OpCode::Ok), "{res:?}");
+    assert!(files.iter().all(|f| !f.exists()));
+    let back = restore(&res.iter().map(|r| r.trash_ref.clone()).collect::<Vec<_>>());
+    trashed.0.clear();
+    assert!(back.iter().all(|b| b.code == OpCode::Ok), "{back:?}");
+    assert!(back[0].path.contains('\u{FFFD}'), "{back:?}"); // as shown
+    for (i, f) in files.iter().enumerate() {
+        assert_eq!(std::fs::read(f).unwrap(), [b'0' + i as u8]);
+    }
+    let beside: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+    assert_eq!(beside.len(), 1, "{beside:?}");
+    assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2);
+}
+
+#[test]
+fn trash_refs_keep_names_that_are_not_unicode() {
+    let plain = Path::new("/home/lenny/a b.txt");
+    assert_eq!(trash::ref_of(plain), "/home/lenny/a b.txt");
+    assert_eq!(trash::path_of_ref("/home/lenny/a b.txt"), plain);
+    let odd = PathBuf::from("x").join(odd_os_name("y", ".z"));
+    let r = trash::ref_of(&odd);
+    assert!(r.starts_with('\0'), "{r:?}");
+    assert_eq!(trash::path_of_ref(&r), odd);
+    // a malformed spelled-out reference is just a (missing) path
+    assert_eq!(trash::path_of_ref("\0exact:zz"), Path::new("\0exact:zz"));
 }

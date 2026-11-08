@@ -59,6 +59,8 @@ pub(crate) fn trash_text(key: &str) -> &'static str {
         "error" => "操作失败：{detail}",
         "partly" => "部分内容未能删除：{detail}",
         "mount_inside" => "其中有另一个卷的挂载点，未进入",
+        "bad_name_inside" => "其中有名字里带路径分隔符的项，按路径找不到它，未删除",
+        "moved_inside" => "删除过程中其中一项被换成了别的项或链接，未进入、未删除",
         "no_bin_remote" => "网络位置没有回收站，只能永久删除",
         "no_bin_removable" => "可移动磁盘没有回收站，只能永久删除",
         "no_bin_volume" => "这个卷没有回收站，只能永久删除",

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use sk_core::ops::basket::{AddResult, Basket, BasketItem, Merged, default_volume_of};
+use sk_core::ops::basket::{AddResult, Basket, BasketItem, Merged, Target, default_volume_of};
 use sk_core::ops::trash::{OpCode, OpResult};
 use sk_protocol::compare::ChangeKind;
 use sk_protocol::ops::BasketItemStatus as St;
@@ -425,6 +425,12 @@ fn targets_expand_groups() {
             (fid.clone(), path_of("docs/b.txt"), KB4),
         ]
     );
+    // a folder knows the longest path below it as scanned (Windows: the trash checks it)
+    let did = add(&b, &store, "s", &[node(&store, "links")]).added[0].clone();
+    let links = b.targets(Some(std::slice::from_ref(&did))).remove(0);
+    assert_eq!(links.longest, cfg!(windows).then_some("\\x.dat".len()));
+    assert!(targets.iter().all(|t| t.longest.is_none() || t.item == fid));
+    b.remove(std::slice::from_ref(&did));
     let only: Vec<String> = b
         .targets(Some(&[fid]))
         .into_iter()
@@ -701,7 +707,13 @@ fn apply_results_and_reinstate() {
         ),
         op(&path_of("small/s2.log"), OpCode::Cancelled, "已取消", ""),
     ];
-    let left = b.apply_results(&results);
+    // each result with the target it is for
+    let targets = b.targets(None);
+    let pairs: Vec<(&Target, &OpResult)> = results
+        .iter()
+        .map(|r| (targets.iter().find(|t| t.path == r.path).unwrap(), r))
+        .collect();
+    let left = b.apply_results(pairs);
     let got: Vec<(String, Vec<String>)> = left
         .iter()
         .map(|i| (i.id.clone(), i.members.clone()))
@@ -790,12 +802,13 @@ fn many_items_stay_fast() {
         .unwrap()
         .added[0]
         .clone();
-    assert_eq!(b.targets(None).len(), n);
-    let done: Vec<OpResult> = b.lock_targets()[..n / 2]
+    let targets = b.targets(None);
+    assert_eq!(targets.len(), n);
+    let done: Vec<OpResult> = targets[..n / 2]
         .iter()
-        .map(|p| OpResult::new(p, OpCode::Ok, "", ""))
+        .map(|t| OpResult::new(&t.path, OpCode::Ok, "", ""))
         .collect();
-    let left = b.apply_results(&done);
+    let left = b.apply_results(targets.iter().zip(&done));
     assert_eq!(left[0].members.len(), n / 2);
     assert_eq!(b.get(&gid).unwrap().members.len(), n - n / 2);
     assert!(started.elapsed().as_secs() < 20);
@@ -888,7 +901,7 @@ fn names_that_are_not_unicode_are_executed_by_their_real_path() {
     assert!(!top.join(&single).exists() && !folder.join(&member).exists());
     assert!(folder.join("plain.txt").exists());
     // the results find their items: both leave the basket
-    let left = b.apply_results(&results);
+    let left = b.apply_results(targets.iter().zip(&results));
     assert_eq!(left.len(), 2);
     assert_eq!(b.len(), 0);
 }

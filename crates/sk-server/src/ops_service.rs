@@ -19,7 +19,7 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use sk_core::ops::{Basket, BasketItem, OpOptions, OpResult, Refused, TrashStatus};
+use sk_core::ops::{Basket, BasketItem, OpOptions, OpResult, Refused, Target, TrashStatus};
 use sk_core::settings::SettingsStore;
 use sk_core::tr;
 use sk_protocol::ErrorCode;
@@ -43,6 +43,24 @@ pub const TRASH_INFO_TTL: Duration = Duration::from_secs(30);
 pub const KEEP_TASKS: usize = 8;
 /// After file changes, the basket is checked again once this quiet.
 pub const REFRESH_QUIET: Duration = Duration::from_secs(1);
+
+/// A test hook run while `basket.execute` registers an operation.
+#[doc(hidden)]
+pub type RegisteringHook = Arc<dyn Fn() + Send + Sync>;
+/// A test hook run as each item of an operation becomes final: (task id, items done).
+#[doc(hidden)]
+pub type ProgressHook = Arc<dyn Fn(&str, usize) + Send + Sync>;
+
+/// Test hooks of one backend's operations ([`OpsService::set_test_hooks`]).
+#[doc(hidden)]
+#[derive(Clone, Default)]
+pub struct TestHooks {
+    /// runs while `basket.execute` registers an operation, right after its busy check (tests
+    /// widen that moment)
+    pub registering: Option<RegisteringHook>,
+    /// runs as each item of an operation becomes final
+    pub progress: Option<ProgressHook>,
+}
 
 mod text {
     pub const NOT_ON_DISK: &str = "只能操作「现在」还在磁盘上的项";
@@ -76,9 +94,13 @@ pub struct OpRun {
     pub mode: OpMode,
     session: Weak<Session>,
     pub total: i64,
+    /// what is executed, in order (results come back in this order)
+    targets: Vec<Target>,
     /// as the file system names them (results and the maps below: as shown)
     paths: Vec<std::path::PathBuf>,
     sizes: HashMap<String, i64>,
+    /// folder path -> the longest path below it as last scanned (trash: no walk when it fits)
+    longest: HashMap<String, usize>,
     /// item path -> freeable bytes (what a success frees)
     alloc: HashMap<String, i64>,
     /// path -> scan id (refresh the tree afterwards)
@@ -111,8 +133,9 @@ impl OpRun {
                 Vec::new()
             },
             freed: st.freed,
+            // a move to the trash stopped midway can be undone too: what went there comes back
             can_undo: st.phase == OpPhase::Waiting
-                || (st.phase == OpPhase::Done && !st.refs.is_empty()),
+                || (matches!(st.phase, OpPhase::Done | OpPhase::Cancelled) && !st.refs.is_empty()),
         }
     }
 
@@ -149,6 +172,7 @@ pub struct OpsService {
     refreshing: AtomicBool,
     locking: AtomicBool,
     delay: Mutex<Duration>,
+    hooks: Mutex<TestHooks>,
 }
 
 fn rpc_internal(e: impl std::fmt::Display) -> RpcError {
@@ -166,7 +190,14 @@ impl OpsService {
             refreshing: AtomicBool::new(false),
             locking: AtomicBool::new(false),
             delay: Mutex::new(DELETE_DELAY),
+            hooks: Mutex::new(TestHooks::default()),
         }
+    }
+
+    /// Set the test hooks (tests only).
+    #[doc(hidden)]
+    pub fn set_test_hooks(&self, hooks: TestHooks) {
+        *self.hooks.lock() = hooks;
     }
 
     /// The undo window of a permanent deletion.
@@ -329,38 +360,26 @@ impl OpsService {
             scan_id = host.scan_id.clone();
         }
         let mut refused: Vec<Refused> = Vec::new();
-        let handle = match server.scans.lookup(&scan_id) {
-            Some(h) => h,
-            None if server.compares.view_target(&scan_id).is_some() => {
-                // TODO(compares): map change-tree rows to the live tree (`live_node`); until then a
-                // compare view's blocks are refused
-                for n in &nodes {
-                    let path = server
-                        .compares
-                        .tree_node(&scan_id, *n as NodeId)
-                        .and_then(|r| r.ok())
-                        .map_or_else(|| n.to_string(), |r| r.path);
-                    refused.push(Refused {
-                        path,
-                        reason: tr!(text::NOT_ON_DISK),
-                    });
-                }
-                return self
-                    .added(
-                        server,
-                        sk_core::ops::AddResult {
-                            refused,
-                            ..Default::default()
-                        },
-                    )
-                    .await;
+        if server.scans.lookup(&scan_id).is_none()
+            && server.compares.view_target(&scan_id).is_some()
+        {
+            // a compare view's rows: the same items in the tab's live tree (a group: its folder
+            // and its members, each)
+            let (target, live, more) = Self::live(server, &scan_id, &nodes);
+            refused.extend(more);
+            if let Some(m) = members.take() {
+                let (_, live_members, more) = Self::live(server, &scan_id, &m);
+                refused.extend(more);
+                members = Some(live_members);
             }
-            None => {
-                return Err(RpcError::new(
-                    ErrorCode::UnknownScan,
-                    format!("unknown scan: {scan_id}"),
-                ));
-            }
+            scan_id = target;
+            nodes = live;
+        }
+        let Some(handle) = server.scans.lookup(&scan_id) else {
+            return Err(RpcError::new(
+                ErrorCode::UnknownScan,
+                format!("unknown scan: {scan_id}"),
+            ));
         };
         let mut result = sk_core::ops::AddResult::default();
         if !nodes.is_empty() && members.as_ref().is_none_or(|m| !m.is_empty()) {
@@ -377,6 +396,40 @@ impl OpsService {
         let out = self.added(server, result).await;
         self.check_locks(server);
         out
+    }
+
+    /// Rows of the comparison `compare_id`'s change tree → the same items in its tab's live tree
+    /// (the scan id, the nodes found) and the rows that are not on disk now, refused.
+    fn live(server: &Server, compare_id: &str, nodes: &[i64]) -> (String, Vec<i64>, Vec<Refused>) {
+        let mut target = server
+            .compares
+            .lookup(compare_id)
+            .map(|h| h.scan_id.clone())
+            .unwrap_or_default();
+        let (mut live, mut refused) = (Vec::new(), Vec::new());
+        for &n in nodes {
+            let found = u32::try_from(n)
+                .ok()
+                .and_then(|n| server.compares.live_node(compare_id, n as NodeId));
+            match found {
+                Some((scan, node)) => {
+                    target = scan;
+                    live.push(i64::from(node));
+                }
+                None => {
+                    let path = u32::try_from(n)
+                        .ok()
+                        .and_then(|n| server.compares.tree_node(compare_id, n as NodeId))
+                        .and_then(|r| r.ok())
+                        .map_or_else(|| n.to_string(), |r| r.path);
+                    refused.push(Refused {
+                        path,
+                        reason: tr!(text::NOT_ON_DISK),
+                    });
+                }
+            }
+        }
+        (target, live, refused)
     }
 
     async fn added(
@@ -484,19 +537,25 @@ impl OpsService {
 
     // ------------------------------------------------------------- executing (W5-41…49)
 
+    /// Start executing the items `p.ids` (None: the whole basket; a front end sends the ids it
+    /// asked the user to confirm). One operation at a time: the busy check and the registration
+    /// are one step under the list of runs, so two requests at once never both start.
     pub fn execute(
         &self,
         server: &Arc<Server>,
         session: &Arc<Session>,
         p: &BasketExecuteParams,
     ) -> RpcResult<OpTask> {
-        if self
-            .runs
-            .lock()
+        let mut runs = self.runs.lock();
+        if runs
             .iter()
             .any(|r| matches!(r.phase(), OpPhase::Waiting | OpPhase::Running))
         {
             return Err(RpcError::invalid_request(tr!(text::BUSY)));
+        }
+        let registering = self.hooks.lock().registering.clone();
+        if let Some(f) = registering {
+            f();
         }
         let targets = self.basket.targets(p.ids.as_deref());
         if targets.is_empty() {
@@ -531,6 +590,10 @@ impl OpsService {
             total: targets.len() as i64,
             paths: targets.iter().map(|t| t.os_path.clone()).collect(),
             sizes: targets.iter().map(|t| (t.path.clone(), t.size)).collect(),
+            longest: targets
+                .iter()
+                .filter_map(|t| t.longest.map(|l| (t.path.clone(), l)))
+                .collect(),
             alloc,
             scans,
             roots: targets
@@ -538,6 +601,7 @@ impl OpsService {
                 .filter(|t| !t.root.is_empty())
                 .map(|t| (t.path.clone(), t.root.clone()))
                 .collect(),
+            targets,
             st: Mutex::new(RunState {
                 done: 0,
                 current: String::new(),
@@ -557,13 +621,11 @@ impl OpsService {
             called_off: AtomicBool::new(false),
             wake: tokio::sync::Notify::new(),
         });
-        {
-            let mut runs = self.runs.lock();
-            runs.push(run.clone());
-            while runs.len() > KEEP_TASKS {
-                runs.remove(0);
-            }
+        runs.push(run.clone());
+        while runs.len() > KEEP_TASKS {
+            runs.remove(0);
         }
+        drop(runs);
         tracing::info!(
             "file operation {}: {} {} items",
             run.id,
@@ -603,6 +665,7 @@ impl OpsService {
         }
         run.emit(true);
         let r = run.clone();
+        let hook = self.hooks.lock().progress.clone();
         let results = tokio::task::spawn_blocking(move || {
             let mut progress = |done: usize, _total: usize, res: &OpResult| {
                 {
@@ -611,12 +674,16 @@ impl OpsService {
                     st.current = res.path.clone();
                 }
                 r.emit(false);
+                if let Some(f) = &hook {
+                    f(&r.id, done);
+                }
             };
             let cancel = || r.cancel.load(Ordering::SeqCst);
             let opts = OpOptions {
                 progress: Some(&mut progress),
                 cancel: Some(&cancel),
                 sizes: (r.mode == OpMode::Trash).then_some(&r.sizes),
+                longest: (r.mode == OpMode::Trash).then_some(&r.longest),
                 roots: Some(&r.roots),
                 ..OpOptions::default()
             };
@@ -629,7 +696,8 @@ impl OpsService {
         .await;
         match results {
             Ok(results) => {
-                let left = self.basket.apply_results(&results);
+                // matched by target: two targets can show the same path
+                let left = self.basket.apply_results(run.targets.iter().zip(&results));
                 let ok = results.iter().filter(|r| r.ok).count();
                 let failed: Vec<&OpResult> = results
                     .iter()
@@ -743,7 +811,8 @@ impl OpsService {
         Ok(())
     }
 
-    /// Call off a deletion still waiting, or put what went to the trash back (UI-W5-44).
+    /// Call off a deletion still waiting, or put what went to the trash back, also from a move
+    /// to the trash that was stopped (UI-W5-44).
     pub async fn undo(&self, server: &Arc<Server>, task_id: &str) -> RpcResult<()> {
         let run = self.get(task_id)?;
         let refs = {
@@ -753,7 +822,9 @@ impl OpsService {
                     drop(st);
                     return self.cancel(task_id);
                 }
-                OpPhase::Done if !st.refs.is_empty() => std::mem::take(&mut st.refs),
+                OpPhase::Done | OpPhase::Cancelled if !st.refs.is_empty() => {
+                    std::mem::take(&mut st.refs)
+                }
                 _ => return Ok(()),
             }
         };

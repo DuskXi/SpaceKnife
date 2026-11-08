@@ -321,10 +321,11 @@ export async function basketClear(): Promise<void> {
   set({ basket: await call("basket.clear", {}) });
 }
 
-/** Run the basket: into the recycle bin, or deleted for good after the undo window (W5-41…47). */
-export async function basketExecute(mode: "trash" | "delete"): Promise<void> {
+/** Run the items `ids` of the basket (the ones the user saw and confirmed; the basket is shared
+ *  by every session): into the recycle bin, or deleted for good after the undo window (W5-41…47). */
+export async function basketExecute(mode: "trash" | "delete", ids: string[]): Promise<void> {
   try {
-    const task = await call("basket.execute", { mode, ids: null });
+    const task = await call("basket.execute", { mode, ids });
     // an ops.progress event may already be here: it wins
     set((s) =>
       s.op?.task_id === task.task_id
