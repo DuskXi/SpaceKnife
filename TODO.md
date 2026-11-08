@@ -10,7 +10,7 @@
   - 两端各实现三种可视化组件：`drawlist.v1`、`flame.v1`、`polar.v1`（几何、标签、缝、命中和配色按 [docs/visuals.md](docs/visuals.md)），并通过同一套一致性测试
   - 三端 golden 截图对比（含火焰图和火焰-极坐标图）
   - 受影响的后续项：M8 里 Qt / WinUI3 的 PyInstaller 打包和 Windows App Runtime 安装一并挂起
-  - 恢复条件：用户决定恢复
+  - 恢复条件：用户决定恢复；2026-11-08 起后端是 Rust，恢复时两端接到 Rust 后端（协议 v1、`spaceknife-cli serve`）上，Python 的共享视图层不再适用（挂起，不是取消）
 
 ## macOS（2026-10-19 恢复）
 

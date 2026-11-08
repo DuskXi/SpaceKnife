@@ -11,13 +11,15 @@ SpaceKnife comes with a command-line program, `spaceknife-cli`, built from the s
 
 | How you installed SpaceKnife | The command line |
 |---|---|
-| Windows installer | `%LOCALAPPDATA%\SpaceKnife\spaceknife-cli.exe` (the default folder) |
+| Windows installer | `spaceknife-cli.exe` in the install folder: `%LOCALAPPDATA%\Programs\SpaceKnife` for the current user, `C:\Program Files\SpaceKnife` for all users |
 | Windows portable | `spaceknife-cli.exe` next to `SpaceKnife.exe` |
 | deb / rpm | `spaceknife-cli` (`/usr/bin/spaceknife-cli`) |
 | Linux portable | `spaceknife-cli` next to `spaceknife` |
-| AppImage | inside the image: `./SpaceKnife_<version>_amd64.AppImage --appimage-extract` unpacks it to `squashfs-root/`, then use `squashfs-root/usr/bin/spaceknife-cli` |
+| AppImage | inside the image: `./SpaceKnife-<version>-x86_64.AppImage --appimage-extract` unpacks it to `squashfs-root/`, then use `squashfs-root/spaceknife-cli`. For headless mode you don't need that: `./SpaceKnife-<version>-x86_64.AppImage --headless` runs it ([Headless mode](../headless/)) |
 | macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli` |
 | From source | `cargo run -p sk-server --bin spaceknife-cli -- <command>` in the repository |
+
+Up to 0.3.4 the command line was the backend program inside the app, `resources/backend/spaceknife-backend` (macOS: `Contents/Resources/backend/spaceknife-backend`). In 0.3.5 it is `spaceknife-cli`: `scan`, `run`, `snapshot` and `version` work as before, and `scan` prints what it printed, so scripts only need the new path. `schema` is gone (the protocol's JSON Schema is in the repository), and `headless` is new.
 
 The examples on this page write `spaceknife-cli`. Add the folder to your PATH, or make an alias:
 
@@ -26,13 +28,13 @@ alias skc=/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli
 ```
 
 :::note
-On a deb or rpm install, `spaceknife` (`/usr/bin/spaceknife`) starts the app, and `spaceknife-cli` is the command line.
+On a deb or rpm install, `spaceknife` (`/usr/bin/spaceknife`) starts the app, and `spaceknife-cli` is the command line. On Windows, the install folder and the portable copy also hold `SpaceKnife.com`: in a terminal, `SpaceKnife --headless …` runs headless mode through it, as in 0.3.x.
 
 `spaceknife-cli headless` runs SpaceKnife without a window and serves its interface to a browser, on this computer or another one. See [Headless mode](../headless/).
 :::
 
 :::caution[Portable copies]
-A portable copy keeps its data in the `data` folder next to it, but only the app and headless mode know that. To make the command line use the same snapshots and settings, set `SPACEKNIFE_HOME` to that `data` folder (see [Environment variables](#environment-variables)).
+A portable copy keeps its data in the `data` folder next to it, but only the app and headless mode look for it; `scan`, `run` and `snapshot` use your user folders. To make them use the portable copy's snapshots and settings, set `SPACEKNIFE_HOME` to that `data` folder (see [Environment variables](#environment-variables)).
 :::
 
 Messages appear in the language chosen in **Settings › General › Interface language** (the command line reads your settings file). The `--help` texts are in English, except headless mode's.
@@ -231,7 +233,7 @@ Prints the SpaceKnife version and the protocol version. Include this line in bug
 
 ## serve
 
-The app runs the backend inside its own process; you only need `serve` to connect your own client or to debug. It prints one JSON line on standard output once it listens (`{"event": "ready", "url": "ws://127.0.0.1:…/v1", …}`) and logs to standard error.
+The app runs the backend inside its own process; in the Electron builds (the rpm, the AppImage and the Linux portable that brings its own engine) the app starts `spaceknife-cli serve --token-stdin` next to itself, as 0.3.x started its backend. You only need `serve` yourself to connect your own client or to debug. It prints one JSON line on standard output once it listens (`{"event": "ready", "url": "ws://127.0.0.1:…/v1", …}`) and logs to standard error.
 
 | Option | Default | What it does |
 |---|---|---|
@@ -248,11 +250,11 @@ The messages are described in the [protocol document](https://github.com/DuskXi/
 
 ## Environment variables
 
-Set these before you start the app or the command line. The backend runs inside the app, so it sees the same environment.
+Set these before you start the app or the command line. The backend runs inside the app, or as the app's own `spaceknife-cli serve`, so it sees the same environment.
 
 | Variable | What it does |
 |---|---|
-| `SPACEKNIFE_HOME` | Keep everything SpaceKnife writes in one folder: `data` (snapshots, tags, logs), `config` (settings, file classes), `cache`, and for the app also `desktop` (the window's own files). Useful for a second, separate setup, for tests, and for portable copies. See [Data locations and portable mode](../data-locations/) |
+| `SPACEKNIFE_HOME` | Keep everything SpaceKnife writes in one folder: `data` (snapshots, tags, logs), `config` (settings, file classes), `cache`, and for the app also the window's own files (`desktop`, or `electron` in the Electron builds). Useful for a second, separate setup, for tests, and for portable copies. See [Data locations and portable mode](../data-locations/) |
 | `SPACEKNIFE_SCAN_THREADS` | Number of listing threads, 1 to 64. Default: one per CPU, between 2 and 16; on macOS twice the CPUs, between 4 and 16. It also caps the manual concurrency |
 | `SPACEKNIFE_LANGUAGE` | `en` or `zh-CN`: messages of the command line in this language, whatever the settings say. Handy for scripts and bug reports |
 | `SPACEKNIFE_NO_BULK=1` | macOS: list files with `readdir` and `fstatat` instead of `getattrlistbulk`, to compare the speed |

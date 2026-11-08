@@ -8,7 +8,7 @@ SpaceKnife 是 GitHub 上一个使用 MIT 许可证的项目：[DuskXi/SpaceKnif
 ## 需要什么
 
 - 稳定版 [Rust](https://rustup.rs/) 工具链（edition 2024），用于后端、命令行和应用的原生部分。
-- Node.js 24 和 pnpm 10，用于应用的界面（Tauri 2 + Nuxt 4 + Vue 3）；官网需要 Node.js 22.12 或更新的版本。
+- Node.js 24 和 pnpm 10，用于应用的界面（Nuxt 4 + Vue 3）和它的两个外壳：Tauri 2 与 Electron；官网需要 Node.js 22.12 或更新的版本。
 - Linux 上还要 Tauri 编译时用到的库：`libwebkit2gtk-4.1-dev`、`libgtk-3-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev`、`libssl-dev` 和 `patchelf`（Ubuntu / Debian 的包名）。Windows 上需要 Microsoft Edge WebView2（Windows 11 自带）和 MSVC 生成工具；macOS 上需要 Xcode 命令行工具。
 
 ## 从源码运行
@@ -25,6 +25,7 @@ pnpm tauri dev
 - `pnpm tauri dev` 编译并启动应用。后端在应用的进程里运行（`sk_server::start`），不需要另外启动程序。
 - `pnpm dev` 只在浏览器里提供界面（`http://localhost:3000`），没有后端。
 - 单独运行后端：`cargo run -p sk-server --bin spaceknife-cli -- serve` 输出一行 `ready`，里面有 WebSocket 地址和令牌。在终端里扫描：`cargo run -p sk-server --bin spaceknife-cli -- scan <路径>`（见[命令行](../command-line/)）；想看真实的速度就加 `--release`。
+- 同一套界面也跑在 Electron 外壳（`apps/electron-shell`）里：RHEL 9 没有 WebKitGTK 4.1，所以 rpm、AppImage 和自带引擎的 Linux 便携版用它。试用：`cargo build -p sk-server --bin spaceknife-cli`，`pnpm -C apps/desktop generate`，然后 `pnpm -C apps/electron-shell install`、`pnpm -C apps/electron-shell dev`。它的后端是子进程 `spaceknife-cli serve`。界面只经 `window.sk`（`app/shared/api.ts`）和外壳打交道，改界面要两个外壳都能用。
 - 把 `SPACEKNIFE_HOME` 设为一个空文件夹，试验就不会碰到你真实的快照和设置。
 
 ## 提交 PR 之前的检查
@@ -44,15 +45,26 @@ node tools/gen_design.mjs --check
 cargo run -p sk-protocol --bin gen-ts -- --check
 ```
 
-界面、工具与翻译：
+Windows 的控制台启动器 `SpaceKnife.com` 自成一个小工作区：
+
+```bash
+cargo clippy --manifest-path packaging/console-launcher/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path packaging/console-launcher/Cargo.toml
+```
+
+界面、Electron 外壳、工具与翻译：
 
 ```bash
 pnpm -C apps/desktop typecheck
 pnpm -C apps/desktop test
+pnpm -C apps/electron-shell typecheck
+pnpm -C apps/electron-shell test
 node --test "tools/tests/*.test.mjs"
 node tools/i18n_check.mjs
 ```
 
+- `cargo test --workspace` 里包含对等关卡的回放（`cargo test -p sk-server --test parity_replay`）：后端经协议给出的回答，和 0.3.4 的 Python 后端对同样场景的回答比较。对着 `v0.3.4` 的 worktree 在线比较需要 Python 3.12 和 uv；怎么跑、怎么重新录下回答，见 [tests/parity/README.md](https://github.com/DuskXi/SpaceKnife/blob/main/tests/parity/README.md)。
+- 修缺陷要带一个没有这个修复就会失败的测试。
 - 测试和基准要小而短，不要在贡献者真实的磁盘上大量扫描或写入。
 
 ## 构建安装包
@@ -64,9 +76,10 @@ pnpm bundle
 pnpm bundle:portable
 ```
 
-`pnpm bundle` 用 Tauri 构建当前系统的安装包，输出到 `target/release/bundle/`：Windows 出 NSIS 安装包；Linux 出 AppImage、deb 和 rpm；macOS 出 app 和 dmg。Tauri 运行之前，`apps/desktop/scripts/prepare-bundle.mjs` 先构建 `spaceknife-cli`（装在应用旁边）并写好许可证文件。`pnpm bundle:portable` 在 `pnpm bundle` 之后把便携包打进 `target/portable/`。
+`pnpm bundle` 用 Tauri 构建当前系统的安装包，输出到 `target/release/bundle/`：Windows 出 NSIS 安装包；Linux 出 AppImage、deb 和 rpm；macOS 出 app 和 dmg。Tauri 运行之前，`apps/desktop/scripts/prepare-bundle.mjs` 先构建 `spaceknife-cli`（装在应用旁边）并写好许可证文件。`pnpm bundle:portable` 在 `pnpm bundle` 之后把便携包打进 `target/portable/`。发布时，Windows 安装包、deb、macOS 的 app 和 dmg 以及便携版用 Tauri 的构建；rpm、AppImage 和沿用 0.3.4 文件名的 Linux 便携版则来自 Electron 外壳：`pnpm -C apps/electron-shell package` 把它们构建到 `target/electron-shell/dist`。
 
-- 用 `node packaging/smoke-app.mjs` 测试打包好的应用，`node packaging/smoke-headless.mjs` 测试无头模式，`node packaging/update-e2e.mjs` 测试便携版的更新。
+- 用 `node packaging/smoke-app.mjs` 测试打包好的应用（两个外壳都行），`node packaging/smoke-headless.mjs` 测试无头模式，`node packaging/update-e2e.mjs` 测试便携版的更新。`node packaging/update-from-034.mjs` 把真实的 0.3.4 更新到一个构建，CI 对每种安装方式都跑一遍。
+- 发布文件的名字是和每一份已安装副本的约定：0.3.4 只按这些确切的名字找自己的文件，所以它们永远不改。
 
 细节（包括发布文件的命名）见 [docs/packaging.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/packaging.md)。
 
@@ -89,8 +102,10 @@ pnpm -C site dev
 | `crates/sk-core` | 扫描、过滤引擎、布局、视图、实时监控、导出、文件操作、设置、更新 |
 | `crates/sk-server` | WebSocket 服务和 `spaceknife-cli` 命令行 |
 | `apps/desktop` | 应用：界面（`app/`，Nuxt + Vue）和 Tauri 外壳及打包配置（`src-tauri/`） |
+| `apps/electron-shell` | Electron 外壳：主进程和 preload，没有自己的界面 |
 | `design/tokens`、`design/icons` | 设计令牌与图标源文件；`design/build` 是生成的 |
-| `packaging` | 打包后应用的冒烟测试 |
+| `packaging` | 打包后应用的测试（冒烟、无头模式、更新，包括从 0.3.4 更新），以及 Windows 的控制台启动器 `SpaceKnife.com` |
+| `tests/parity` | 对等关卡：同一批协议场景分别跑在 0.3.4 的后端和 Rust 后端上 |
 | `site` | 官网和这份文档 |
 | `docs` | 设计文档 |
 | `tools` | 代码生成和开发工具：`gen_design.mjs`、`gen_pinyin.mjs`、`i18n_check.mjs`、`release.mjs`、`demo/screenshots.mjs` |

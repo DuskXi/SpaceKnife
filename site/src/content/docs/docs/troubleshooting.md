@@ -32,6 +32,10 @@ The installer and the app aren't code-signed yet, so SmartScreen shows a warning
 - The first start after unzipping takes a few seconds longer while Windows checks the new files.
 - Unzip to a folder you can write to. In a place such as `C:\Program Files`, the portable copy can't write its `data` folder.
 
+### Windows: the window doesn't open
+
+SpaceKnife's window is drawn by the Microsoft Edge WebView2 Runtime. Windows 11 includes it and most Windows 10 computers have it; the installer installs it where it is missing, but a portable copy can't. If a portable copy shows no window, install the WebView2 Runtime from Microsoft (it is free) and start SpaceKnife again, or use the installer.
+
 ### macOS: "SpaceKnife can't be verified"
 
 The macOS build isn't notarized by Apple yet, so macOS blocks it once:
@@ -45,13 +49,15 @@ From then on it opens normally. After you install a new version, allow it once m
 xattr -dr com.apple.quarantine /Applications/SpaceKnife.app
 ```
 
-### Linux: the AppImage doesn't start
+### Linux: the AppImage or a portable copy doesn't start
 
-- The AppImage needs FUSE 2 (`libfuse2` on Ubuntu 22.04). Without it, run it as `./SpaceKnife_<version>_amd64.AppImage --appimage-extract-and-run`, or use the deb, rpm or portable tar.gz, which don't need FUSE.
+- The AppImage needs FUSE 2 (`libfuse2` on Ubuntu 22.04). Without it, run it as `./SpaceKnife-<version>-x86_64.AppImage --appimage-extract-and-run`, or use the deb, rpm or a portable tar.gz, which don't need FUSE.
+- On distributions that restrict unprivileged user namespaces (the AppArmor rules of Ubuntu 23.10 and later), the AppImage and the portable `…-linux-<arch>-portable.tar.gz` may not start because their Chromium sandbox helper isn't setuid. Start them with `--no-sandbox`, or use the deb or the small portable. Ubuntu 22.04 and RHEL 9 aren't affected.
+- The small portable `…-linux-<arch>-tauri.tar.gz` needs WebKitGTK 4.1. Without it, `./spaceknife` stops with `error while loading shared libraries: libwebkit2gtk-4.1.so.0`. Install it (`sudo apt install libwebkit2gtk-4.1-0` on Ubuntu and Debian), or, on RHEL 9, which doesn't have it, use the rpm or the portable `…-linux-<arch>-portable.tar.gz`. Its `spaceknife-cli` and headless mode don't need it.
 
 ### "The backend didn't start"
 
-The window is there, but a message covers it, and the status bar says `Backend unavailable`. The message under the title says why, for example `The backend exited (exit code N).`
+The window is there, but a message covers it, and the status bar says `Backend unavailable`. The message under the title says why: `The backend wasn't ready within 30 seconds.`, `The backend failed to start (exit code N).` or `The backend exited (exit code N).` In the Electron builds the backend is the program `spaceknife-cli` next to the app; elsewhere it runs inside the app.
 
 - Restart SpaceKnife. If it happens again, run the command line in a terminal: `spaceknife-cli version` (where it is: [Command line](../command-line/#where-the-program-is)). An error there is what to report, together with the message under the title.
 
@@ -65,7 +71,7 @@ The MFT quick scan needs administrator rights. SpaceKnife never runs elevated it
 - **It asks again later**: an idle helper quits after 10 minutes, and the next quick scan starts a new one.
 - **You never want the prompt**: switch off **Settings › Scan & performance › Scan method › Ask for administrator rights when needed**, or set **Default scan method** to **Full scan**.
 - **No prompt appears and the scan waits** at `Waiting for administrator approval…`: look for the UAC prompt in the taskbar. **Stop** cancels the scan.
-- The installer installs for the current user, so the helper starts from a folder your account can write to.
+- With an install for the current user, the helper starts from a folder your account can write to. If that concerns you, install SpaceKnife for all users (in Program Files).
 
 ### macOS: Full Disk Access
 
@@ -115,6 +121,16 @@ Every 15 seconds the backend compares its memory with what the open scans need. 
 - Close the scans and tabs you don't need.
 - If the warning comes back with few or no scans open, report it. The log file then contains a block after `memory above what the scans account for:` that lists every scan's data, the views and the queues; attach it.
 - To add the code lines that hold the most memory, start SpaceKnife with the environment variable `SPACEKNIFE_MEMTRACE=1`, reproduce, and attach the new block. It makes SpaceKnife slower, so remove it afterwards.
+
+## Updates
+
+### "Can't start the update"
+
+**Seamless update** of a portable copy asks the new version whether it can start on this computer before it replaces anything. When the answer is no, nothing is changed: the copy goes on as it was, and the card says `Can't start the update: the new version can't start on this computer: …` with the reason. The usual reasons are a missing web view: the WebView2 Runtime on Windows, or WebKitGTK 4.1 for the small Linux portable (RHEL 9 has none). Install it and try again, or take the other download ([Which file to download](../install/#which-file-to-download)). The steps are in `updates/update-<version>.log` in the data folder.
+
+### The installer update didn't finish
+
+When **Seamless update** of the Windows installer can't go through (for example, the WebView2 Runtime couldn't be downloaded, or you declined the administrator prompt of an all-users install), the installer leaves the old version as it was and opens it again. Try again later, or click **Run the installer** in the update card to go through the installer's pages.
 
 ## Resetting settings
 

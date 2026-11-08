@@ -8,7 +8,7 @@ SpaceKnife is an MIT-licensed project on GitHub: [DuskXi/SpaceKnife](https://git
 ## What you need
 
 - A stable [Rust](https://rustup.rs/) toolchain (edition 2024) for the backend, the command line and the app's native side.
-- Node.js 24 with pnpm 10, for the app's interface (Tauri 2 + Nuxt 4 + Vue 3). The website needs Node.js 22.12 or later.
+- Node.js 24 with pnpm 10, for the app's interface (Nuxt 4 + Vue 3) and its two shells, Tauri 2 and Electron. The website needs Node.js 22.12 or later.
 - On Linux, the libraries Tauri builds against: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libssl-dev` and `patchelf` (Ubuntu and Debian package names). On Windows, Microsoft Edge WebView2 (Windows 11 has it) and the MSVC build tools; on macOS, the Xcode command line tools.
 
 ## Run from source
@@ -25,6 +25,7 @@ pnpm tauri dev
 - `pnpm tauri dev` builds and starts the app. The backend runs inside the app's process (`sk_server::start`), so there is no second program to start.
 - `pnpm dev` serves only the interface in a browser at `http://localhost:3000`, without a backend.
 - The backend on its own: `cargo run -p sk-server --bin spaceknife-cli -- serve` prints one `ready` line with the WebSocket address and a token. Scans in a terminal: `cargo run -p sk-server --bin spaceknife-cli -- scan <path>` (see [Command line](../command-line/)); add `--release` for realistic speed.
+- The same interface also runs in the Electron shell (`apps/electron-shell`), which the rpm, the AppImage and the Linux portable that brings its own engine use, because RHEL 9 has no WebKitGTK 4.1. To try it: `cargo build -p sk-server --bin spaceknife-cli`, `pnpm -C apps/desktop generate`, then `pnpm -C apps/electron-shell install` and `pnpm -C apps/electron-shell dev`. Its backend is the child process `spaceknife-cli serve`. The interface talks to either shell only through `window.sk` (`app/shared/api.ts`), and a change to it has to work in both.
 - Set `SPACEKNIFE_HOME` to an empty folder to keep your experiments away from your real snapshots and settings.
 
 ## Checks before a pull request
@@ -44,15 +45,26 @@ node tools/gen_design.mjs --check
 cargo run -p sk-protocol --bin gen-ts -- --check
 ```
 
-The interface, the tools and the translations:
+The Windows console launcher `SpaceKnife.com` is a small workspace of its own:
+
+```bash
+cargo clippy --manifest-path packaging/console-launcher/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path packaging/console-launcher/Cargo.toml
+```
+
+The interface, the Electron shell, the tools and the translations:
 
 ```bash
 pnpm -C apps/desktop typecheck
 pnpm -C apps/desktop test
+pnpm -C apps/electron-shell typecheck
+pnpm -C apps/electron-shell test
 node --test "tools/tests/*.test.mjs"
 node tools/i18n_check.mjs
 ```
 
+- `cargo test --workspace` includes the parity gate's replay (`cargo test -p sk-server --test parity_replay`): the backend's answers over the protocol, compared with those 0.3.4's Python backend gave to the same scenarios. The live comparison against a `v0.3.4` worktree needs Python 3.12 and uv; how to run it and how to record the answers again is in [tests/parity/README.md](https://github.com/DuskXi/SpaceKnife/blob/main/tests/parity/README.md).
+- A bug fix comes with a test that fails without it.
 - Keep tests and benchmarks small and short. Never scan or write large amounts of data on a contributor's real drives.
 
 ## Build the installers
@@ -64,9 +76,10 @@ pnpm bundle
 pnpm bundle:portable
 ```
 
-`pnpm bundle` builds the bundles of the system it runs on with Tauri, into `target/release/bundle/`: the NSIS installer on Windows; AppImage, deb and rpm on Linux; the app and a dmg on macOS. Before Tauri runs, `apps/desktop/scripts/prepare-bundle.mjs` builds `spaceknife-cli` (installed next to the app) and writes the license files. `pnpm bundle:portable`, after `pnpm bundle`, packs the portable archive into `target/portable/`.
+`pnpm bundle` builds the bundles of the system it runs on with Tauri, into `target/release/bundle/`: the NSIS installer on Windows; AppImage, deb and rpm on Linux; the app and a dmg on macOS. Before Tauri runs, `apps/desktop/scripts/prepare-bundle.mjs` builds `spaceknife-cli` (installed next to the app) and writes the license files. `pnpm bundle:portable`, after `pnpm bundle`, packs the portable archive into `target/portable/`. A release publishes the Tauri builds of the Windows installer, the deb, the macOS app and dmg and the portables; the rpm, the AppImage and the Linux portable under 0.3.4's file name come from the Electron shell instead: `pnpm -C apps/electron-shell package` builds them into `target/electron-shell/dist`.
 
-- Test a packaged app with `node packaging/smoke-app.mjs`, headless mode with `node packaging/smoke-headless.mjs`, and a portable copy's update with `node packaging/update-e2e.mjs`.
+- Test a packaged app with `node packaging/smoke-app.mjs` (either shell), headless mode with `node packaging/smoke-headless.mjs`, and a portable copy's update with `node packaging/update-e2e.mjs`. `node packaging/update-from-034.mjs` updates a real 0.3.4 to a build; CI runs it for every kind of install.
+- The release file names are a contract with every installed copy: 0.3.4 looks for its file under exactly these names, so they never change.
 
 The details, including the release file names, are in [docs/packaging.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/packaging.md).
 
@@ -89,8 +102,10 @@ The website lives in `site/` (Astro with Starlight) and is published to GitHub P
 | `crates/sk-core` | Scanning, the filter engine, layouts, views, monitoring, export, file operations, settings, updates |
 | `crates/sk-server` | The WebSocket server and the `spaceknife-cli` command line |
 | `apps/desktop` | The app: the interface (`app/`, Nuxt + Vue) and the Tauri shell and bundle configuration (`src-tauri/`) |
+| `apps/electron-shell` | The Electron shell: main process and preload, no interface of its own |
 | `design/tokens`, `design/icons` | Design tokens and icon sources; `design/build` is generated |
-| `packaging` | The smoke tests of packaged apps |
+| `packaging` | The tests of packaged apps (smoke, headless, updates, also from 0.3.4) and the Windows console launcher `SpaceKnife.com` |
+| `tests/parity` | The parity gate: the same protocol scenarios against 0.3.4's backend and the Rust one |
 | `site` | The website and this documentation |
 | `docs` | Design documents |
 | `tools` | Code generation and developer tools: `gen_design.mjs`, `gen_pinyin.mjs`, `i18n_check.mjs`, `release.mjs`, `demo/screenshots.mjs` |

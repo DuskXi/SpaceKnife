@@ -30,17 +30,16 @@ SpaceKnife 无头模式 · 0.3.5
 
 | 安装方式 | 命令 |
 |---|---|
-| Windows 安装包 | `%LOCALAPPDATA%\SpaceKnife\spaceknife-cli headless`（默认文件夹） |
+| Windows 安装包 | 在 PowerShell 里 `& "$env:LOCALAPPDATA\Programs\SpaceKnife\spaceknife-cli.exe" headless`（仅当前用户的默认目录；所有用户是 `C:\Program Files\SpaceKnife`） |
 | Windows 便携版 | 在它的文件夹里 `.\spaceknife-cli headless` |
 | deb / rpm | `spaceknife-cli headless` |
 | Linux 便携版 | 在它的文件夹里 `./spaceknife-cli headless` |
+| AppImage | `./SpaceKnife-<版本>-x86_64.AppImage --headless` |
 | macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli headless` |
 
-它是控制台程序：终端会等它结束，<kbd>Ctrl</kbd>+<kbd>C</kbd> 就能停止。它提供的页面是 `spaceknife-cli` 旁边 `ui` 文件夹里构建好的界面；用 `--ui` 可以指定别的文件夹。
+它是控制台程序：终端会等它结束，<kbd>Ctrl</kbd>+<kbd>C</kbd> 就能停止。它提供的页面是随应用一起装好的界面：`spaceknife-cli` 旁边的 `ui` 文件夹，或者旁边的 `resources/ui`（Windows、便携版、rpm、AppImage），deb 是 `/usr/lib/SpaceKnife/ui`，macOS 是 `SpaceKnife.app/Contents/Resources/ui`。用 `--ui` 可以指定别的文件夹。
 
 在便携版里，无头模式和应用一样把数据存在便携版的 `data` 文件夹里（[数据位置](../data-locations/)）；设了 `SPACEKNIFE_HOME` 时仍以它为准。
-
-<!-- TODO: confirm — default_ui_dir (crates/sk-server/src/cli/headless.rs) looks for `ui` next to spaceknife-cli, `resources/ui`, `../lib/SpaceKnife/ui` (deb / rpm) and `Contents/Resources/ui` (macOS); not yet checked on a real deb, rpm or macOS install. The AppImage runs spaceknife-cli only once the app's shells hand `--headless` on to it (merge plan §4, the shells' work). -->
 
 ## 选项
 
@@ -50,12 +49,18 @@ SpaceKnife 无头模式 · 0.3.5
 | `--yes` | 在网络上开放前不再询问。没有终端可以回答时必须加 |
 | `--tls-cert <文件>` | 用这个证书（PEM）提供 HTTPS，与 `--tls-key` 一起用 |
 | `--tls-key <文件>` | 证书的私钥（PEM，不加密：见[在网络上开放](#在网络上开放)里的 **HTTPS**） |
-| `--ui <文件夹>` | 要提供的构建好的界面（默认：程序旁边的 `ui` 文件夹） |
+| `--ui <文件夹>` | 要提供的构建好的界面（默认：随应用装好的那份，见上文） |
 | `--help` | 列出这些选项 |
 
 选项的顺序随意，也可以写成 `--listen=0.0.0.0`。帮助和选项写错时的提示使用界面语言（「设置 › 常规 › 界面语言」），和命令行的其他输出一样。
 
-SpaceKnife 0.3.x 启动无头模式的写法仍然可用：`--headless` 和 `--listen <地址>` 放在参数里的任何位置，例如 `spaceknife-cli --yes --listen 0.0.0.0`（0.3.x 命令行里的其他东西，比如 Chromium 的开关，会被跳过）。Windows 上在应用的文件夹里打开终端，输入 `SpaceKnife --headless …`，运行的是那里的 `SpaceKnife.com`：它用同样的参数启动 `spaceknife-cli` 并等它结束，和 0.3.x 一样；不带这些选项时它打开窗口。
+SpaceKnife 0.3.x 启动无头模式的写法仍然可用，为 0.3.x 写的脚本和服务单元照样能跑：`--headless` 和 `--listen <地址>` 放在参数里的任何位置，例如 `spaceknife-cli --yes --listen 0.0.0.0`（0.3.x 命令行里的其他东西，比如 Chromium 的开关，会被跳过）。应用自己的程序也认这些写法，这时它运行无头模式，不打开窗口：
+
+- Windows：在应用的文件夹里打开终端，输入 `SpaceKnife --headless …`，运行的是那里的 `SpaceKnife.com`：它用同样的参数启动 `spaceknife-cli` 并等它结束，和 0.3.x 一样；不带这些选项时它打开窗口。
+- Linux：`spaceknife --headless …`（deb、rpm 和便携版），以及 `./SpaceKnife-<版本>-x86_64.AppImage --headless …`。
+- macOS：`/Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife --headless …`。
+
+在没有桌面环境的电脑上，请直接用 `spaceknife-cli`：应用的程序即使不开窗口，也需要窗口用的那些库。
 
 地址可以这样写：
 
@@ -151,7 +156,7 @@ ssh -L 8375:localhost:8375 lenny@nas.lan
 
 ## 没有显示器的 Linux 服务器
 
-`spaceknife-cli` 是控制台程序：不需要 X11 或 Wayland，也不需要窗口用的库（GTK、WebKitGTK）。在服务器上用便携版 tar.gz 就够了：解压后运行 `./spaceknife-cli headless`。
+`spaceknife-cli` 是控制台程序：不需要 X11 或 Wayland，也不需要窗口用的库（GTK、WebKitGTK、Chromium 要的那些）。在服务器上有一个便携版 tar.gz 就够了，RHEL 9 也一样：解压后运行 `./spaceknife-cli headless`。用小巧的那种（`SpaceKnife-<版本>-linux-<架构>-tauri.tar.gz`，[两种的区别](../install/#便携版-targz)）：它的 `spaceknife-cli` 和 `ui` 与另一种相同，下载却小得多。
 
 请用你想查看其文件的那个用户运行它。以 root 运行也可以，但浏览器里的一切操作都带着 root 的权限。
 

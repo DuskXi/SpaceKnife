@@ -70,21 +70,24 @@ The file goes into the `updates` folder in the [data folder](../data-locations/)
 
 | Your copy | File it downloads |
 |---|---|
-| Windows installer | `SpaceKnife_<version>_x64-setup.exe` |
-| Windows portable | `SpaceKnife-<version>-win-x64-portable.zip` |
-| macOS | `SpaceKnife_<version>_aarch64.dmg` or `…_x64.dmg`, for your Mac |
-| deb | `SpaceKnife_<version>_amd64.deb` |
-| rpm | `SpaceKnife-<version>-1.x86_64.rpm` |
-| AppImage | `SpaceKnife_<version>_amd64.AppImage` |
-| Linux portable | `SpaceKnife-<version>-linux-x64-portable.tar.gz` |
-| Linux portable, light | `SpaceKnife-<version>-linux-x64-tauri.tar.gz` |
+| Windows installer | `SpaceKnife-<version>-Setup-x64.exe` |
+| Windows portable | `SpaceKnife-<version>-win-x64-portable.zip`; on Windows on ARM `…-win-arm64-portable.zip` |
+| macOS dmg | `SpaceKnife-<version>-mac-arm64.dmg` or `…-mac-x64.dmg`, for your Mac |
+| macOS portable | `SpaceKnife-<version>-mac-arm64-portable.zip` or `…-mac-x64-portable.zip` |
+| deb | `spaceknife_<version>_amd64.deb` |
+| rpm | `spaceknife-<version>.x86_64.rpm` |
+| AppImage | `SpaceKnife-<version>-x86_64.AppImage` |
+| Linux portable, the small one | `SpaceKnife-<version>-linux-<x64 or arm64>-tauri.tar.gz` |
+| Linux portable with its own engine | `SpaceKnife-<version>-linux-<x64 or arm64>-portable.tar.gz` |
+
+The portable copies take the build for the processor they run on, so an x64 copy on an ARM computer moves to the ARM build. Each kind of install only ever takes its own kind of file: a Linux portable copy stays the kind it is (see [Portable tar.gz](../install/#portable-targz) for the two).
 
 Then SpaceKnife checks the file:
 
 - It compares the file's SHA-256 with the checksum published in the same release (`SHA256SUMS*.txt`). On a match the card says **SHA-256 checksum verified**.
 - A file that doesn't match is deleted at once: "The downloaded file doesn't match the published SHA-256 checksum and was deleted".
 - If the release publishes checksum files but they can't be read, nothing is downloaded.
-- If the release publishes no checksum for that file, the file is kept, marked "This release publishes no checksums: the file was not verified".
+- If the release lists no checksum for that file, nothing is downloaded: "This release lists no SHA-256 checksum for the file, so nothing was downloaded". So an update SpaceKnife installs has always been checked.
 - A file already in the `updates` folder with the right checksum is used as it is, without downloading it again.
 
 An automatic download that failed (no connection, for example) is tried again after the next check, or when you click **Retry**. For a copy SpaceKnife can't match to a release file (for example one run from the source code), **Download** is disabled and the card says "For this kind of install, download it from the release page".
@@ -105,15 +108,15 @@ A line under each button says what it does. Where your kind of install has no se
 
 | Your copy | Seamless update | The classic way |
 |---|---|---|
-| Windows installer | SpaceKnife closes, the installer runs silently in the background without showing its pages and replaces the old version, and SpaceKnife opens again. | **Run the installer**: SpaceKnife quits and opens the installer's wizard; go through its steps to install the new version. It upgrades the old version in place. |
-| Portable (Windows zip, Linux tar.gz) | SpaceKnife closes, puts the new program files in place itself (see below) and opens again. The `data` folder stays as it is. | **Replace it yourself**: shows the downloaded archive in its folder, and SpaceKnife keeps running. Quit SpaceKnife, then unpack the archive over the old files, keeping the `data` folder. |
+| Windows installer | SpaceKnife closes, the installer runs silently in the background without showing its pages and replaces the old version, and SpaceKnife opens again. For an installation for all users, Windows asks once for administrator permission. | **Run the installer**: SpaceKnife quits and opens the installer's wizard; go through its steps to install the new version. It upgrades the old version in place. |
+| Portable (Windows zip, Linux tar.gz, macOS zip) | SpaceKnife closes, puts the new program files in place itself (see below) and opens again. The `data` folder stays as it is. | **Replace it yourself**: shows the downloaded archive in its folder, and SpaceKnife keeps running. Quit SpaceKnife, then unpack the archive over the old files, keeping the `data` folder. |
 | AppImage | SpaceKnife closes, the new AppImage (already made executable) takes the place of the old file, and it opens again. | **Replace it yourself**: shows the new AppImage in its folder, and SpaceKnife keeps running. Quit SpaceKnife, then replace the old file with it. |
-| macOS | None | **Open the disk image**: SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one, then [allow it once more](../install/#first-launch-allow-it-once). |
+| macOS dmg | None | **Open the disk image**: SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one, then [allow it once more](../install/#first-launch-allow-it-once). |
 | deb, rpm | None | **Open the package**: SpaceKnife quits and opens the package in the system's software installer. |
 
 Whichever way you choose, scan data and settings are kept. After a **Seamless update**, the window says "Updated to SpaceKnife 0.4.0" (the version it now runs) once.
 
-**A portable copy's seamless update**: SpaceKnife unpacks the archive in its `updates` folder and quits; the files are swapped by the new version's own backend program, not by a script. It waits for SpaceKnife to quit, moves everything in the program folder except `data` to `updates/previous-<old version>` (waiting up to 30 more seconds while files are still in use), moves the new files in and starts the new version. If a file can't be replaced, the old files are put back and the old version opens again. If the new version is incomplete, nothing is touched: SpaceKnife stays open and says why. Each step is written to `updates/update-<version>.log`.
+**A portable copy's seamless update**: SpaceKnife unpacks the archive in its `updates` folder and starts the new version's own program, which swaps the files; no script is involved. Before anything is touched, that program checks the new files and asks the new version whether it can start on this computer: the portable copies need the system's web view (the Microsoft Edge WebView2 Runtime on Windows; the small Linux portable needs WebKitGTK 4.1). If the new version can't start, or is incomplete, nothing is touched: SpaceKnife stays open and the card says why, for example **Can't start the update: the new version can't start on this computer: …**. Otherwise SpaceKnife quits, and the program waits for it to be gone, moves everything in the program folder except `data` to `updates/previous-<old version>` (waiting up to 30 more seconds while files are still in use), moves the new files in and starts the new version. If a file can't be replaced, the old files are put back and the old version opens again. Each step is written to `updates/update-<version>.log`.
 
 If a scan is still running when you click a button that closes SpaceKnife, the first click only warns "A scan is still running. Updating stops it (what it has read so far isn't saved)." and the button says **Click again to go on**; the second click goes ahead. **Replace it yourself** doesn't close SpaceKnife, so it doesn't ask.
 
@@ -130,7 +133,7 @@ Once you click, it only starts a file that is directly in its `updates` folder a
 - **At the top**: your version, how this copy was installed and which versions are offered; what the last check found, when it ran and when the next automatic check is due. **Check for updates** checks now; **All releases** opens the [Releases page](https://github.com/DuskXi/SpaceKnife/releases). When a newer version is known, its update card is shown here too, and stays.
 - **Skipped series**: a release of a [skipped](#skipping-a-series) series is shown here too. The status reads "Version 0.4.2 is available (prompts for 0.4.x are off)", and the card has a line "Prompts for 0.4.x are off: no card, no badge, no automatic download." with **Turn prompts back on**, which makes the series speak up again. You can still download and install the release from this card.
 - **Updates**: the three update settings (check, download, versions to offer).
-- **Components**: how this copy was installed, the versions of SpaceKnife, Tauri, the system's WebView, Rust and the protocol, and your system. **Copy version info** copies them, for a bug report.
+- **Components**: how this copy was installed, the versions of SpaceKnife, of the shell that draws its window (Tauri, or Electron in the rpm, the AppImage and the Linux portable that brings its own engine) and of its web view, of Rust and the protocol, and your system. **Copy version info** copies them, for a bug report.
 - **Release timeline**: the last 30 releases, newest first, marked **Current**, **New** (newer than yours) and **Preview**. Click one to read its notes in the interface language; the newest is open. **View on GitHub** opens its release page. The timeline comes from the last check, so it is there offline too; before the first check it is empty.
 
 ## Turning the check off
@@ -162,7 +165,7 @@ All of them go to GitHub, and only for updates:
 
 ### On your computer
 
-- The window talks to its scanning backend over a local connection on this computer only (the loopback address, with a new random token each start), so other computers can't reach it.
+- The window talks to its scanning backend over a local connection on this computer only (the loopback address, with a new random token each start), so other computers can't reach it. The backend runs inside the app, or, in the Electron builds, as the program `spaceknife-cli serve` that the app starts next to itself and that ends with it. Only [headless mode](../headless/) can listen on the network, and only when you tell it to.
 - The log file and the log panel contain the paths of files and folders, for example of folders that couldn't be read.
 - **Copy diagnostics** (**Settings › Advanced**) only copies to the clipboard. What it copies includes the paths of your settings file and log folder, which usually contain your user name; check before you post it.
 - A snapshot file (`.sks`) holds the names, sizes and dates of everything that was scanned. Sharing one shares your folder structure; the same goes for [exports](../export/).

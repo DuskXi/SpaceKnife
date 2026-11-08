@@ -32,6 +32,10 @@ description: 首次启动的警告、权限、未知空间、扫描慢或卡住�
 - 解压后第一次启动会慢几秒，Windows 要先检查这些新文件。
 - 解压到你有写权限的文件夹。放在 `C:\Program Files` 之类的位置时，便携版写不了旁边的 `data` 文件夹。
 
+### Windows：窗口打不开
+
+SpaceKnife 的窗口由 Microsoft Edge WebView2 Runtime 绘制。Windows 11 自带，多数 Windows 10 电脑也已经装好；缺少时安装包会装上它，便携版则不会。便携版打开后没有窗口时，从微软免费下载安装 WebView2 Runtime，再启动 SpaceKnife；或者改用安装包。
+
 ### macOS：提示无法验证 SpaceKnife
 
 macOS 版还没有经过苹果公证，第一次打开会被拦下，需要放行一次：
@@ -45,13 +49,15 @@ macOS 版还没有经过苹果公证，第一次打开会被拦下，需要放�
 xattr -dr com.apple.quarantine /Applications/SpaceKnife.app
 ```
 
-### Linux：AppImage 打不开
+### Linux：AppImage 或便携版打不开
 
-- AppImage 需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）。没有时用 `./SpaceKnife_<版本>_amd64.AppImage --appimage-extract-and-run` 运行，或者改用不需要 FUSE 的 deb、rpm 或便携版 tar.gz。
+- AppImage 需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）。没有时用 `./SpaceKnife-<版本>-x86_64.AppImage --appimage-extract-and-run` 运行，或者改用不需要 FUSE 的 deb、rpm 或便携版 tar.gz。
+- 在限制非特权用户命名空间的发行版上（Ubuntu 23.10 起的 AppArmor 规则），AppImage 和便携版 `…-linux-<架构>-portable.tar.gz` 可能启动不了，因为其中 Chromium 的沙箱程序没有 setuid。加 `--no-sandbox` 启动，或者改用 deb 或小巧的便携版。Ubuntu 22.04 和 RHEL 9 不受影响。
+- 小巧的便携版 `…-linux-<架构>-tauri.tar.gz` 需要 WebKitGTK 4.1。没有时 `./spaceknife` 报 `error while loading shared libraries: libwebkit2gtk-4.1.so.0` 后退出。装上它（Ubuntu 和 Debian 上 `sudo apt install libwebkit2gtk-4.1-0`）；RHEL 9 没有它，请改用 rpm 或便携版 `…-linux-<架构>-portable.tar.gz`。它的 `spaceknife-cli` 和无头模式不需要 WebKitGTK。
 
 ### 「后端没有启动」
 
-窗口出现了，但被一段提示盖住，状态栏显示「后端不可用」。标题下面写着原因，比如「后端已退出（退出码 N）」。
+窗口出现了，但被一段提示盖住，状态栏显示「后端不可用」。标题下面写着原因：「后端 30 秒内没有就绪」「后端启动失败（退出码 N）」或「后端已退出（退出码 N）」。Electron 版的后端是应用旁边的 `spaceknife-cli` 程序；其他版本的后端在应用里面运行。
 
 - 重新打开 SpaceKnife。再次出现时，在终端里运行命令行：`spaceknife-cli version`（位置见[命令行](../command-line/#程序在哪里)）。那里的报错，连同标题下面的原因，就是需要报告的内容。
 
@@ -65,7 +71,7 @@ MFT 快速扫描需要管理员权限。SpaceKnife 本身从不提权：它启�
 - **过一会儿又来问**：助手空闲 10 分钟后退出，之后的快速扫描会启动一个新的助手。
 - **永远不想看到提示**：关掉「设置 › 扫描与性能 › 扫描方式 › 需要时请求管理员权限」，或把「默认扫描方式」设为「硬扫描」。
 - **没看到提示，扫描停在「正在等待管理员授权…」**：去任务栏找 UAC 提示。「停止」可以取消这次扫描。
-- 安装包只装给当前用户，所以助手从你的账户可写的文件夹启动。
+- 「仅当前用户」安装时，助手从你的账户可写的文件夹启动。介意的话请选「所有用户」安装（装到 Program Files）。
 
 ### 完全磁盘访问权限
 
@@ -115,6 +121,16 @@ macOS 上没有「完全磁盘访问权限」时，系统会为桌面、文稿�
 - 关掉不需要的扫描和标签页。
 - 只开着很少的扫描、甚至没有扫描时警告仍然出现，请报告问题。这时日志文件里 `memory above what the scans account for:` 之后有一段明细，列出每个扫描的数据、视图和各个队列，请附上它。
 - 想再附上占用内存最多的代码行：设置环境变量 `SPACEKNIFE_MEMTRACE=1` 后启动 SpaceKnife，重现问题，附上新的明细。它会让 SpaceKnife 变慢，用完请去掉。
+
+## 更新
+
+### 「无法启动更新」
+
+便携版的「无缝更新」在替换任何东西之前，先问新版本能不能在这台电脑上启动。不能时什么都不改：这份副本照常使用，卡片显示「无法启动更新：the new version can't start on this computer: …」和原因。常见的原因是缺少网页视图：Windows 上的 WebView2 Runtime，或者小巧的 Linux 便携版要的 WebKitGTK 4.1（RHEL 9 没有）。装上它再试，或者换另一种下载（[下载哪个文件](../install/#下载哪个文件)）。每一步记在数据文件夹的 `updates/update-<版本>.log` 里。
+
+### 安装包的更新没有完成
+
+Windows 安装包的「无缝更新」做不下去时（比如 WebView2 Runtime 下载不了，或者为所有用户安装时你拒绝了管理员授权），安装程序保持旧版本原样，并重新打开它。稍后再试，或者在更新卡片里点「运行安装程序」，按安装向导一步步来。
 
 ## 恢复设置
 
