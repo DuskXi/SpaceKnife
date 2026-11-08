@@ -78,7 +78,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 - 界面跑在系统的 WebView 里（Windows WebView2、macOS WKWebView、Linux WebKitGTK），不再自带 Chromium。
 - 外壳自己的文件（`theme.json`、WebView 的配置目录）：设了 `SPACEKNIFE_HOME`（便携版、演示、测试）时在 `<SPACEKNIFE_HOME>/desktop`，否则在 Tauri 的应用本地数据目录（按 identifier 命名），和后端的文件分开（`src-tauri/src/window.rs` 的 `ui_dir`）。
 - 拖动窗口的元素带 `data-tauri-drag-region`。
-- Windows 上 release 构建的 `spaceknife.exe` 是 GUI 子系统；终端里用的无头模式是控制台程序 `spaceknife-cli headless`，不再需要 0.3.x 的 `SpaceKnife.com` 启动器。
+- Windows 上 release 构建的 `SpaceKnife.exe` 是 GUI 子系统；终端里用的无头模式是控制台程序 `spaceknife-cli headless`，不再需要 0.3.x 的 `SpaceKnife.com` 启动器。
 
 ## 4. 安装包
 
@@ -134,7 +134,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
     - 「无缝更新」：换文件的是**新版本自己的可执行文件**（`spaceknife --apply-update <计划>`，`sk_core::update::swap`）。
       - 外壳把压缩包解到 `updates/staging-<版本>`，确认里面唯一的顶层文件夹带着可执行文件（macOS 上是 `SpaceKnife.app`）。
       - 写出计划 `updates/update-<版本>.json`（版本 1：`v`、`pid`、`app`、`new`、`old`、`exe`、`log`、`keep: ["data"]`）。计划是和每个旧版本的约定：旧应用把它交给更新的版本，所以以后的版本要一直能读 `v: 1`。0.3.x 的计划交给的是新版本的 `resources/backend/spaceknife-backend`，0.3.5 的包里没有它（见下面「发布时的约定」）。
-      - 以 detached 方式启动 `<staging>/spaceknife[.exe] --apply-update <计划>`（macOS 上是 `SpaceKnife.app/Contents/MacOS/spaceknife`），等它在 stdout 回一行 `{"ok": true}` 后退出。30 秒没回、回了别的或者它先退出了，应用就照旧运行并提示原因。
+      - 以 detached 方式启动 `<staging>/spaceknife[.exe] --apply-update <计划>`（macOS 上是 `SpaceKnife.app/Contents/MacOS/SpaceKnife`），等它在 stdout 回一行 `{"ok": true}` 后退出。30 秒没回、回了别的或者它先退出了，应用就照旧运行并提示原因。
       - 助手先检查计划：路径都是绝对路径、`exe` 在 `app` 里、新版本的同一位置有可执行文件、`old` 是空的。不能用的计划什么都不动：日志写一行 `not started: …`，回 `{"ok": false, "error": …}`，应用保持打开并提示原因。
       - 等应用主进程退出（最多 60 秒）。
       - 把程序目录里除 `data` 以外的条目移到 `updates/previous-<旧版本>`。文件还被占用时在 30 秒内反复重试，日志写「busy: …」。

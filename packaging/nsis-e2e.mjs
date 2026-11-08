@@ -28,7 +28,7 @@ if (!setup || !existsSync(setup) || !statSync(setup).isFile()) fail("usage: node
 
 // Tauri's per-user NSIS installer: $LOCALAPPDATA\<productName>
 const dir = join(process.env.LOCALAPPDATA, "SpaceKnife");
-const exe = join(dir, "spaceknife.exe");
+const exe = join(dir, "SpaceKnife.exe");
 const here = fileURLToPath(new URL(".", import.meta.url));
 
 function run(file, argv, what) {

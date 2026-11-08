@@ -132,7 +132,7 @@ jobs:
       - name: Smoke test in portable mode
         run: |
           app=$(ls -d target/portable-test/*/SpaceKnife.app)
-          node packaging/smoke-app.mjs --portable "$app/Contents/MacOS/spaceknife"
+          node packaging/smoke-app.mjs --portable "$app/Contents/MacOS/SpaceKnife"
 
       - name: Headless mode smoke test
         run: |

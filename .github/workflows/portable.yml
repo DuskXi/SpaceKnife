@@ -177,7 +177,7 @@ jobs:
         run: |
           # a glob, not `ls` of both names: the missing one would fail the step (pipefail)
           shopt -s nullglob
-          app=(target/portable-test/*/spaceknife.exe target/portable-test/*/spaceknife)
+          app=(target/portable-test/*/SpaceKnife.exe target/portable-test/*/spaceknife)
           app=${app[0]:?the program is missing from the archive}
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a node packaging/smoke-app.mjs --portable "$app"

@@ -65,9 +65,9 @@ For scripted deployment, the installer takes the usual switches:
 
 ### Portable zip
 
-Unzip `SpaceKnife-<version>-win-x64-portable.zip` somewhere you can write (your user folder, a USB drive; not Program Files) and run `spaceknife.exe`. It needs Microsoft Edge WebView2, which Windows 11 includes. The first launch takes a few seconds longer while Windows checks the new files.
+Unzip `SpaceKnife-<version>-win-x64-portable.zip` somewhere you can write (your user folder, a USB drive; not Program Files) and run `SpaceKnife.exe`. It needs Microsoft Edge WebView2, which Windows 11 includes. The first launch takes a few seconds longer while Windows checks the new files.
 
-Next to `spaceknife.exe` there is a `data` folder. While it is there, SpaceKnife keeps everything in it (snapshots, settings, logs, cache) and writes nothing to your user profile. See [Portable mode](../data-locations/#portable-mode).
+Next to `SpaceKnife.exe` there is a `data` folder. While it is there, SpaceKnife keeps everything in it (snapshots, settings, logs, cache) and writes nothing to your user profile. See [Portable mode](../data-locations/#portable-mode).
 
 ## macOS
 

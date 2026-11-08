@@ -39,7 +39,10 @@ if (os === "mac") {
   if (!existsSync(app)) throw new Error(`${app} is missing: run pnpm bundle first`);
   execFileSync("/usr/bin/ditto", [app, join(folder, "SpaceKnife.app")], { stdio: "inherit" });
 } else {
-  copyFileSync(join(release, `spaceknife${exe}`), join(folder, `spaceknife${exe}`));
+  // the program as tauri.<platform>.conf.json names it (mainBinaryName): SpaceKnife.exe on Windows,
+  // as 0.3.4 had it (its update looks for that name), spaceknife on Linux
+  const program = os === "win" ? "SpaceKnife.exe" : "spaceknife";
+  copyFileSync(join(release, program), join(folder, program));
   copyFileSync(join(release, `spaceknife-cli${exe}`), join(folder, `spaceknife-cli${exe}`));
   cpSync(join(desktop, "src-tauri", "target-bundle", "licenses"), join(folder, "licenses"), { recursive: true });
   // `spaceknife-cli headless` serves the interface from `ui` next to it

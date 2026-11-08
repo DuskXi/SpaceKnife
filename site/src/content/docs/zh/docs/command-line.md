@@ -12,7 +12,7 @@ SpaceKnife 附带一个命令行程序 `spaceknife-cli`，和替应用扫描的�
 | 安装方式 | 命令行 |
 |---|---|
 | Windows 安装包 | `%LOCALAPPDATA%\SpaceKnife\spaceknife-cli.exe`（默认安装目录） |
-| Windows 便携版 | `spaceknife.exe` 旁边的 `spaceknife-cli.exe` |
+| Windows 便携版 | `SpaceKnife.exe` 旁边的 `spaceknife-cli.exe` |
 | deb / rpm | `spaceknife-cli`（`/usr/bin/spaceknife-cli`） |
 | Linux 便携版 | `spaceknife` 旁边的 `spaceknife-cli` |
 | AppImage | 在镜像里面：`./SpaceKnife_<版本>_amd64.AppImage --appimage-extract` 解到 `squashfs-root/`，再用 `squashfs-root/usr/bin/spaceknife-cli` |

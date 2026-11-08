@@ -80,7 +80,7 @@ Windows, for one start from PowerShell:
 
 ```powershell
 $env:SPACEKNIFE_HOME = "D:\SpaceKnife-data"
-& "<install folder>\spaceknife.exe"
+& "<install folder>\SpaceKnife.exe"
 ```
 
 Windows, for every program started afterwards (to undo it, delete the variable in the Windows environment variable settings):
@@ -98,7 +98,7 @@ SPACEKNIFE_HOME=/home/lenny/spaceknife-data spaceknife
 macOS:
 
 ```bash
-SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/spaceknife
+SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife
 ```
 
 The [command line](../command-line/) reads the same variable, so `spaceknife-cli snapshot list` with `SPACEKNIFE_HOME` set lists the snapshots in that folder.
