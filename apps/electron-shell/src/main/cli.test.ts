@@ -2,9 +2,35 @@
 // same decision is spaceknife-cli's `wants_headless`, the Tauri shell's src-tauri/src/cli.rs and
 // SpaceKnife.com's `route` (packaging/console-launcher).
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
-import { headlessArgs } from "./cli";
+import { STARTUP_CHECK, headlessArgs, isStartupCheck, startupCheckAnswer } from "./cli";
+
+describe("the startup check", () => {
+  it("is the flag the swap helper asks with (crates/sk-core/src/update/swap.rs STARTUP_CHECK)", () => {
+    const swap = readFileSync(fileURLToPath(new URL("../../../../crates/sk-core/src/update/swap.rs", import.meta.url)), "utf8");
+    expect(swap).toContain(`pub const STARTUP_CHECK: &str = "${STARTUP_CHECK}";`);
+  });
+
+  it("is asked by the flag, in a checkout after the app's folder too, and is not headless mode", () => {
+    expect(isStartupCheck(["--startup-check"])).toBe(true);
+    expect(isStartupCheck([".", "--startup-check"])).toBe(true);
+    expect(isStartupCheck([])).toBe(false);
+    expect(isStartupCheck(["--updated"])).toBe(false);
+    expect(isStartupCheck(["--startup-checks"])).toBe(false);
+    expect(headlessArgs(["--startup-check"])).toBeNull();
+  });
+
+  it("answers with one line the helper reads as ok", () => {
+    const line = startupCheckAnswer({ electron: "44.9.3" });
+    expect(line.endsWith("\n")).toBe(true);
+    expect(line.trim().includes("\n")).toBe(false);
+    expect(JSON.parse(line)).toEqual({ ok: true, electron: "44.9.3" });
+  });
+});
 
 describe("headlessArgs", () => {
   it("opens the window without a headless option", () => {

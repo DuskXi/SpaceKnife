@@ -13,12 +13,21 @@
 //       No ELF file in TARGET (the same members) may need a newer glibc than --max (the RHEL 9
 //       floor, docs/PLAN.md). Conservative, as tools/build_package.py was: any GLIBC_x.y string in
 //       the file counts.
+//   node tools/package_checks.mjs crt [--allow-ucrt NAME …] TARGET …
+//       No Windows program or library in TARGET (PE files, the same members) imports the Visual C++
+//       runtime (VCRUNTIME*.dll, MSVCP*.dll, the UCRT's api-ms-win-crt-*.dll and ucrtbase.dll, older
+//       or extra runtime DLLs: CRT_DLL), directly or delay-loaded: neither the installer nor the
+//       portable copies ship the Visual C++ Redistributable, so every program has the C runtime
+//       linked in (+crt-static). A file named by --allow-ucrt may take the Universal CRT from the
+//       system (Windows 10 and later have it): for others' prebuilt files (Electron's dxil.dll).
 //
 // remappedEnv() is the environment of a release build (apps/desktop/scripts/bundle.mjs, which
 // `pnpm bundle` runs): rustc's --remap-path-prefix writes the home folder, CARGO_HOME, RUSTUP_HOME
 // and the repository as ~, /cargo, /rustup and /spaceknife in panic messages and debug paths
 // (Cargo's trim-paths is not stable), and on Windows the program keeps only its PDB's file name.
-// The `paths` check over the packages is what tells that it worked.
+// The `paths` check over the packages is what tells that it worked. On Windows it also links the C
+// runtime statically (STATIC_CRT, as .cargo/config.toml asks, which Cargo skips once
+// CARGO_ENCODED_RUSTFLAGS is set); the `crt` check tells that this worked.
 
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
@@ -49,11 +58,22 @@ export function remapFlags({ home = homedir(), cargoHome, rustupHome, root = ROO
   return flags;
 }
 
-/** `env` with remapFlags() added to the flags Cargo would use (CARGO_ENCODED_RUSTFLAGS, else
+/** Windows (MSVC): the C runtime linked into the program, so it needs no Visual C++
+ * Redistributable (the `crt` check). The same flag as .cargo/config.toml's. */
+export const STATIC_CRT = "-Ctarget-feature=+crt-static";
+
+/** The flags of a release build: remapFlags(), and on Windows STATIC_CRT. */
+export function releaseFlags(opts = {}) {
+  const windows = opts.windows ?? process.platform === "win32";
+  return [...remapFlags({ ...opts, windows }), ...(windows ? [STATIC_CRT] : [])];
+}
+
+/** `env` with releaseFlags() added to the flags Cargo would use (CARGO_ENCODED_RUSTFLAGS, else
  * RUSTFLAGS); flags already there are not added twice, so a second call changes nothing (the
- * spaceknife-cli build inside `tauri build` gets the same flags, and shares its dependencies). */
+ * spaceknife-cli build inside `tauri build` gets the same flags, and shares its dependencies).
+ * Cargo then ignores the rustflags of .cargo/config.toml: STATIC_CRT is among these flags for that. */
 export function remappedEnv(env = process.env, { home = homedir(), root = ROOT, windows = process.platform === "win32" } = {}) {
-  const flags = remapFlags({ home, cargoHome: env.CARGO_HOME, rustupHome: env.RUSTUP_HOME, root, windows });
+  const flags = releaseFlags({ home, cargoHome: env.CARGO_HOME, rustupHome: env.RUSTUP_HOME, root, windows });
   const current =
     env.CARGO_ENCODED_RUSTFLAGS !== undefined
       ? env.CARGO_ENCODED_RUSTFLAGS.split("\x1f").filter(Boolean)
@@ -73,6 +93,7 @@ const XZ = [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00];
 const AR = [...Buffer.from("!<arch>\n")];
 const USTAR = [...Buffer.from("ustar")];
 const ELF = [0x7f, 0x45, 0x4c, 0x46];
+const MZ = [0x4d, 0x5a];
 
 const cstr = (data, at, len) => {
   const raw = data.subarray(at, at + len);
@@ -411,10 +432,98 @@ export function findNewGlibc(targets, { max = GLIBC_FLOOR } = {}) {
   return { problems, worst, elves };
 }
 
+// ------------------------------------------------------------------ the C runtime of Windows programs
+
+/** The DLLs of the Visual C++ runtime, which a Windows program built without +crt-static imports:
+ * the VC runtime (VCRUNTIME140.dll, VCRUNTIME140_1.dll), the C++ library (MSVCP140*.dll), the UCRT
+ * (api-ms-win-crt-*.dll, ucrtbase.dll), older ones (MSVCR120.dll …) and the extra ones (CONCRT140,
+ * VCOMP140, VCCORLIB140); debug builds' too (…d.dll). Not msvcrt.dll nor msvcp_win.dll: Windows'
+ * own. */
+export const CRT_DLL = /^(?:vcruntime\d|msvc[pr]\d|api-ms-win-crt-|ucrtbased?\.dll$|concrt\d|vcomp\d|vccorlib\d)/i;
+
+const MAX_IMPORTS = 4096; // descriptors read per table: a broken file ends the list
+
+/** The DLLs a PE file (a Windows .exe, .dll or .com program; PE32 or PE32+) imports, the ones it
+ * delay-loads included, as its import tables name them; null for any other file. */
+export function peImports(data) {
+  if (!startsWith(data, MZ) || data.length < 0x40) return null;
+  const pe = data.readUInt32LE(0x3c);
+  if (pe + 24 > data.length || data.readUInt32LE(pe) !== 0x00004550) return null; // "PE\0\0"
+  const sectionCount = data.readUInt16LE(pe + 6);
+  const optSize = data.readUInt16LE(pe + 20);
+  const opt = pe + 24;
+  if (optSize < 2 || opt + optSize > data.length) return null;
+  const magic = data.readUInt16LE(opt);
+  const plus = magic === 0x20b;
+  if (!plus && magic !== 0x10b) return null;
+  const dirs = opt + (plus ? 112 : 96); // the data directories, after NumberOfRvaAndSizes
+  if (dirs > opt + optSize) return null;
+  const dirCount = Math.min(data.readUInt32LE(dirs - 4), Math.floor((opt + optSize - dirs) / 8));
+  const imageBase = plus ? data.readBigUInt64LE(opt + 24) : BigInt(data.readUInt32LE(opt + 28));
+  const sections = [];
+  for (let i = 0, at = opt + optSize; i < sectionCount && at + 40 <= data.length; i++, at += 40) {
+    sections.push({ va: data.readUInt32LE(at + 12), size: Math.max(data.readUInt32LE(at + 8), data.readUInt32LE(at + 16)), raw: data.readUInt32LE(at + 20) });
+  }
+  /** The file offset of an address in the image (-1: in no section, or past the file's end). */
+  const offset = (rva) => {
+    const s = sections.find((s) => rva >= s.va && rva < s.va + s.size);
+    const at = s ? s.raw + (rva - s.va) : -1;
+    return at >= 0 && at < data.length ? at : -1;
+  };
+  const dllName = (rva) => {
+    const at = offset(rva);
+    return at < 0 ? null : cstr(data, at, 260) || null;
+  };
+  const table = (index, size, nameAt) => {
+    if (index >= dirCount) return [];
+    const rva = data.readUInt32LE(dirs + index * 8);
+    let at = rva ? offset(rva) : -1;
+    const names = [];
+    for (let k = 0; at >= 0 && at + size <= data.length && k < MAX_IMPORTS; k++, at += size) {
+      if (data.subarray(at, at + size).every((b) => b === 0)) break;
+      const name = dllName(nameAt(at));
+      if (name) names.push(name);
+    }
+    return names;
+  };
+  return [
+    // IMAGE_IMPORT_DESCRIPTOR: its Name at 12
+    ...table(1, 20, (at) => data.readUInt32LE(at + 12)),
+    // the delay-load descriptor: its DllNameRVA at 4, an address in the image when Attributes says
+    // so (bit 0, every linker since Visual C++ 7), else a virtual address (Visual C++ 6)
+    ...table(13, 32, (at) => {
+      const name = data.readUInt32LE(at + 4);
+      return data.readUInt32LE(at) & 1 ? name : Number((BigInt(name) - imageBase) & 0xffffffffn);
+    }),
+  ];
+}
+
+/** The Universal CRT's DLLs, which Windows 10 and later have of their own (the VC runtime they don't). */
+const UCRT_DLL = /^(?:api-ms-win-crt-|ucrtbase\.dll$)/i;
+
+/** The findings of the `crt` check: [label imports …] and how many PE files there were. Files named
+ * in `allowUcrt` (any folder, any case) may import the Universal CRT: others' prebuilt files that
+ * link it from the system (Electron's dxil.dll), never one of ours. */
+export function findCrtImports(targets, { allowUcrt = [] } = {}) {
+  const allowed = new Set(allowUcrt.map((n) => n.toLowerCase()));
+  const problems = [];
+  let programs = 0;
+  for (const c of everything(targets)) {
+    const imports = peImports(c.data);
+    if (!imports) continue;
+    programs++;
+    const name = c.label.split(/[/\\›]/).pop().trim().toLowerCase();
+    const crt = [...new Set(imports.filter((n) => CRT_DLL.test(n) && !(allowed.has(name) && UCRT_DLL.test(n))))];
+    if (crt.length) problems.push(`${c.label} imports ${crt.join(", ")}`);
+  }
+  return { problems, programs };
+}
+
 // ------------------------------------------------------------------ command line
 
 const USAGE = `usage: node tools/package_checks.mjs paths [--home DIR …] [--user NAME] TARGET …
-       node tools/package_checks.mjs glibc [--max ${GLIBC_FLOOR}] TARGET …`;
+       node tools/package_checks.mjs glibc [--max ${GLIBC_FLOOR}] TARGET …
+       node tools/package_checks.mjs crt [--allow-ucrt NAME …] TARGET …`;
 
 function main(argv) {
   const [cmd, ...rest] = argv;
@@ -422,11 +531,14 @@ function main(argv) {
   const targets = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
-    if (["--home", "--user", "--max"].includes(a) && i + 1 < rest.length) (opts[a] ??= []).push(rest[++i]);
+    if (["--home", "--user", "--max", "--allow-ucrt"].includes(a) && i + 1 < rest.length) (opts[a] ??= []).push(rest[++i]);
     else if (a.startsWith("--")) return console.error(USAGE), 2;
     else targets.push(a);
   }
-  if (!targets.length || !["paths", "glibc"].includes(cmd)) return console.error(USAGE), 2;
+  if (!targets.length || !["paths", "glibc", "crt"].includes(cmd)) return console.error(USAGE), 2;
+  // each command its own options
+  const allowed = { paths: ["--home", "--user"], glibc: ["--max"], crt: ["--allow-ucrt"] }[cmd];
+  if (Object.keys(opts).some((o) => !allowed.includes(o))) return console.error(USAGE), 2;
   try {
     if (cmd === "paths") {
       const homes = opts["--home"] ?? [homedir()];
@@ -437,6 +549,17 @@ function main(argv) {
         return 1;
       }
       console.log(`no build-machine paths: ${files} files, ${members} archive members`);
+    } else if (cmd === "crt") {
+      const { problems, programs } = findCrtImports(targets, { allowUcrt: opts["--allow-ucrt"] ?? [] });
+      if (problems.length) {
+        console.error(`the Visual C++ runtime is not linked in (+crt-static; the packages don't ship it):\n  ${problems.join("\n  ")}`);
+        return 1;
+      }
+      if (!programs) {
+        console.error(`no Windows program in ${targets.join(", ")}`);
+        return 1;
+      }
+      console.log(`no Visual C++ runtime DLL imported: ${programs} Windows programs and libraries`);
     } else {
       const max = opts["--max"]?.[0] ?? GLIBC_FLOOR;
       const { problems, worst, elves } = findNewGlibc(targets, { max });

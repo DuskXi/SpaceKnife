@@ -1,0 +1,10 @@
+# Windows (MSVC): the whole C runtime is linked into every program (+crt-static), so none of them
+# needs the Visual C++ Redistributable (VCRUNTIME140.dll, MSVCP140.dll, the UCRT's
+# api-ms-win-crt-*.dll): neither the installer nor the portable copies ship it (docs/packaging.md
+# §1 「C 运行库静态链接」). Tests and development builds are built the same way.
+#
+# A release build sets CARGO_ENCODED_RUSTFLAGS (tools/package_checks.mjs remappedEnv), and Cargo
+# then skips this table: remappedEnv adds the same flag itself, and
+# `node tools/package_checks.mjs crt` checks every shipped program for the runtime DLLs.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

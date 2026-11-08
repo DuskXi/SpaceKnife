@@ -2,8 +2,12 @@
 //! shared/theme.ts). The window's theme decides the page's `prefers-color-scheme` (tokens.css is
 //! light unless it says dark) and the native UI's; 「跟随系统」 follows the system. The last choice
 //! is kept in `<ui data>/theme.json` so a start is in the right theme from its first frame, before
-//! the backend's settings arrive. Tauri and the file system come in through [`ThemeHost`]
-//! (lib.rs), so this is tested without them.
+//! the backend's settings arrive. The first start after 0.3.4, without a theme.json of its own,
+//! takes the one 0.3.4's Electron app kept ([`electron_theme_file`], [`ThemeKeeper::restore`]),
+//! so a dark-theme user's first window is dark too. Tauri and the file system come in through
+//! [`ThemeHost`] (window.rs), so this is tested without them.
+
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +65,18 @@ pub fn theme_file_text(theme: ThemeSetting) -> String {
     format!("{{\"theme\":\"{}\"}}\n", theme.as_str())
 }
 
+/// Where 0.3.4's Electron app kept its theme.json (the same format): in its userData folder,
+/// `<SPACEKNIFE_HOME>/electron` when a home is set (a portable copy's data folder included), else
+/// `<the system's config folder>/SpaceKnife/electron` (Electron's appData: %APPDATA%,
+/// ~/Library/Application Support, $XDG_CONFIG_HOME or ~/.config). None when neither is known.
+pub fn electron_theme_file(home: Option<&Path>, config_dir: Option<&Path>) -> Option<PathBuf> {
+    let user_data = match home {
+        Some(home) => home.join("electron"),
+        None => config_dir?.join("SpaceKnife").join("electron"),
+    };
+    Some(user_data.join("theme.json"))
+}
+
 /// The window and the file, as the keeper sees them.
 pub trait ThemeHost {
     /// The window's theme (Tauri's `set_theme`: None for 「跟随系统」).
@@ -92,6 +108,19 @@ impl<H: ThemeHost> ThemeKeeper<H> {
             current: theme,
             saved: file_text.map(|_| theme),
         }
+    }
+
+    /// [`ThemeKeeper::new`] for a start: `own` is this app's theme.json (None: there is none),
+    /// `earlier` 0.3.4's Electron app's ([`electron_theme_file`]), which says the theme when there
+    /// is no file of its own yet (the first start after 0.3.4). That file stays as it is; this
+    /// app's own is written at the first setting the page sends.
+    pub fn restore(host: H, own: Option<&str>, earlier: Option<&str>) -> Self {
+        if own.is_some() {
+            return Self::new(host, own);
+        }
+        let mut keeper = Self::new(host, earlier);
+        keeper.saved = None;
+        keeper
     }
 
     /// The setting in force.
@@ -282,6 +311,54 @@ mod tests {
         keeper.host.fail = false;
         keeper.set("dark"); // the same choice: the file does not hold it yet
         assert_eq!(keeper.host().files, ["{\"theme\":\"dark\"}\n"]);
+    }
+
+    #[test]
+    fn the_first_start_after_0_3_4_takes_its_electron_apps_theme() {
+        // 0.3.4 kept {"theme":"dark"}\n in <userData>/theme.json; no file of this app's yet
+        let earlier = "{\"theme\":\"dark\"}\n";
+        let mut keeper = ThemeKeeper::restore(Fake::new(false), None, Some(earlier));
+        assert_eq!(keeper.host().source, ThemeSetting::Dark);
+        assert_eq!(keeper.background(), WINDOW_BG_DARK);
+        // the page's setting (the same theme) writes this app's own file once
+        keeper.set("dark");
+        keeper.set("dark");
+        assert_eq!(keeper.host().files, ["{\"theme\":\"dark\"}\n"]);
+        // this app's own file wins once it is there
+        let keeper = ThemeKeeper::restore(
+            Fake::new(false),
+            Some("{\"theme\":\"light\"}\n"),
+            Some(earlier),
+        );
+        assert_eq!(keeper.host().source, ThemeSetting::Light);
+        // neither: 「跟随系统」
+        let keeper = ThemeKeeper::restore(Fake::new(true), None, None);
+        assert_eq!(keeper.setting(), ThemeSetting::System);
+        assert_eq!(keeper.background(), WINDOW_BG_DARK);
+        let keeper = ThemeKeeper::restore(Fake::new(false), None, Some("garbage"));
+        assert_eq!(keeper.setting(), ThemeSetting::System);
+    }
+
+    #[test]
+    fn the_electron_apps_theme_file_is_where_0_3_4_kept_it() {
+        let home = Path::new("/media/usb/SpaceKnife-0.3.4-portable/data");
+        let config = Path::new("/home/lenny/.config");
+        // a home (a portable copy's data folder, SPACEKNIFE_HOME): <home>/electron
+        assert_eq!(
+            electron_theme_file(Some(home), Some(config)),
+            Some(home.join("electron").join("theme.json"))
+        );
+        // else <appData>/SpaceKnife/electron
+        assert_eq!(
+            electron_theme_file(None, Some(config)),
+            Some(
+                config
+                    .join("SpaceKnife")
+                    .join("electron")
+                    .join("theme.json")
+            )
+        );
+        assert_eq!(electron_theme_file(None, None), None);
     }
 
     #[test]

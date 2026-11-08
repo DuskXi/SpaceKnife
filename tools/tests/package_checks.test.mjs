@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -285,4 +285,153 @@ test("every ELF file of a package needs at most glibc 2.34; other files do not c
   assert.equal(none.status, 1);
   assert.match(none.stderr, /no ELF file/);
   assert.equal(cli("glibc").status, 2);
+});
+
+/** A Windows program (PE32+, or PE32 with `pe32`) whose import table names `dlls` and whose
+ * delay-load table names `delayed`; `oldDelay` writes the delay-load names as virtual addresses, as
+ * Visual C++ 6 did. One section at 0x1000 holds the tables and the names. */
+function pe(dlls, { delayed = [], pe32 = false, oldDelay = false } = {}) {
+  const optSize = pe32 ? 96 + 16 * 8 : 112 + 16 * 8;
+  const imageBase = pe32 ? 0x400000n : 0x140000000n;
+  const RVA = 0x1000;
+  const RAW = 0x400;
+  const delayAt = (dlls.length + 1) * 20;
+  let namesAt = delayAt + (delayed.length + 1) * 32;
+  const body = Buffer.alloc(namesAt + [...dlls, ...delayed].reduce((n, d) => n + d.length + 1, 0) + 16);
+  const nameRva = (dll) => {
+    const rva = RVA + namesAt;
+    body.write(`${dll}\0`, namesAt, "latin1");
+    namesAt += dll.length + 1;
+    return rva;
+  };
+  dlls.forEach((dll, i) => body.writeUInt32LE(nameRva(dll), i * 20 + 12));
+  delayed.forEach((dll, i) => {
+    const rva = nameRva(dll);
+    body.writeUInt32LE(oldDelay ? 0 : 1, delayAt + i * 32);
+    body.writeUInt32LE(oldDelay ? Number(imageBase) + rva : rva, delayAt + i * 32 + 4);
+  });
+  const head = Buffer.alloc(RAW);
+  head.write("MZ", 0, "latin1");
+  head.writeUInt32LE(0x40, 0x3c);
+  head.writeUInt32LE(0x00004550, 0x40);
+  head.writeUInt16LE(pe32 ? 0x14c : 0x8664, 0x44);
+  head.writeUInt16LE(1, 0x46); // one section
+  head.writeUInt16LE(optSize, 0x54);
+  const opt = 0x58;
+  head.writeUInt16LE(pe32 ? 0x10b : 0x20b, opt);
+  if (pe32) head.writeUInt32LE(Number(imageBase), opt + 28);
+  else head.writeBigUInt64LE(imageBase, opt + 24);
+  const dirs = opt + (pe32 ? 96 : 112);
+  head.writeUInt32LE(16, dirs - 4);
+  if (dlls.length) {
+    head.writeUInt32LE(RVA, dirs + 8);
+    head.writeUInt32LE(delayAt, dirs + 12);
+  }
+  if (delayed.length) {
+    head.writeUInt32LE(RVA + delayAt, dirs + 13 * 8);
+    head.writeUInt32LE((delayed.length + 1) * 32, dirs + 13 * 8 + 4);
+  }
+  const sec = opt + optSize;
+  head.write(".idata", sec, "latin1");
+  head.writeUInt32LE(body.length, sec + 8);
+  head.writeUInt32LE(RVA, sec + 12);
+  head.writeUInt32LE(body.length, sec + 16);
+  head.writeUInt32LE(RAW, sec + 20);
+  return Buffer.concat([head, body]);
+}
+
+test("a release build on Windows links the C runtime in, and only there", () => {
+  const winOpts = { home: WIN_HOME, root: "C:\\Users\\lenny\\src\\SpaceKnife", windows: true };
+  assert.deepEqual(checks.releaseFlags(winOpts), [...checks.remapFlags(winOpts), "-Ctarget-feature=+crt-static"]);
+  const env = checks.remappedEnv({ PATH: "C:\\Windows" }, winOpts);
+  assert.deepEqual(env.CARGO_ENCODED_RUSTFLAGS.split("\x1f").slice(-1), ["-Ctarget-feature=+crt-static"]);
+  assert.deepEqual(checks.remappedEnv(env, winOpts), env); // not twice
+  // elsewhere the flag has nothing to do (and on musl it would mean a static program)
+  const posix = checks.remappedEnv({}, { home: HOME, root: "/home/lenny/sk", windows: false });
+  assert.ok(!posix.CARGO_ENCODED_RUSTFLAGS.includes("crt-static"));
+  // .cargo/config.toml asks for the same in every other build (Cargo skips it once the flags are set)
+  const config = readFileSync(fileURLToPath(new URL("../../.cargo/config.toml", import.meta.url)), "utf8");
+  assert.match(config, /\[target\.'cfg\(all\(windows, target_env = "msvc"\)\)'\]\r?\nrustflags = \["-C", "target-feature=\+crt-static"\]/);
+});
+
+test("the import tables of a Windows program are read, the delay-loaded DLLs too", () => {
+  assert.deepEqual(checks.peImports(pe(["KERNEL32.dll", "ntdll.dll"])), ["KERNEL32.dll", "ntdll.dll"]);
+  assert.deepEqual(checks.peImports(pe(["KERNEL32.dll"], { delayed: ["MSVCP140.dll", "user32.dll"] })), ["KERNEL32.dll", "MSVCP140.dll", "user32.dll"]);
+  assert.deepEqual(checks.peImports(pe(["KERNEL32.dll"], { pe32: true, delayed: ["VCRUNTIME140.dll"], oldDelay: true })), ["KERNEL32.dll", "VCRUNTIME140.dll"]);
+  assert.deepEqual(checks.peImports(pe([])), []);
+  // not programs: an ELF file, text that starts with MZ, a program cut off before its PE header
+  assert.equal(checks.peImports(elf("2.17")), null);
+  assert.equal(checks.peImports(Buffer.from("MZ is how this note starts, and it goes on for longer than sixty-four bytes")), null);
+  assert.equal(checks.peImports(pe(["KERNEL32.dll"]).subarray(0, 0x50)), null);
+  // a name outside every section is skipped, not a crash
+  const broken = pe(["KERNEL32.dll"]);
+  broken.writeUInt32LE(0x7fff0000, 0x400 + 12);
+  assert.deepEqual(checks.peImports(broken), []);
+});
+
+test("no Windows program of a package imports the Visual C++ runtime", () => {
+  for (const dll of ["VCRUNTIME140.dll", "vcruntime140_1.dll", "MSVCP140.dll", "msvcp140_atomic_wait.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "ucrtbase.dll", "ucrtbased.dll", "MSVCR120.dll", "VCRUNTIME140D.dll", "concrt140.dll", "vcomp140.dll"]) {
+    assert.ok(checks.CRT_DLL.test(dll), dll);
+  }
+  // Windows' own
+  for (const dll of ["msvcrt.dll", "msvcp_win.dll", "KERNEL32.dll", "api-ms-win-core-synch-l1-2-0.dll", "ucrtbase_clr0400.dll", "bcryptprimitives.dll"]) {
+    assert.ok(!checks.CRT_DLL.test(dll), dll);
+  }
+  const dir = tmp();
+  const pkg = join(dir, "pkg");
+  const good = ["KERNEL32.dll", "ntdll.dll", "WS2_32.dll", "bcryptprimitives.dll"];
+  put(pkg, "SpaceKnife.exe", pe([...good, "msvcrt.dll"]));
+  put(pkg, "SpaceKnife.com", pe(good));
+  put(pkg, "notes.txt", "VCRUNTIME140.dll"); // not a program
+  const name = "SpaceKnife-0.3.5-win-x64-portable";
+  const portable = [
+    [`${name}/spaceknife-cli.exe`, pe(good, { delayed: ["VCRUNTIME140.dll"] })],
+    [`${name}/resources/backend/spaceknife-backend.exe`, pe(["KERNEL32.dll", "api-ms-win-crt-heap-l1-1-0.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "VCRUNTIME140.dll"])],
+  ];
+  put(pkg, "p.zip", zip(portable));
+  const { problems, programs } = checks.findCrtImports([pkg]);
+  assert.equal(programs, 4);
+  assert.deepEqual(problems.map((p) => p.replace(/^.*?pkg\//, "")), [
+    `p.zip › ${name}/spaceknife-cli.exe imports VCRUNTIME140.dll`,
+    `p.zip › ${name}/resources/backend/spaceknife-backend.exe imports api-ms-win-crt-heap-l1-1-0.dll, api-ms-win-crt-runtime-l1-1-0.dll, VCRUNTIME140.dll`,
+  ]);
+
+  const r = cli("crt", pkg);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /spaceknife-cli\.exe imports VCRUNTIME140\.dll/);
+  rmSync(join(pkg, "p.zip"));
+  const ok = cli("crt", pkg);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /2 Windows programs and libraries/);
+  // a folder without any program is the wrong folder, not a pass
+  const none = cli("crt", join(pkg, "notes.txt"));
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /no Windows program/);
+  assert.equal(cli("crt").status, 2);
+  assert.equal(cli("crt", "--max", "2.34", pkg).status, 2);
+  assert.equal(cli("paths", "--allow-ucrt", "x.dll", pkg).status, 2);
+});
+
+test("others' prebuilt files may take the Universal CRT from Windows, never the VC runtime", () => {
+  const dir = tmp();
+  const app = join(dir, "win-unpacked");
+  put(app, "SpaceKnife.exe", pe(["KERNEL32.dll"]));
+  // Electron's DirectX shader compiler takes the UCRT from Windows 10's own
+  put(app, "dxil.dll", pe(["KERNEL32.dll", "api-ms-win-crt-heap-l1-1-0.dll", "api-ms-win-crt-runtime-l1-1-0.dll"]));
+  put(app, "vk_swiftshader.dll", pe(["KERNEL32.dll", "ucrtbase.dll", "VCRUNTIME140.dll"]));
+  assert.equal(checks.findCrtImports([app]).problems.length, 2);
+  const allowed = checks.findCrtImports([app], { allowUcrt: ["DXIL.dll", "vk_swiftshader.dll"] });
+  assert.deepEqual(allowed.problems.map((p) => p.replace(/^.*?win-unpacked\//, "")), ["vk_swiftshader.dll imports VCRUNTIME140.dll"]);
+  const r = cli("crt", "--allow-ucrt", "dxil.dll", app);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /vk_swiftshader\.dll imports ucrtbase\.dll, VCRUNTIME140\.dll/);
+  assert.doesNotMatch(r.stderr, /dxil/);
+  // only by its own name: a program of ours named otherwise is checked in full
+  put(app, "vk_swiftshader.dll", pe(["KERNEL32.dll"]));
+  put(app, "spaceknife-cli.exe", pe(["KERNEL32.dll", "api-ms-win-crt-heap-l1-1-0.dll"]));
+  const ours = cli("crt", "--allow-ucrt", "dxil.dll", app);
+  assert.equal(ours.status, 1);
+  assert.match(ours.stderr, /spaceknife-cli\.exe imports api-ms-win-crt-heap-l1-1-0\.dll/);
+  rmSync(join(app, "spaceknife-cli.exe"));
+  assert.equal(cli("crt", "--allow-ucrt", "dxil.dll", app).status, 0);
 });

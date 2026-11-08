@@ -5,6 +5,9 @@
     "targets": [
       "app",
       "dmg"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }

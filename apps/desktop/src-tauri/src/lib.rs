@@ -8,12 +8,14 @@ use std::time::Duration;
 pub mod backend;
 pub mod cli;
 pub mod commands;
+pub mod console;
 pub mod events;
 pub mod files;
 pub mod install;
 pub mod links;
 pub mod navigation;
 pub mod portable;
+pub mod startup_check;
 pub mod terminal;
 pub mod text;
 pub mod theme;
@@ -80,6 +82,7 @@ pub fn run() {
             commands::dialog_save_file,
         ])
         .setup(|app| {
+            console::set_app(app.handle());
             window::create(app.handle())?;
             backend::start(app.handle());
             Ok(())

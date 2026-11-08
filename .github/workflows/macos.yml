@@ -34,6 +34,9 @@ on:
       - packaging/**
       - apps/desktop/scripts/**
       - tools/package_checks.mjs
+      - apps/desktop/src-tauri/Info.plist
+      - apps/desktop/src-tauri/src/main.rs
+      - apps/desktop/src-tauri/src/startup_check.rs
       - apps/desktop/src-tauri/tauri*.json
       - apps/desktop/src-tauri/src/install.rs
       - apps/desktop/src-tauri/src/portable.rs
@@ -142,12 +145,22 @@ jobs:
 
       # what 0.3.x copies need of it: SpaceKnife.app/Contents/MacOS/SpaceKnife, and the swap helper
       # (spaceknife-cli, signed with the bundle) answering --apply-update
+      # Info.plist: the reasons the folder prompts show, as 0.3.4's, and the macOS 14 floor
+      # the program answering the helper's --startup-check (it can start here)
       - name: The layout 0.3.x copies update to
         run: |
           set -euo pipefail
           app=$(ls -d target/portable-test/*/SpaceKnife.app)
           [ -x "$app/Contents/MacOS/SpaceKnife" ] || { echo "::error::no Contents/MacOS/SpaceKnife"; exit 1; }
           [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" = SpaceKnife ]
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist")" = 14.0 ]
+          for k in NSDesktopFolderUsageDescription NSDocumentsFolderUsageDescription NSDownloadsFolderUsageDescription NSRemovableVolumesUsageDescription NSNetworkVolumesUsageDescription; do
+            v=$(/usr/libexec/PlistBuddy -c "Print :$k" "$app/Contents/Info.plist") || { echo "::error::no $k in Info.plist"; exit 1; }
+            echo "$k: $v"
+          done
+          said=$("$app/Contents/MacOS/SpaceKnife" --startup-check)
+          echo "SpaceKnife --startup-check: $said"
+          echo "$said" | grep -q '"ok":true' || { echo "::error::SpaceKnife does not answer the swap helper's --startup-check"; exit 1; }
           helper="$app/Contents/Resources/backend/spaceknife-backend"
           [ -x "$helper" ] || { echo "::error::no executable Contents/Resources/backend/spaceknife-backend"; exit 1; }
           codesign --verify --strict "$helper"

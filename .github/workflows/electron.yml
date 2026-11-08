@@ -148,7 +148,11 @@ jobs:
           sha256sum *.exe *.AppImage *.rpm | tee "SHA256SUMS-installers-electron-${{ matrix.target }}.txt"
 
       # what the installers install: the NSIS installer unpacked with 7-Zip, the rpm through
-      # rpm2cpio, the AppImage through its own --appimage-extract
+      # rpm2cpio, the AppImage through its own --appimage-extract. On Windows no program the
+      # installer holds or installs (the app is the 7z archive $PLUGINSDIR/app-64.7z in it) may
+      # import the Visual C++ runtime, which it doesn't install (+crt-static; Electron's own programs
+      # have it linked in as well, except that its dxil.dll takes the Universal CRT from Windows 10's
+      # own)
       - name: Check the files
         run: |
           set -euo pipefail
@@ -159,6 +163,14 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then
             for f in target/electron/*-Setup-x64.exe; do 7z x -y -bd -o"$u/nsis" "$f" > /dev/null; done
             node tools/package_checks.mjs paths "$u"
+            apps=("$u"/nsis/\$PLUGINSDIR/app-*.7z)
+            [ ${#apps[@]} -gt 0 ] || { echo "::error::no \$PLUGINSDIR/app-*.7z in the installer"; ls -R "$u/nsis"; exit 1; }
+            a=target/electron-app && rm -rf "$a"
+            for f in "${apps[@]}"; do 7z x -y -bd -o"$a" "$f" > /dev/null; done
+            for p in SpaceKnife.exe spaceknife-cli.exe SpaceKnife.com; do
+              [ -f "$a/$p" ] || { echo "::error::the installer's app has no $p"; ls "$a"; exit 1; }
+            done
+            node tools/package_checks.mjs crt --allow-ucrt dxil.dll "$u" "$a"
           else
             sudo apt-get install -y rpm2cpio cpio
             for f in target/electron/*.rpm; do mkdir -p "$u/rpm" && (cd "$u/rpm" && rpm2cpio "$root/$f" | cpio -idm --quiet); done
