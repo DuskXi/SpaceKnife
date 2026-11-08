@@ -78,6 +78,7 @@ export interface Content {
     rpm: { title: string; note: string };
     appimage: { title: string; note: string };
     portableLinux: { title: string; note: string };
+    portableLinuxTauri: { title: string; note: string };
     button: string;
     sha: string;
     copy: string;
@@ -172,7 +173,8 @@ export const content: Record<Lang, Content> = {
       deb: { title: "Ubuntu / Debian", note: "Ubuntu 22.04+, Debian 12+ and derivatives." },
       rpm: { title: "RHEL / Fedora", note: "RHEL 9+, Rocky, Alma, Fedora and derivatives." },
       appimage: { title: "AppImage", note: "Any x64 Linux with glibc 2.34+. Needs FUSE 2." },
-      portableLinux: { title: "Linux · portable", note: "x64, glibc 2.34+. Extract anywhere and run, no FUSE needed; data stays next to it." },
+      portableLinux: { title: "Linux · portable", note: "x64, glibc 2.34+, RHEL 9 too. Extract anywhere and run, no FUSE needed; data stays next to it." },
+      portableLinuxTauri: { title: "Linux · portable, light", note: "x64, a much smaller download that uses the system's WebKitGTK 4.1 (Ubuntu 22.04+, Debian 12+, Fedora). Extract and run; data stays next to it." },
       button: "Download",
       sha: "SHA-256",
       copy: "Copy",
@@ -292,7 +294,8 @@ export const content: Record<Lang, Content> = {
       deb: { title: "Ubuntu / Debian", note: "Ubuntu 22.04+、Debian 12+ 及衍生版。" },
       rpm: { title: "RHEL / Fedora", note: "RHEL 9+、Rocky、Alma、Fedora 及衍生版。" },
       appimage: { title: "AppImage", note: "任意 x64 Linux（glibc 2.34+），需要 FUSE 2。" },
-      portableLinux: { title: "Linux · 便携版", note: "x64，glibc 2.34+。解压后直接运行，不需要 FUSE；数据存在旁边。" },
+      portableLinux: { title: "Linux · 便携版", note: "x64，glibc 2.34+，RHEL 9 也能用。解压后直接运行，不需要 FUSE；数据存在旁边。" },
+      portableLinuxTauri: { title: "Linux · 轻量便携版", note: "x64，下载小得多，用系统自带的 WebKitGTK 4.1（Ubuntu 22.04+、Debian 12+、Fedora）。解压即用，数据存在旁边。" },
       button: "下载",
       sha: "SHA-256",
       copy: "复制",

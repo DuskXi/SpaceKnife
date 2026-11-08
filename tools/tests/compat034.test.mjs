@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { CONTRACT, acceptedBy034, judge, loadUpdateTs, portableLayoutProblems, wantName } from "../compat034.mjs";
+import { CONTRACT, acceptedBy034, judge, loadUpdateTs, pattern034, portableLayoutProblems, wantName } from "../compat034.mjs";
+import { expected } from "../release.mjs";
 
 const V = "0.3.5";
 const mod = await loadUpdateTs(readFileSync(new URL("./fixtures/v0.3.4-update.ts", import.meta.url), "utf8"));
@@ -87,4 +88,41 @@ test("portable archives are laid out as 0.3.4's swap needs them", () => {
   assert.deepEqual(portableLayoutProblems(`${mtop}.zip`, mac), []);
   const tauriName = mac.map((e) => ({ ...e, name: e.name.replace("MacOS/SpaceKnife", "MacOS/spaceknife") }));
   assert.match(portableLayoutProblems(`${mtop}.zip`, tauriName).join("\n"), /Contents\/MacOS\/SpaceKnife/);
+});
+
+test("0.3.4's own patterns never take a file of a kind of install 0.3.4 did not have", () => {
+  // v0.3.4 update.py pick_asset: re.escape(template) with {v} as [0-9A-Za-z.+~_-]+, fullmatch,
+  // case-sensitive, for every template of every kind; the Tauri app's Linux portable copy must
+  // stay out of reach of every 0.3.4 copy (one on RHEL 9 has no WebKitGTK 4.1 to run it)
+  const fresh = expected().filter((e) => e.since);
+  assert.ok(fresh.length >= 2);
+  for (const e of fresh) {
+    for (const v of [V, "0.4.0-beta.1", "0.4.0~beta.1", "1.0.0+build.7", "10.20.30"]) {
+      const name = e.template.replace("{v}", v);
+      for (const [kind, , , template] of CONTRACT) assert.ok(!pattern034(template).test(name), `0.3.4's ${kind} ${template} takes ${name}`);
+    }
+  }
+  // and 0.3.4's window would not run it either, were it in its updates folder
+  for (const a of ["x64", "arm64"]) {
+    const name = `SpaceKnife-${V}-linux-${a}-tauri.tar.gz`;
+    assert.equal(acceptedBy034(mod, name, "portable", "linux"), "updateNotAnUpdate", name);
+    assert.equal(mod.portableVersion(name), null);
+  }
+  // the pattern is 0.3.4's: it takes its own names, also with a version spelled otherwise
+  assert.ok(pattern034("SpaceKnife-{v}-linux-x64-portable.tar.gz").test(`SpaceKnife-${V}-linux-x64-portable.tar.gz`));
+  assert.ok(pattern034("spaceknife_{v}_amd64.deb").test("spaceknife_0.4.0~beta.1_amd64.deb"));
+  assert.ok(!pattern034("SpaceKnife-{v}-linux-x64-portable.tar.gz").test(`spaceknife-${V}-linux-x64-portable.tar.gz`));
+  assert.ok(!pattern034("SpaceKnife-{v}-linux-x64-portable.tar.gz").test(`SpaceKnife-${V}-linux-x64-portable.tar.gz.sig`));
+});
+
+test("a file of a kind 0.3.4 did not have, taken by a 0.3.4 install, is a problem", () => {
+  const tauri = `SpaceKnife-${V}-linux-x64-tauri.tar.gz`;
+  // what tools/compat034_check.py says 0.3.4's pick_asset takes from a release with just that file
+  const ok = { ...goodResult(), takers: { [tauri]: [], [`SpaceKnife-${V}-linux-x64-portable.tar.gz`]: ["portable linux/x86_64"] } };
+  assert.deepEqual(judge(ok, V, mod, null), []);
+  const taken = { ...goodResult(), takers: { [tauri]: ["portable linux/x86_64"] } };
+  assert.match(judge(taken, V, mod, null).join("\n"), /linux-x64-tauri\.tar\.gz.*0\.3\.4.*portable linux\/x86_64/);
+  const picked = goodResult();
+  picked.installs.find((i) => i.kind === "portable" && i.machine === "x86_64" && i.system === "linux").asset = tauri;
+  assert.ok(judge(picked, V, mod, null).some((p) => p.includes(tauri) && p.includes("0.3.4")));
 });

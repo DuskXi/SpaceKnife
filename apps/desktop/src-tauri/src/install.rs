@@ -740,8 +740,9 @@ mod tests {
 
     #[test]
     fn knows_the_release_files_of_the_tauri_app() {
-        // 0.3.4's names (sk_core::update::asset_templates): the portable copies, the deb and the
-        // disk images are the Tauri app's
+        // 0.3.4's names (sk_core::update::asset_templates): the Windows and macOS portable copies,
+        // the deb and the disk images are the Tauri app's; its Linux portable copy has a name of
+        // its own
         for (name, kind, platform, machine) in [
             (
                 "SpaceKnife-0.4.1-win-x64-portable.zip",
@@ -756,10 +757,16 @@ mod tests {
                 "arm64",
             ),
             (
-                "SpaceKnife-0.4.1-linux-x64-portable.tar.gz",
+                "SpaceKnife-0.4.1-linux-x64-tauri.tar.gz",
                 "portable",
                 "linux",
                 "x64",
+            ),
+            (
+                "SpaceKnife-0.4.1-linux-arm64-tauri.tar.gz",
+                "portable",
+                "linux",
+                "arm64",
             ),
             ("spaceknife_0.4.1_amd64.deb", "deb", "linux", "x64"),
             ("spaceknife_0.4.1~beta.1_amd64.deb", "deb", "linux", "x64"),
@@ -769,8 +776,15 @@ mod tests {
             assert!(is_release_file(name, kind, platform, machine), "{name}");
         }
         for (name, kind, platform, machine) in [
-            // the Windows installer, the rpm and the AppImage come from the Electron shell
+            // the Windows installer, the rpm, the AppImage and the Linux portable copy under 0.3.4's
+            // name come from the Electron shell
             ("SpaceKnife-0.4.1-Setup-x64.exe", "nsis", "windows", "x64"),
+            (
+                "SpaceKnife-0.4.1-linux-x64-portable.tar.gz",
+                "portable",
+                "linux",
+                "x64",
+            ),
             ("spaceknife-0.4.1.x86_64.rpm", "rpm", "linux", "x64"),
             (
                 "SpaceKnife-0.4.1-x86_64.AppImage",

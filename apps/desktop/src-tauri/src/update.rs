@@ -30,18 +30,20 @@ fn is_version(v: &str) -> bool {
     core_ok && tail_ok
 }
 
-/// The portable archive names of a platform (`std::env::consts::OS`): zip on Windows and macOS,
-/// tar.gz on Linux; x64 or arm64.
+/// The names of this app's portable archives on a platform (`std::env::consts::OS`): zip on Windows
+/// and macOS, tar.gz on Linux; x64 or arm64. On Linux 0.3.4's name
+/// (`-linux-<arch>-portable.tar.gz`) is the Electron shell's portable copy, which 0.3.4's copies
+/// update to; this app's is `-linux-<arch>-tauri.tar.gz` (sk_core::update::asset_templates).
 fn suffixes(platform: &str) -> Vec<String> {
-    let (os, ext) = match platform {
-        "windows" => ("win", "zip"),
-        "macos" => ("mac", "zip"),
-        "linux" => ("linux", "tar.gz"),
+    let (os, kind, ext) = match platform {
+        "windows" => ("win", "portable", "zip"),
+        "macos" => ("mac", "portable", "zip"),
+        "linux" => ("linux", "tauri", "tar.gz"),
         _ => return Vec::new(),
     };
     ARCHES
         .iter()
-        .map(|arch| format!("-{os}-{arch}-portable.{ext}"))
+        .map(|arch| format!("-{os}-{arch}-{kind}.{ext}"))
         .collect()
 }
 
@@ -102,9 +104,14 @@ mod tests {
             portable_version("SpaceKnife-0.4.0-win-arm64-portable.zip").as_deref(),
             Some("0.4.0")
         );
+        // Linux: the Tauri app's own archive; 0.3.4's name is the Electron shell's portable copy
         assert_eq!(
-            portable_version("SpaceKnife-0.4.10-beta.1-linux-arm64-portable.tar.gz").as_deref(),
+            portable_version("SpaceKnife-0.4.10-beta.1-linux-arm64-tauri.tar.gz").as_deref(),
             Some("0.4.10-beta.1")
+        );
+        assert_eq!(
+            portable_version("SpaceKnife-0.4.10-beta.1-linux-arm64-portable.tar.gz"),
+            None
         );
         assert_eq!(
             portable_version("SpaceKnife-0.4.0-mac-arm64-portable.zip").as_deref(),
@@ -115,7 +122,7 @@ mod tests {
             None
         );
         assert_eq!(
-            portable_version("SpaceKnife-0.4.0-linux-x64-portable.zip"),
+            portable_version("SpaceKnife-0.4.0-linux-x64-tauri.zip"),
             None
         );
         assert_eq!(portable_version("SpaceKnife-0.4.0-Setup-x64.exe"), None);
@@ -132,9 +139,13 @@ mod tests {
             Some("0.4.0")
         );
         assert_eq!(
-            portable_version_for("SpaceKnife-0.4.0-linux-arm64-portable.tar.gz", "linux")
-                .as_deref(),
+            portable_version_for("SpaceKnife-0.4.0-linux-arm64-tauri.tar.gz", "linux").as_deref(),
             Some("0.4.0")
+        );
+        // the Electron shell's portable copy (0.3.4's name): not this app's update
+        assert_eq!(
+            portable_version_for("SpaceKnife-0.4.0-linux-arm64-portable.tar.gz", "linux"),
+            None
         );
         assert_eq!(
             portable_version_for("SpaceKnife-0.4.0-mac-x64-portable.zip", "macos").as_deref(),
@@ -146,7 +157,7 @@ mod tests {
             None
         );
         assert_eq!(
-            portable_version_for("SpaceKnife-0.4.0-linux-riscv64-portable.tar.gz", "linux"),
+            portable_version_for("SpaceKnife-0.4.0-linux-riscv64-tauri.tar.gz", "linux"),
             None
         );
     }
@@ -171,11 +182,11 @@ mod tests {
         );
         assert_eq!(
             swap_helper(
-                "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable/",
+                "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-tauri/",
                 "linux",
                 "spaceknife"
             ),
-            "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable/spaceknife"
+            "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-tauri/spaceknife"
         );
     }
 

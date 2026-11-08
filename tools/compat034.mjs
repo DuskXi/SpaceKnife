@@ -22,7 +22,10 @@
 //    at the top, holding the program under the name 0.3.4 runs and the swap helper where
 //    update.ts swapHelper looks (executable on Linux).
 // Every file of the release that someone installs (tools/release.mjs expected) is picked by some
-// kind of install. Exit status 1 with the problems listed.
+// kind of install — except a file of a kind of install 0.3.4 did not have (expected `since`: the
+// Tauri app's Linux portable copy), which no 0.3.4 install may take, neither among the release's
+// files nor alone in a release (compat034_check.py `takers`: 0.3.4's pick_asset on a release with
+// just that file). Exit status 1 with the problems listed.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -51,6 +54,15 @@ export const CONTRACT = [
   ["dmg", "darwin", "arm64", "SpaceKnife-{v}-mac-arm64.dmg"],
   ["dmg", "darwin", "x86_64", "SpaceKnife-{v}-mac-x64.dmg"],
 ];
+
+/** 0.3.4's pattern for a template, as its pick_asset builds and uses it (v0.3.4 update.py:
+ * `re.compile(re.escape(template).replace(re.escape("{v}"), _V_SLOT))`, `fullmatch`, with
+ * `_V_SLOT = r"[0-9A-Za-z.+~_-]+"`, case-sensitive). The Python half runs 0.3.4's own code
+ * (compat034_check.py takers); this one lets the unit tests ask the same question offline. */
+export function pattern034(template) {
+  const escaped = template.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&");
+  return new RegExp(`^${escaped.replace("\\{v\\}", "[0-9A-Za-z.+~_-]+")}$`);
+}
 
 /** deb and rpm write a pre-release part with ~ (v0.3.4 tools/release.py deb_version). */
 export const wantName = (kind, template, version) => template.replace("{v}", kind === "deb" || kind === "rpm" ? version.replaceAll("-", "~") : version);
@@ -141,7 +153,14 @@ export function judge(result, version, mod, files) {
   for (const e of expected()) {
     if (!e.sums) continue; // the .zsync: AppImageUpdate's, not the app's
     const name = wantName(e.template.includes(".deb") ? "deb" : e.template.includes(".rpm") ? "rpm" : "", e.template, version);
-    if (!picked.has(name)) problems.push(`${name} is published but no 0.3.4 install picks it`);
+    if (e.since) {
+      // a kind of install 0.3.4 did not have (the Tauri app's Linux portable copy): no 0.3.4 copy
+      // may take it, in this release or alone in one (compat034_check.py takers: 0.3.4's own
+      // pick_asset on a release that has only this file)
+      if (picked.has(name)) problems.push(`${name} (new in ${e.since}) is picked by a 0.3.4 install`);
+      const takers = result.takers?.[name] ?? [];
+      if (takers.length) problems.push(`${name} (new in ${e.since}) would be taken by 0.3.4: ${takers.join(", ")}`);
+    } else if (!picked.has(name)) problems.push(`${name} is published but no 0.3.4 install picks it`);
   }
   return problems;
 }
