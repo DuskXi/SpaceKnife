@@ -136,7 +136,9 @@ browser. Differences from Electron:
   the portable swap through `--apply-update`, AppImage replace, dmg / deb / rpm opened).
 - `backend()`: the server runs in this process (`src-tauri/src/backend.rs`, `sk_server::start` on a
   random loopback port with a fresh token); "failed" carries the reason, "exited" when it stops on
-  its own. `SPACEKNIFE_READY_FILE=<path>` writes `{url, token, pid}` there (tests, demos).
+  its own. `SPACEKNIFE_READY_FILE=<path>` writes `{url, token, pid}` there once (tests, demos, the
+  portable swap watching a new version); `main.rs` takes the variable out of the environment first,
+  so nothing the app starts inherits it.
 
 `lib/host.ts` (`inBrowser`, `serverName`) is as before.
 

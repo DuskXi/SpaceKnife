@@ -4,7 +4,7 @@
 
 ## 1. 启动与连接
 
-桌面应用在自己的进程里启动后端：`apps/desktop/src-tauri/src/backend.rs` 调用 `sk_server::start`，在随机的回环端口上监听，每次启动生成新的 token，直接交给窗口里的界面（没有子进程、没有 ready 行）；设了 `SPACEKNIFE_READY_FILE=<路径>` 时把 `{url, token, pid}` 写进那个文件（测试、演示）。
+桌面应用在自己的进程里启动后端：`apps/desktop/src-tauri/src/backend.rs` 调用 `sk_server::start`，在随机的回环端口上监听，每次启动生成新的 token，直接交给窗口里的界面（没有子进程、没有 ready 行）；设了 `SPACEKNIFE_READY_FILE=<路径>` 时把 `{url, token, pid}` 写进那个文件一次（测试、演示、便携版的替换助手确认新版本已启动；外壳启动时就把这个变量从自己的环境里拿掉，它启动的程序不会继承，见 [packaging.md](packaging.md) 第 2 节）。
 
 其他启动方（测试、脚本、别的客户端）以子进程方式运行独立的后端：
 

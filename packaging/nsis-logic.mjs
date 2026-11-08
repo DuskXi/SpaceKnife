@@ -2,14 +2,20 @@
 // without installing anything: packaging/nsis-logic/logic-test.nsi is compiled with the NSIS of
 // Tauri's bundler and run once per case — 0.3.4's and Tauri's command lines (what each flag turns
 // on, the elevated copy's arguments), the folder guard (never the data folder, never a system
-// folder), and the staging of the new files (SkMakeStage / SkCheckStaged / SkPlaceAll /
-// SkDropStage) with real files in a temporary folder: a new folder renamed into place in one go,
-// an update in place file by file (a stale interface file gone, a file of the user's kept), an
-// incomplete staging that stops with nothing changed, a held file that is reported, a parent that
-// takes no folder (staged elsewhere and copied), a leftover staging folder, a folder that is not
-// a staging folder never removed — and that the app the installer starts gets its environment
-// (cmd.exe stands in for it: on your own desktop run this from packaging/hidden-desktop.ps1, so
-// its console window stays out of sight). Windows only; it writes in a temporary folder only.
+// folder), the folder's name (\SpaceKnife added as 0.3.4 did) and choice (/D= in either scope),
+// and the staging of the new files (SkMakeStage / SkCheckStaged / SkPlaceAll / SkDropStage) with
+// real files in a temporary folder: a new folder renamed into place in one go (and kept as it is
+// when a file went missing after that), an update in place file by file (the files the earlier
+// build listed gone, the user's kept), an incomplete staging that stops with nothing changed, a
+// held file that is reported, a parent that takes no folder (staged elsewhere and copied), a
+// leftover staging folder (emptied by name only), a folder that is not a staging folder never
+// removed; the list of installed files (SkWriteManifest / SkRemoveListed: nothing off the list,
+// nothing outside the folder), 0.3.4's own files (SkRemove034Files) and when its uninstaller may
+// run (SkOldUninstallerUse), the WebView2 minimum (SkWebView2Minimum, with stand-ins for reading
+// and updating the runtime), shortcuts (.lnk files in the sandbox: SkMigrateShortcut's target and
+// AppUserModelID) — and that the app the installer starts gets its environment (cmd.exe stands in
+// for it: on your own desktop run this from packaging/hidden-desktop.ps1, so its console window
+// stays out of sight). Windows only; it writes in a temporary folder only, never the registry.
 //
 //   node packaging/nsis-logic.mjs [--makensis PATH] [--utils PATH] [--helpers PATH]
 //
