@@ -2,8 +2,10 @@
 //! how this copy was installed — which decides the release file the backend downloads — and the
 //! update card's two buttons (app/shared/install.ts says what each does per kind of install).
 //!
-//! - Windows installer (Tauri's NSIS bundle, `uninstall.exe` next to the program): 「无缝更新」 runs
-//!   it silently and it starts the new version; the classic way opens its pages. SpaceKnife quits.
+//! - Windows installer (Tauri's NSIS bundle with the forked template, src-tauri/windows;
+//!   `uninstall.exe` next to the program): 「无缝更新」 runs it silently with 0.3.4's arguments
+//!   ([`nsis_update_args`]) and it starts the new version; the classic way opens its pages.
+//!   SpaceKnife quits.
 //! - Portable copy (a `data` folder next to the program): the archive is unpacked in the updates
 //!   folder, a plan is written, and *the new version's* program swaps the files once this one has
 //!   quit (`--apply-update <plan>`, sk_core::update::swap; main.rs). The classic way shows the file.
@@ -227,11 +229,42 @@ pub fn install_refusal(
     (!is_release_file(&name, kind, platform, machine)).then_some(TextKey::UpdateNotAnUpdate)
 }
 
-/// The Windows installer's arguments for a silent update in place (Tauri's NSIS template): `/S` no
-/// pages, `/UPDATE` an update of the installed copy (its shortcuts stay), `/R` start the app
-/// afterwards, `/ARGS` its arguments.
-pub fn nsis_update_args() -> Vec<&'static str> {
-    vec!["/S", "/UPDATE", "/R", "/ARGS", "--updated"]
+/// The Windows installer's arguments for a silent update in place: exactly 0.3.4's (v0.3.4
+/// apps/electron/src/main/update.ts nsisUpdateArgs, electron-builder's own flags), so that every
+/// version starts the next installer the same way and the forked NSIS template
+/// (src-tauri/windows/spaceknife.nsh SkParseFlags) has one contract to keep: `--updated` keeps the
+/// data, the shortcuts and the folder and skips the pages, `/S` silent, `--force-run` starts the
+/// new version afterwards (with `--updated`). The scope only where the folder makes it plain —
+/// under Program Files `/allusers`, under LOCALAPPDATA `/currentuser`, elsewhere none (the
+/// installer reads it from the registry). `env` reads the environment.
+pub fn nsis_update_args(exe: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Vec<String> {
+    let mut args = vec!["--updated".to_owned(), "/S".into(), "--force-run".into()];
+    let dir = exe.parent().unwrap_or(exe);
+    let within = |var: &str| env(var).is_some_and(|root| path_within(Path::new(&root), dir));
+    if ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
+        .iter()
+        .any(|v| within(v))
+    {
+        args.push("/allusers".into());
+    } else if within("LOCALAPPDATA") {
+        args.push("/currentuser".into());
+    }
+    args
+}
+
+/// Whether `path` lies inside `root` (not `root` itself), as Windows compares paths: without case,
+/// `/` as `\`, no trailing separator, no `\\?\` prefix.
+fn path_within(root: &Path, path: &Path) -> bool {
+    let norm = |p: &Path| {
+        let s = p.to_string_lossy().replace('/', "\\").to_lowercase();
+        let s = s.strip_prefix("\\\\?\\").unwrap_or(&s).to_owned();
+        s.trim_end_matches('\\').to_owned()
+    };
+    let (root, path) = (norm(root), norm(path));
+    !root.is_empty()
+        && path.len() > root.len() + 1
+        && path.starts_with(&root)
+        && path.as_bytes()[root.len()] == b'\\'
 }
 
 /// The plan file for the new version's `--apply-update <plan>` (sk_core::update::swap::Plan,
@@ -284,7 +317,13 @@ pub fn install_update(app: &AppHandle, file: &Path, how: &str) -> String {
     let failed =
         |e: &dyn std::fmt::Display| mt(TextKey::UpdateStartFailed, &[("error", &e.to_string())]);
     match step {
-        Some(Step::Silent) => restart_into(app, || launch(file, &nsis_update_args())),
+        Some(Step::Silent) => {
+            let exe = std::env::current_exe().unwrap_or_default();
+            let args = nsis_update_args(&exe, &|k| std::env::var_os(k));
+            tracing::info!("[update] the installer's arguments: {}", args.join(" "));
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            restart_into(app, || launch(file, &args))
+        }
         // the installer with its pages upgrades in place; SpaceKnife is gone before it gets far
         Some(Step::Wizard) => restart_into(app, || launch(file, &[])),
         Some(Step::Swap) => {
@@ -595,6 +634,62 @@ fn unpack(file: &Path, into: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn starts_the_installer_as_0_3_4_does() {
+        // v0.3.4 apps/electron/src/main/update.ts nsisUpdateArgs: every version starts the next
+        // installer with the same arguments, and the forked template reads them
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                vars.iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| OsString::from(*v))
+            }
+        };
+        let windows = env(&[
+            ("ProgramFiles", "C:\\Program Files"),
+            ("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+            ("ProgramW6432", "C:\\Program Files"),
+            ("LOCALAPPDATA", "C:\\Users\\lenny\\AppData\\Local"),
+        ]);
+        let args = |exe: &str| nsis_update_args(Path::new(exe), &windows);
+        assert_eq!(
+            args("C:\\Users\\lenny\\AppData\\Local\\Programs\\SpaceKnife\\SpaceKnife.exe"),
+            ["--updated", "/S", "--force-run", "/currentuser"]
+        );
+        assert_eq!(
+            args("C:\\Program Files\\SpaceKnife\\SpaceKnife.exe"),
+            ["--updated", "/S", "--force-run", "/allusers"]
+        );
+        // case, the 32-bit folder, a forward slash
+        assert_eq!(
+            args("c:\\program files (x86)\\SpaceKnife\\SpaceKnife.exe"),
+            ["--updated", "/S", "--force-run", "/allusers"]
+        );
+        assert_eq!(
+            args("C:/Users/lenny/AppData/Local/Programs/SpaceKnife/SpaceKnife.exe"),
+            ["--updated", "/S", "--force-run", "/currentuser"]
+        );
+        // a folder of the user's choosing: no scope, the installer reads it from the registry
+        assert_eq!(
+            args("D:\\Apps\\SpaceKnife\\SpaceKnife.exe"),
+            ["--updated", "/S", "--force-run"]
+        );
+        // a name that only starts like Program Files is not in it
+        assert_eq!(
+            args("C:\\Program Files Extra\\SpaceKnife\\SpaceKnife.exe"),
+            ["--updated", "/S", "--force-run"]
+        );
+        // nothing known: no scope
+        let none = env(&[]);
+        assert_eq!(
+            nsis_update_args(
+                Path::new("C:\\Program Files\\SpaceKnife\\SpaceKnife.exe"),
+                &none
+            ),
+            ["--updated", "/S", "--force-run"]
+        );
+    }
+
     fn kind(exe: &str, platform: &str, env: &[(&str, &str)], files: &[&str]) -> &'static str {
         let env: Vec<(String, String)> = env
             .iter()
@@ -740,9 +835,11 @@ mod tests {
 
     #[test]
     fn knows_the_release_files_of_the_tauri_app() {
-        // 0.3.4's names (sk_core::update::asset_templates): the portable copies, the deb and the
-        // disk images are the Tauri app's
+        // 0.3.4's names (sk_core::update::asset_templates): the Windows installer, the portable
+        // copies, the deb and the disk images are the Tauri app's
         for (name, kind, platform, machine) in [
+            ("SpaceKnife-0.4.1-Setup-x64.exe", "nsis", "windows", "x64"),
+            ("SpaceKnife-0.4.1-Setup-x64.exe", "nsis", "windows", "arm64"),
             (
                 "SpaceKnife-0.4.1-win-x64-portable.zip",
                 "portable",
@@ -769,8 +866,7 @@ mod tests {
             assert!(is_release_file(name, kind, platform, machine), "{name}");
         }
         for (name, kind, platform, machine) in [
-            // the Windows installer, the rpm and the AppImage come from the Electron shell
-            ("SpaceKnife-0.4.1-Setup-x64.exe", "nsis", "windows", "x64"),
+            // the rpm and the AppImage come from the Electron shell
             ("spaceknife-0.4.1.x86_64.rpm", "rpm", "linux", "x64"),
             (
                 "SpaceKnife-0.4.1-x86_64.AppImage",
@@ -779,6 +875,13 @@ mod tests {
                 "x64",
             ),
             // the names Tauri's bundler gives its files are not release files
+            ("SpaceKnife_0.4.1_x64-setup.exe", "nsis", "windows", "x64"),
+            (
+                "SpaceKnife-0.4.1-Setup-x64.exe",
+                "portable",
+                "windows",
+                "x64",
+            ),
             ("SpaceKnife_0.4.1_amd64.deb", "deb", "linux", "x64"),
             ("SpaceKnife_0.4.1_aarch64.dmg", "dmg", "macos", "arm64"),
             // another processor's disk image, another kind's file, odd versions
@@ -829,6 +932,14 @@ mod tests {
         assert_eq!(
             install_refusal(&good, "dev", &updates, os, "x64"),
             Some(TextKey::UpdateNoInstall)
+        );
+        // the Windows installer's own update: the release's setup file (Tauri's installer)
+        let setup = updates.join("SpaceKnife-0.4.1-Setup-x64.exe");
+        std::fs::write(&setup, "x").unwrap();
+        assert_eq!(install_refusal(&setup, "nsis", &updates, os, "x64"), None);
+        assert_eq!(
+            install_refusal(&good, "nsis", &updates, os, "x64"),
+            Some(TextKey::UpdateNotAnUpdate)
         );
     }
 

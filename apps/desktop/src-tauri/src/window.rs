@@ -20,6 +20,31 @@ use crate::theme::{ThemeHost, ThemeKeeper, ThemeSetting};
 
 pub const MAIN: &str = "main";
 
+/// The AppUserModelID of the process, the identifier (tauri.conf.json): what the installer's
+/// shortcuts carry (0.3.4's electron-builder ones and the forked NSIS template's, utils.nsh
+/// SetLnkAppUserModelId), and what 0.3.4's Electron app set (app.setAppUserModelId). Without it
+/// Windows derives an ID from the program's path, and the running window stands apart from the
+/// pinned taskbar icon. Tauri, tao and wry set none.
+pub const APP_USER_MODEL_ID: &str = "io.github.duskxi.spaceknife";
+
+/// Give the process [`APP_USER_MODEL_ID`]: before the first window (lib.rs run), since a window
+/// takes its ID when it is created. Windows only; no-op elsewhere.
+pub fn set_app_user_model_id() {
+    #[cfg(windows)]
+    {
+        #[link(name = "shell32")]
+        unsafe extern "system" {
+            fn SetCurrentProcessExplicitAppUserModelID(id: *const u16) -> i32;
+        }
+        let id: Vec<u16> = APP_USER_MODEL_ID.encode_utf16().chain([0]).collect();
+        // SAFETY: a NUL-terminated UTF-16 string that outlives the call (the system copies it)
+        let hr = unsafe { SetCurrentProcessExplicitAppUserModelID(id.as_ptr()) };
+        if hr < 0 {
+            eprintln!("[window] could not set the AppUserModelID: HRESULT {hr:#010x}");
+        }
+    }
+}
+
 /// An isolated home: SPACEKNIFE_HOME (demos, tests), else a portable copy's data folder.
 fn isolated_home() -> Option<PathBuf> {
     std::env::var_os("SPACEKNIFE_HOME")
@@ -221,6 +246,43 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The process's explicit AppUserModelID, as the taskbar reads it (None when it has none).
+    #[cfg(windows)]
+    fn process_app_user_model_id() -> Option<String> {
+        use std::ffi::c_void;
+        #[link(name = "shell32")]
+        unsafe extern "system" {
+            fn GetCurrentProcessExplicitAppUserModelID(id: *mut *mut u16) -> i32;
+        }
+        #[link(name = "ole32")]
+        unsafe extern "system" {
+            fn CoTaskMemFree(p: *mut c_void);
+        }
+        let mut p: *mut u16 = std::ptr::null_mut();
+        // SAFETY: an out pointer; on success the system allocated a NUL-terminated string
+        if unsafe { GetCurrentProcessExplicitAppUserModelID(&mut p) } < 0 || p.is_null() {
+            return None;
+        }
+        // SAFETY: the string is NUL-terminated and stays valid until it is freed below
+        let len = (0..).take_while(|&i| unsafe { *p.add(i) } != 0).count();
+        let id = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(p, len) });
+        // SAFETY: allocated with CoTaskMemAlloc by the call above
+        unsafe { CoTaskMemFree(p.cast()) };
+        Some(id)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_process_takes_the_shortcuts_app_user_model_id() {
+        // what lib.rs run() does before the window: taskbar and Start group the window with the
+        // pinned shortcut (both carry this ID), not by the program's path
+        set_app_user_model_id();
+        assert_eq!(
+            process_app_user_model_id().as_deref(),
+            Some(APP_USER_MODEL_ID)
+        );
+    }
 
     #[test]
     fn reads_window_colours() {

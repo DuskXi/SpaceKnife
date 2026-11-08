@@ -52,6 +52,7 @@ while IFS= read -r path; do
       | README.md | README.zh-CN.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | SECURITY.md | TODO.md | LICENSE \
       | UNRELEASED.md | .github/ISSUE_TEMPLATE/* | .github/pull_request_template.md | .github/workflows/pages.yml \
       | .github/workflows/macos.yml | .github/workflows/portable.yml | .github/workflows/release.yml \
+      | .github/workflows/windows-installer.yml | .github/workflows/installer-experiments.yml \
       | .github/workflows/release-check.yml | release-notes/*) ;;
     *)
       rust=true

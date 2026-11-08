@@ -6,7 +6,8 @@ name: Portable build
 # arm64, each built on a runner of its architecture (apps/desktop `pnpm bundle --no-bundle`, build
 # paths remapped, then `pnpm bundle:portable`) — and, with "installers", the deb (`pnpm bundle
 # --bundles deb`, repacked under 0.3.4's package name spaceknife by tools/deb.mjs). The Windows
-# installer, the AppImage and the rpm are the Electron shell's (electron.yml). Each archive is
+# installer has a workflow of its own (windows-installer.yml); the AppImage and the rpm are the
+# Electron shell's (electron.yml). Each archive is
 # checked (no build-machine home folder in any file, glibc ≤ 2.34 on Linux:
 # tools/package_checks.mjs), unpacked again and smoke-tested in portable mode and in headless mode,
 # and its 「无缝更新」 is tested end to end twice: from this build to the next version

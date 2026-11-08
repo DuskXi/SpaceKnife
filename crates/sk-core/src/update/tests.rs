@@ -466,23 +466,24 @@ fn pick_assets() {
     let r = release("0.4.0", ALL_ASSETS);
     // 0.3.4's names (its update.py asset_templates), which every later version keeps: an installed
     // 0.3.x looks for exactly these. Each kind of install is built by one shell; the other shell
-    // has no file for it.
+    // has no file for it. The Windows installer is Tauri's (the forked NSIS template, which takes
+    // over 0.3.4's electron-builder installation; 0.3.4's own update code finds it by this name).
     for (kind, shell, system, machine, name) in [
         (
             Nsis,
-            Electron,
+            Tauri,
             "win32",
             "AMD64",
             Some("SpaceKnife-0.4.0-Setup-x64.exe"),
         ),
         (
             Nsis,
-            Electron,
+            Tauri,
             "win32",
             "ARM64",
             Some("SpaceKnife-0.4.0-Setup-x64.exe"),
         ),
-        (Nsis, Tauri, "win32", "AMD64", None),
+        (Nsis, Electron, "win32", "AMD64", None),
         (
             Portable,
             Tauri,
@@ -585,7 +586,7 @@ fn the_names_are_the_ones_0_3_4_looks_for() {
     let table: &[(InstallKind, Shell, &str, &str, &[&str])] = &[
         (
             Nsis,
-            Electron,
+            Tauri,
             "win32",
             "AMD64",
             &["SpaceKnife-{v}-Setup-x64.exe"],
@@ -806,7 +807,7 @@ fn pick_asset_tolerates_the_packagers_spelling() {
         pick_asset(
             r,
             InstallKind::Nsis,
-            Shell::Electron,
+            Shell::Tauri,
             Some("win32"),
             Some("AMD64"),
         )

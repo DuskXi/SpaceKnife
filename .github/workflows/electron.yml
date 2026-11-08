@@ -1,12 +1,11 @@
 name: Electron shell build
 
-# The Electron shell's installers (docs/packaging.md; the shell is apps/electron-shell): the Windows
-# installer (electron-builder's NSIS, the same appId, uninstall entry, folder and shortcuts as 0.3.4,
-# so that 0.3.4's silent update and both per-user and all-users installs carry on), and for Linux
-# the AppImage and the rpm (RHEL 9 has no WebKitGTK 4.1 for the Tauri app). All under 0.3.4's file
-# names, the update check's contract (crates/sk-core update asset_templates, Shell::Electron):
+# The Electron shell's installers (docs/packaging.md; the shell is apps/electron-shell), only where
+# the Tauri app can't run: for Linux the AppImage and the rpm (RHEL 9 has no WebKitGTK 4.1 for the
+# Tauri app). The Windows installer is the Tauri app's (windows-installer.yml). All under 0.3.4's
+# file names, the update check's contract (crates/sk-core update asset_templates, Shell::Electron):
 #
-#   SpaceKnife-<v>-Setup-x64.exe, SpaceKnife-<v>-x86_64.AppImage (+ .zsync), spaceknife-<v>.x86_64.rpm
+#   SpaceKnife-<v>-x86_64.AppImage (+ .zsync), spaceknife-<v>.x86_64.rpm
 #
 # What the shell's own build has to leave, by contract with this workflow: `pnpm run package` in
 # apps/electron-shell (after the interface and spaceknife-cli are built, below) puts those files in
@@ -16,10 +15,9 @@ name: Electron shell build
 # apps/electron-shell/build/linux/rpm-posttrans.sh as its %posttrans (electron-builder rpm.fpm: --rpm-posttrans),
 # which puts back the /usr/bin/spaceknife link 0.3.4's %postun takes away on an upgrade.
 # This workflow then writes the AppImage's update information and .zsync (tools/appimage.mjs),
-# checks the files (no build-machine home folder; glibc ≤ 2.34 for every ELF file on Linux),
-# installs, runs and uninstalls the Windows installer (packaging/nsis-e2e.mjs), and tests the update
-# from the real 0.3.4 files end to end (packaging/update-from-034.mjs): the Windows installer
-# per user and for all users, the AppImage, and the rpm in rockylinux:9. The files and their
+# checks the files (no build-machine home folder; glibc ≤ 2.34 for every ELF file), and tests the
+# update from the real 0.3.4 files end to end (packaging/update-from-034.mjs): the AppImage, and
+# the rpm in rockylinux:9. The files and their
 # checksums (SHA256SUMS-installers-electron-<target>.txt, merged into SHA256SUMS.txt by
 # tools/release.mjs) go to the run's artifacts. Started by hand, and by the Release workflow
 # (release.yml) for a release: the tag's commit and a build provenance attestation for every file.
@@ -56,8 +54,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: win-x64
-            runner: windows-latest
           - target: linux-x64
             runner: ubuntu-22.04 # glibc 2.35 build host; every ELF file may need at most 2.34 (checked)
     permissions:
@@ -120,11 +116,7 @@ jobs:
           tauri=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
           [ "$version" = "$tauri" ] || { echo "::error::the Electron shell is $version, the Tauri app $tauri"; exit 1; }
           mkdir -p target/electron
-          if [ "$RUNNER_OS" = Windows ]; then
-            want=("SpaceKnife-$version-Setup-x64.exe")
-          else
-            want=("SpaceKnife-$version-x86_64.AppImage" "spaceknife-${version/-/\~}.x86_64.rpm")
-          fi
+          want=("SpaceKnife-$version-x86_64.AppImage" "spaceknife-${version/-/\~}.x86_64.rpm")
           for f in "${want[@]}"; do
             [ -f "target/electron-shell/dist/$f" ] || { echo "::error::the shell's build left no target/electron-shell/dist/$f: $(ls target/electron-shell/dist)"; exit 1; }
             cp "target/electron-shell/dist/$f" target/electron/
@@ -145,14 +137,10 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          sha256sum *.exe *.AppImage *.rpm | tee "SHA256SUMS-installers-electron-${{ matrix.target }}.txt"
+          sha256sum *.AppImage *.rpm | tee "SHA256SUMS-installers-electron-${{ matrix.target }}.txt"
 
-      # what the installers install: the NSIS installer unpacked with 7-Zip, the rpm through
-      # rpm2cpio, the AppImage through its own --appimage-extract. On Windows no program the
-      # installer holds or installs (the app is the 7z archive $PLUGINSDIR/app-64.7z in it) may
-      # import the Visual C++ runtime, which it doesn't install (+crt-static; Electron's own programs
-      # have it linked in as well, except that its dxil.dll takes the Universal CRT from Windows 10's
-      # own)
+      # what the installers install: the rpm through rpm2cpio, the AppImage through its own
+      # --appimage-extract
       - name: Check the files
         run: |
           set -euo pipefail
@@ -160,44 +148,12 @@ jobs:
           root=$PWD
           u=target/electron-unpacked
           rm -rf "$u" && mkdir -p "$u"
-          if [ "$RUNNER_OS" = Windows ]; then
-            for f in target/electron/*-Setup-x64.exe; do 7z x -y -bd -o"$u/nsis" "$f" > /dev/null; done
-            node tools/package_checks.mjs paths "$u"
-            apps=("$u"/nsis/\$PLUGINSDIR/app-*.7z)
-            [ ${#apps[@]} -gt 0 ] || { echo "::error::no \$PLUGINSDIR/app-*.7z in the installer"; ls -R "$u/nsis"; exit 1; }
-            a=target/electron-app && rm -rf "$a"
-            for f in "${apps[@]}"; do 7z x -y -bd -o"$a" "$f" > /dev/null; done
-            for p in SpaceKnife.exe spaceknife-cli.exe SpaceKnife.com; do
-              [ -f "$a/$p" ] || { echo "::error::the installer's app has no $p"; ls "$a"; exit 1; }
-            done
-            node tools/package_checks.mjs crt --allow-ucrt dxil.dll "$u" "$a"
-          else
-            sudo apt-get install -y rpm2cpio cpio
-            for f in target/electron/*.rpm; do mkdir -p "$u/rpm" && (cd "$u/rpm" && rpm2cpio "$root/$f" | cpio -idm --quiet); done
-            for f in target/electron/*.AppImage; do (cd "$u" && "$root/$f" --appimage-extract > /dev/null && mv squashfs-root appimage); done
-            node tools/package_checks.mjs paths "$u"
-            node tools/package_checks.mjs glibc "$u"
-            rpm -qp --qf '%{NAME} %{VERSION}\n' target/electron/*.rpm | grep -qx "spaceknife ${version/-/\~}" || { echo "::error::the rpm is not package spaceknife"; exit 1; }
-          fi
-
-      - name: Install, run and uninstall (Windows installer)
-        if: runner.os == 'Windows'
-        timeout-minutes: 20
-        run: node packaging/nsis-e2e.mjs target/electron/*-Setup-x64.exe
-
-      # 0.3.4's real installer (checked against the v0.3.4 release's own checksums and its build
-      # provenance), its own 「无缝更新」 to this one: per user, then for all users
-      - name: Update from 0.3.4 (Windows installer)
-        if: runner.os == 'Windows'
-        timeout-minutes: 40
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/v034"
-          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir "$RUNNER_TEMP/v034" --pattern SpaceKnife-0.3.4-Setup-x64.exe --pattern SHA256SUMS.txt
-          (cd "$RUNNER_TEMP/v034" && grep ' SpaceKnife-0.3.4-Setup-x64.exe$' SHA256SUMS.txt | sha256sum -c -)
-          gh attestation verify "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" --repo DuskXi/SpaceKnife
-          node packaging/update-from-034.mjs nsis "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" target/electron/*-Setup-x64.exe
-          node packaging/update-from-034.mjs nsis "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" target/electron/*-Setup-x64.exe --allusers
+          sudo apt-get install -y rpm2cpio cpio
+          for f in target/electron/*.rpm; do mkdir -p "$u/rpm" && (cd "$u/rpm" && rpm2cpio "$root/$f" | cpio -idm --quiet); done
+          for f in target/electron/*.AppImage; do (cd "$u" && "$root/$f" --appimage-extract > /dev/null && mv squashfs-root appimage); done
+          node tools/package_checks.mjs paths "$u"
+          node tools/package_checks.mjs glibc "$u"
+          rpm -qp --qf '%{NAME} %{VERSION}\n' target/electron/*.rpm | grep -qx "spaceknife ${version/-/\~}" || { echo "::error::the rpm is not package spaceknife"; exit 1; }
 
       - name: Run the AppImage
         if: runner.os == 'Linux'
@@ -219,7 +175,6 @@ jobs:
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
-            target/electron/*.exe
             target/electron/*.AppImage
             target/electron/*.AppImage.zsync
             target/electron/*.rpm
@@ -228,7 +183,6 @@ jobs:
         with:
           name: SpaceKnife-electron-${{ matrix.target }}
           path: |
-            target/electron/*.exe
             target/electron/*.AppImage
             target/electron/*.AppImage.zsync
             target/electron/*.rpm

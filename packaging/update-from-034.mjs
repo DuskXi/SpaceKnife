@@ -416,12 +416,23 @@ async function portable() {
 }
 
 // The Windows installer: 0.3.4 runs the new setup with electron-builder's own flags
-// (`--updated /S --force-run` and the scope: v0.3.4 update.ts nsisUpdateArgs) and quits.
+// (`--updated /S --force-run` and the scope: v0.3.4 update.ts nsisUpdateArgs) and quits. The new
+// one is Tauri's with the forked template (apps/desktop/src-tauri/windows), which keeps
+// electron-builder's keys: the folder is InstallLocation of Software\{GUID} (0.3.4 writes none
+// in the uninstall entry), the uninstaller is Tauri's uninstall.exe.
 const UNINSTALL_GUID = "3cb3f1fc-eef4-5813-9008-c29b5510458c"; // electron-builder's uuid5 of the appId
+const OLD_UNINSTALLER = "Uninstall SpaceKnife.exe"; // electron-builder's (0.3.4)
+const NEW_UNINSTALLER = "uninstall.exe"; // Tauri's NSIS template's
 
 function reg(args) {
   const r = spawnSync("reg.exe", args, { encoding: "utf8" });
   return r.status === 0 ? r.stdout : "";
+}
+
+/** InstallLocation of HKCU|HKLM\Software\{GUID} (electron-builder's installer.nsh, the fork). */
+function installLocation(hive) {
+  const text = reg(["query", `${hive}\\Software\\${UNINSTALL_GUID}`, "/v", "InstallLocation", "/reg:64"]);
+  return /^\s+InstallLocation\s+REG_\w+\s+(.*)$/m.exec(text)?.[1]?.trim().replace(/^"(.*)"$/, "$1") || null;
 }
 
 function uninstallEntries() {
@@ -454,8 +465,10 @@ async function nsis() {
   };
   run(oldPath, ["/S", scope], "installing 0.3.4");
   const before = await until("0.3.4's uninstall entry", () => uninstallEntries().find((e) => e.version === OLD), 60_000);
-  const dir = before.location;
+  const dir = installLocation(before.hive);
+  if (!dir) throw new Error(`0.3.4 wrote no InstallLocation in ${before.hive}\\Software\\${UNINSTALL_GUID}`);
   const program = join(dir, "SpaceKnife.exe");
+  if (!existsSync(program) || !existsSync(join(dir, OLD_UNINSTALLER))) throw new Error(`0.3.4 is not in ${dir}: ${existsSync(dir) ? readdirSync(dir).join(", ") : "(no folder)"}`);
   console.log(`0.3.4 in ${dir} (${before.hive})`);
   const local = process.env.LOCALAPPDATA;
   const dataDir = join(local, "SpaceKnife");
@@ -476,8 +489,16 @@ async function nsis() {
     if (entries.length !== 1) throw new Error(`uninstall entries: ${JSON.stringify(entries)}`);
     const [entry] = entries;
     if (entry.version !== NEW_VERSION || entry.hive !== before.hive) throw new Error(`the uninstall entry: ${JSON.stringify(entry)}`);
-    if (resolve(entry.location).toLowerCase() !== resolve(dir).toLowerCase()) throw new Error(`installed in ${entry.location}, not ${dir}`);
+    const now = installLocation(entry.hive);
+    if (!now || resolve(now).toLowerCase() !== resolve(dir).toLowerCase()) throw new Error(`installed in ${now}, not ${dir}`);
     if (resolve(dir).toLowerCase() === resolve(dataDir).toLowerCase()) throw new Error("the program is in the data folder");
+    if (!entry.uninstall?.includes(`\\${NEW_UNINSTALLER}"`)) throw new Error(`the uninstall entry runs ${entry.uninstall}, not ${NEW_UNINSTALLER}`);
+    // Tauri's files, none of the Electron app's (0.3.4's own uninstaller took them), no staging left
+    for (const f of [NEW_UNINSTALLER, "spaceknife-cli.exe", "SpaceKnife.com", join("ui", "index.html")]) if (!existsSync(join(dir, f))) throw new Error(`no ${f} in ${dir} after the update`);
+    const electron = [OLD_UNINSTALLER, "resources", "locales", "resources.pak", "chrome_100_percent.pak", "icudtl.dat", "ffmpeg.dll", "v8_context_snapshot.bin"].filter((f) => existsSync(join(dir, f)));
+    if (electron.length) throw new Error(`the Electron app's files are still in ${dir}: ${electron.join(", ")}`);
+    if (existsSync(`${dir}.sk-staging`)) throw new Error(`the installer's staging folder ${dir}.sk-staging is left`);
+    console.log(`${dir}: ${readdirSync(dir).join(", ")}`);
     const startMenu = allUsers ? join(process.env.ProgramData, "Microsoft", "Windows", "Start Menu", "Programs") : join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs");
     const desktop = allUsers ? join(process.env.PUBLIC, "Desktop") : join(process.env.USERPROFILE, "Desktop");
     for (const lnk of [join(startMenu, "SpaceKnife.lnk"), join(desktop, "SpaceKnife.lnk")]) {
@@ -490,7 +511,7 @@ async function nsis() {
     stop(back.info.pid, true);
 
     step(`uninstall ${NEW_VERSION} silently: the program goes, the data stays`);
-    const uninstaller = join(dir, "Uninstall SpaceKnife.exe");
+    const uninstaller = join(dir, NEW_UNINSTALLER);
     run(uninstaller, ["/S", scope], "uninstalling");
     await until("the program to be removed", () => !existsSync(program), 120_000);
     if (uninstallEntries().length) throw new Error("an uninstall entry is left");

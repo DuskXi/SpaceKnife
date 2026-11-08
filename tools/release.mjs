@@ -4,6 +4,11 @@
 //
 //   node tools/release.mjs assemble 0.3.5 ARTIFACTS OUT --notes release-notes/0.3.5.md \
 //       --notes-out notes.md [--build-run URL …]
+//   node tools/release.mjs windows-installer 0.3.5 target/release/bundle/nsis target/installers
+//
+// `windows-installer` (the Windows installer build, windows-installer.yml) copies the installer
+// Tauri's bundler made (SpaceKnife_0.3.5_x64-setup.exe) under the release's name
+// SpaceKnife-0.3.5-Setup-x64.exe and writes its SHA256SUMS-installers-win-x64.txt.
 //
 // `assemble` takes the build runs' artifacts (any folder layout: one folder per artifact, as
 // actions/download-artifact and `gh run download` write them), checks every checksum file against
@@ -37,9 +42,10 @@ export class ReleaseError extends Error {}
  * and the shell that builds it (crates/sk-core update `Shell`). */
 export function expected() {
   const out = [
-    // the installers (x64 only), listed in SHA256SUMS.txt: the Windows installer, the AppImage and
-    // the rpm (for RHEL 9, which has no WebKitGTK 4.1) from the Electron shell, the deb from Tauri
-    { template: "SpaceKnife-{v}-Setup-x64.exe", sums: SUMS, shell: "electron" },
+    // the installers (x64 only), listed in SHA256SUMS.txt: the Windows installer (Tauri's, the
+    // forked NSIS template, renamed by `windows-installer` below) and the deb from Tauri, the
+    // AppImage and the rpm (for RHEL 9, which has no WebKitGTK 4.1) from the Electron shell
+    { template: "SpaceKnife-{v}-Setup-x64.exe", sums: SUMS, shell: "tauri" },
     { template: "SpaceKnife-{v}-x86_64.AppImage", sums: SUMS, shell: "electron" },
     { template: "spaceknife_{v}_amd64.deb", sums: SUMS, shell: "tauri" },
     { template: "spaceknife-{v}.x86_64.rpm", sums: SUMS, shell: "electron" },
@@ -181,6 +187,33 @@ export function assemble(version, artifacts, out) {
   return { files: result, hashes };
 }
 
+/** The Windows installer under its release name: Tauri's bundler writes
+ * `SpaceKnife_<v>_x64-setup.exe`, every 0.3.x looks for `SpaceKnife-<v>-Setup-x64.exe`. */
+export const TAURI_SETUP = /^SpaceKnife_(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)_x64-setup\.exe$/;
+export function setupName(tauriName) {
+  const m = TAURI_SETUP.exec(tauriName);
+  return m ? `SpaceKnife-${m[1]}-Setup-x64.exe` : null;
+}
+
+/** The Windows installer build's files (windows-installer.yml): the one installer Tauri made for
+ * `version` in `bundle` (target/release/bundle/nsis), copied into `out` under its release name,
+ * with its checksum list SHA256SUMS-installers-win-x64.txt (merged into SHA256SUMS.txt by
+ * `assemble`). -> {file, sums}. */
+export function windowsInstaller(version, bundle, out) {
+  if (!existsSync(bundle) || !statSync(bundle).isDirectory()) throw new ReleaseError(`no bundle folder: ${bundle}`);
+  const made = readdirSync(bundle).filter((n) => TAURI_SETUP.test(n));
+  if (made.length !== 1) throw new ReleaseError(`${bundle} holds ${made.length} Tauri installers (${made.join(", ") || "none"}), not one`);
+  const name = setupName(made[0]);
+  const want = expected().find((e) => e.template.endsWith("-Setup-x64.exe")).template.replace("{v}", version);
+  if (name !== want) throw new ReleaseError(`${made[0]} is not version ${version}`);
+  mkdirSync(out, { recursive: true });
+  const file = join(out, name);
+  copyFileSync(join(bundle, made[0]), file);
+  const sums = join(out, "SHA256SUMS-installers-win-x64.txt");
+  writeFileSync(sums, `${sha256(file)}  ${name}\n`);
+  return { file, sums };
+}
+
 const runLabel = (url) => {
   const m = /\/actions\/runs\/(\d+)/.exec(url);
   return m ? `run ${m[1]}` : url;
@@ -217,6 +250,21 @@ export function fillNotes(text, version, fileMap, runs) {
 function main(argv) {
   const [cmd, version, artifacts, out] = argv.filter((a, i) => !a.startsWith("--") && !argv[i - 1]?.startsWith("--"));
   const opt = (name) => argv.flatMap((a, i) => (argv[i - 1] === name ? [a] : []));
+  if (cmd === "windows-installer") {
+    if (!version || !artifacts || !out) {
+      console.error("usage: node tools/release.mjs windows-installer VERSION BUNDLE_DIR OUT");
+      return 2;
+    }
+    try {
+      const done = windowsInstaller(version, resolve(artifacts), resolve(out));
+      console.log(`${relative(process.cwd(), done.file)}\n${readFileSync(done.sums, "utf8").trim()}`);
+      return 0;
+    } catch (e) {
+      if (!(e instanceof ReleaseError)) throw e;
+      console.error(`windows-installer ${version}: ${e.message}`);
+      return 1;
+    }
+  }
   if (cmd !== "assemble" || !version || !artifacts || !out || !opt("--notes").length || !opt("--notes-out").length) {
     console.error("usage: node tools/release.mjs assemble VERSION ARTIFACTS OUT --notes FILE --notes-out FILE [--build-run URL …]");
     return 2;

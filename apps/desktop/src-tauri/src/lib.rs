@@ -54,6 +54,8 @@ pub fn prepare_environment() {
 }
 
 pub fn run() {
+    // Windows: grouped with the installer's (pinned) shortcuts, before any window exists
+    window::set_app_user_model_id();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
