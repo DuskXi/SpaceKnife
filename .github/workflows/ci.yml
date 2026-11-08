@@ -135,6 +135,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           node --test "tools/tests/*.test.mjs"
+          node tools/nsis_fork.mjs check
           node tools/gen_design.mjs --check
           node tools/gen_pinyin.mjs --check
           node tools/i18n_check.mjs --area core
@@ -172,6 +173,14 @@ jobs:
       # job's gen_design.mjs --check), and the protocol types to the committed generated.ts.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The Windows installer's forked NSIS template follows the stock template of the locked
+      # tauri-cli (src-tauri/windows/upstream.json): a CLI update that brings another one fails here
+      # (crates.io's tauri-bundler and the installed CLI's own program are compared)
+      - name: The NSIS fork follows the locked tauri-cli
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: node tools/nsis_fork.mjs check
 
       # Every interface text needs an English entry (t() falls back to the Chinese source). The
       # result is the same on every OS.
