@@ -1,7 +1,7 @@
 {
   "name": "spaceknife-electron",
   "productName": "SpaceKnife",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "SpaceKnife — see what fills your drives",
   "author": {
@@ -17,36 +17,17 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
-    "package": "electron-builder --publish never"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "esbuild"
-    ]
+    "package": "node scripts/package.mjs"
   },
   "devDependencies": {
-    "@fontsource-variable/geist": "5.3.0",
-    "@fontsource-variable/geist-mono": "5.3.0",
-    "@fontsource-variable/noto-sans-sc": "5.3.1",
     "@types/node": "^22.20.5",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "@vitejs/plugin-react": "6.1.2",
     "electron": "44.9.3",
     "electron-builder": "26.17.0",
     "electron-vite": "6.0.0",
-    "github-slugger": "2.0.0",
-    "markdown-it": "15.0.2",
-    "react": "19.3.1",
-    "react-aria-components": "1.22.1",
-    "react-dom": "19.3.1",
-    "rollup-plugin-license": "3.7.1",
     "typescript": "7.0.2",
     "vite": "8.3.4",
-    "vitest": "5.0.5",
-    "zustand": "5.0.15"
+    "vitest": "5.0.5"
   }
 }

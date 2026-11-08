@@ -22,6 +22,7 @@ jobs:
     outputs:
       rust: ${{ steps.areas.outputs.rust }}
       desktop: ${{ steps.areas.outputs.desktop }}
+      electron: ${{ steps.areas.outputs.electron }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -47,7 +48,7 @@ jobs:
             areas=$(bash .github/scripts/ci-areas.sh < changed.txt)
           else
             echo "(everything)" > changed.txt
-            areas=$'rust=true\ndesktop=true'
+            areas=$'rust=true\ndesktop=true\nelectron=true'
           fi
           echo "$areas" | tee -a "$GITHUB_OUTPUT"
           { echo "### Jobs to run"; echo; echo "$areas" | sed 's/^/- /'; echo; echo "Changed files:"; echo; echo '```'; cat changed.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -174,11 +175,54 @@ jobs:
       - name: Generate
         run: pnpm generate
 
+  electron:
+    name: Electron shell · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.electron == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # the shell of the Windows installer, the RHEL 9 rpm and the AppImage
+        os: [ubuntu-22.04, windows-latest]
+    defaults:
+      run:
+        working-directory: apps/electron-shell
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/electron-shell/pnpm-lock.yaml
+
+      # Electron's own download is not needed for the type check, the unit tests or the build
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Build the main process and preload
+        run: pnpm build
   # The one check branch protection requires: skipped jobs report under their unexpanded matrix
   # name, so requiring each job would leave a pull request waiting forever.
   result:
     name: CI passed
-    needs: [changes, rust, desktop]
+    needs: [changes, rust, desktop, electron]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

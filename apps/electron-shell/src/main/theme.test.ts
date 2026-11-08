@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type ThemeSetting, WINDOW_BG } from "../shared/theme";
+import { type ThemeSetting, WINDOW_BG } from "../../../desktop/app/shared/theme";
 import { type ThemeHost, ThemeKeeper } from "./theme";
 
 /** nativeTheme as Electron behaves: dark colours for 「深色」, for 「浅色」 never, else the system's. */

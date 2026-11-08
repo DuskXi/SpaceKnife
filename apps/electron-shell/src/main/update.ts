@@ -7,14 +7,14 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { posix, win32 } from "node:path";
 
-import type { InstallKind } from "../shared/install";
+import type { InstallKind } from "../../../desktop/app/shared/install";
 import type { TextKey } from "./text";
 
-export { type InstallHow, type InstallKind, type InstallStep, installStep, stepQuits } from "../shared/install";
+export { type InstallHow, type InstallKind, type InstallStep, installStep, stepQuits } from "../../../desktop/app/shared/install";
 
 // The pages main opens in the browser for the renderer (release pages, the help's links to the
 // website); nothing else. The list is shared with the renderer, which checks it before it asks.
-export { PROJECT_PAGES, WEBSITE, projectPage } from "../shared/links";
+export { PROJECT_PAGES, WEBSITE, projectPage } from "../../../desktop/app/shared/links";
 
 /** The uninstaller electron-builder's NSIS installer puts next to the executable. */
 const NSIS_UNINSTALLER = "Uninstall SpaceKnife.exe";
@@ -152,12 +152,18 @@ export function swapPlanJson(p: SwapPlan): string {
 `;
 }
 
-/** The new version's backend executable in its unpacked files: it does the swap (resources/backend,
- *  electron-builder.yml extraResources). */
-export function swapHelper(staged: string, platform: "win32" | "linux" | "darwin"): string {
-  if (platform === "darwin") return posix.join(staged, MAC_APP, "Contents", "Resources", "backend", "spaceknife-backend");
+/** The programs in the new version's unpacked files that can do the swap, the first one there
+ *  does it: its spaceknife-cli (next to the executable; on macOS in the bundle's Contents/MacOS),
+ *  else the backend 0.3.x releases have in resources/backend, which every portable release keeps for
+ *  0.3.4 (it is spaceknife-cli under that name). */
+export function swapHelpers(staged: string, platform: "win32" | "linux" | "darwin"): string[] {
+  if (platform === "darwin") {
+    const contents = posix.join(staged, MAC_APP, "Contents");
+    return [posix.join(contents, "MacOS", "spaceknife-cli"), posix.join(contents, "Resources", "backend", "spaceknife-backend")];
+  }
   const path = platform === "win32" ? win32 : posix;
-  return path.join(staged, "resources", "backend", platform === "win32" ? "spaceknife-backend.exe" : "spaceknife-backend");
+  const exe = platform === "win32" ? ".exe" : "";
+  return [path.join(staged, `spaceknife-cli${exe}`), path.join(staged, "resources", "backend", `spaceknife-backend${exe}`)];
 }
 
 /** The app bundle in a macOS portable copy's folder (tools/build_package.py make_portable). */

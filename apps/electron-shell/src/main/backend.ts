@@ -1,24 +1,30 @@
-// Runs the Python backend as a child process (docs/protocol.md §1).
+// Runs the backend, `spaceknife-cli serve --token-stdin`, as a child process (docs/protocol.md §1;
+// crates/sk-server/src/cli/serve.rs), the same contract 0.3.4 had with its Python backend:
 //
 // The token travels on stdin (never argv/env); the backend prints one JSON "ready" line on stdout
-// and exits gracefully when its stdin closes, so quitting the app (or crashing) stops it.
-// An installed app (M8) runs the frozen backend it ships (resources/backend, PyInstaller);
-// a checkout runs `python -m spaceknife` from the repo's uv environment.
+// and exits gracefully when its stdin closes, so quitting the app (or crashing) stops it. How the
+// app runs (its version, how it was installed, this shell, the system's language) goes in the
+// environment, as 0.3.4 passed it.
+//
+// An installed app runs the spaceknife-cli next to its executable (electron-builder.yml extraFiles);
+// a checkout the one cargo built (target/release, else target/debug), or SPACEKNIFE_CLI.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, posix, resolve, win32 } from "node:path";
 import { createInterface } from "node:readline";
 
-import type { BackendInfo } from "../shared/api";
+import type { BackendInfo } from "../../../desktop/app/shared/api";
 import { mt } from "./text";
 import type { InstallKind } from "./update";
 
+/** SPACEKNIFE_SHELL: which shell started the backend (the update checks pick that shell's files). */
+export const SHELL = "electron";
+
 export interface BackendOptions {
-  repoRoot: string;
-  /** the frozen backend of an installed app (bundledBackend); else the repo's Python */
-  bundled?: string | null;
+  /** the spaceknife-cli executable (cliPath) */
+  cli: string;
   allowOrigins: string[];
   home?: string;
   /** OS UI language (app.getPreferredSystemLanguages), for 「跟随系统」 */
@@ -37,36 +43,55 @@ export interface Backend {
   stop(): Promise<void>;
 }
 
-/** The interpreter of the repo's uv environment, or SPACEKNIFE_PYTHON. */
-export function pythonFor(repoRoot: string): string {
-  const explicit = process.env.SPACEKNIFE_PYTHON;
-  if (explicit) return explicit;
-  const venv = process.platform === "win32" ? join(repoRoot, ".venv", "Scripts", "python.exe") : join(repoRoot, ".venv", "bin", "python");
-  if (existsSync(venv)) return venv;
-  return process.platform === "win32" ? "python.exe" : "python3";
+const exeName = (platform: NodeJS.Platform) => (platform === "win32" ? "spaceknife-cli.exe" : "spaceknife-cli");
+
+/** The spaceknife-cli to run: SPACEKNIFE_CLI; next to the executable of an installed app; in a
+ *  checkout cargo's release build, else its debug build (the release path when neither exists, for
+ *  the error). */
+export function cliPath(
+  execPath: string,
+  platform: NodeJS.Platform,
+  packaged: boolean,
+  env: NodeJS.ProcessEnv,
+  repoRoot: string,
+  exists: (path: string) => boolean = existsSync,
+): string {
+  const path = platform === "win32" ? win32 : posix;
+  if (env.SPACEKNIFE_CLI) return path.resolve(env.SPACEKNIFE_CLI);
+  const name = exeName(platform);
+  if (packaged) return path.join(path.dirname(execPath), name);
+  const target = env.CARGO_TARGET_DIR ? path.resolve(repoRoot, env.CARGO_TARGET_DIR) : path.join(repoRoot, "target");
+  const builds = ["release", "debug"].map((profile) => path.join(target, profile, name));
+  return builds.find(exists) ?? builds[0]!;
 }
 
-/** resources/backend/spaceknife-backend[.exe] of a packaged app (electron-builder.yml), if present. */
-export function bundledBackend(resourcesPath: string): string | null {
-  const exe = join(resourcesPath, "backend", process.platform === "win32" ? "spaceknife-backend.exe" : "spaceknife-backend");
-  return existsSync(exe) ? exe : null;
+/** spaceknife-cli's arguments: the backend for a window, logging plainly on stderr; with a ready file
+ *  (SPACEKNIFE_READY_FILE: end-to-end tests, demos) its address and token go there too, as the Tauri
+ *  shell writes them (src-tauri/src/backend.rs). */
+export function backendArgs(allowOrigins: readonly string[], readyFile?: string): string[] {
+  const args = ["serve", "--token-stdin", "--log-format", "plain"];
+  for (const origin of allowOrigins) args.push("--allow-origin", origin);
+  if (readyFile) args.push("--ready-file", resolve(readyFile));
+  return args;
 }
 
-export function startBackend(opts: BackendOptions): Promise<Backend> {
-  const token = randomBytes(24).toString("base64url");
-  // the frozen backend is built with -X utf8 (packaging/spaceknife-backend.spec)
-  const args = opts.bundled ? ["serve"] : ["-X", "utf8", "-m", "spaceknife", "serve"];
-  args.push("--token-stdin", "--log-format", "plain");
-  for (const origin of opts.allowOrigins) args.push("--allow-origin", origin);
-  const env: NodeJS.ProcessEnv = { ...process.env, PYTHONIOENCODING: "utf-8" };
+/** The backend's environment: this process's, with how the app runs. */
+export function backendEnv(opts: Omit<BackendOptions, "cli" | "allowOrigins" | "onLog">, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, SPACEKNIFE_SHELL: SHELL };
   if (opts.home) env.SPACEKNIFE_HOME = resolve(opts.home);
   // 「界面语言 · 跟随系统」 (M7.5): the OS UI language as Electron sees it
   if (opts.locale) env.SPACEKNIFE_SYSTEM_LOCALE = opts.locale;
   if (opts.appVersion) env.SPACEKNIFE_APP_VERSION = opts.appVersion;
   if (opts.installKind) env.SPACEKNIFE_INSTALL_KIND = opts.installKind;
-  const proc = spawn(opts.bundled ?? pythonFor(opts.repoRoot), args, {
-    cwd: opts.bundled ? dirname(opts.bundled) : opts.repoRoot,
-    env,
+  return env;
+}
+
+export function startBackend(opts: BackendOptions): Promise<Backend> {
+  if (!existsSync(opts.cli)) return Promise.reject(new Error(mt("backendMissing", { path: opts.cli })));
+  const token = randomBytes(24).toString("base64url");
+  const proc = spawn(opts.cli, backendArgs(opts.allowOrigins, process.env.SPACEKNIFE_READY_FILE), {
+    cwd: dirname(opts.cli),
+    env: backendEnv(opts, process.env),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
@@ -104,7 +129,7 @@ export function startBackend(opts: BackendOptions): Promise<Backend> {
 
 function stop(proc: ChildProcess): Promise<void> {
   return new Promise((done) => {
-    if (proc.exitCode !== null) return done();
+    if (proc.exitCode !== null || proc.signalCode !== null) return done();
     const killer = setTimeout(() => {
       proc.kill();
       done();

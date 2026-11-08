@@ -1,31 +1,42 @@
-// Electron main process: one frameless window, the backend child process, a few native services.
+// The Electron shell's main process: one frameless window with the interface (apps/desktop, the Nuxt
+// build) served from app://spaceknife, the backend `spaceknife-cli serve` as a child process
+// (backend.ts), and the native services behind the IPC channels the page's host adapter calls
+// (apps/desktop/app/lib/electronHost.ts, through the preload's window.skElectron). The Tauri shell
+// (apps/desktop/src-tauri) does the same with Tauri; the interface is the same build in both.
+//
+// 0.3.4's headless launch forms (`--headless`, `--listen …`, `--help`) start `spaceknife-cli headless`
+// with this process's terminal instead of a window (cli.ts).
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { BrowserWindow, app, clipboard, dialog, ipcMain, nativeTheme, protocol, shell } from "electron";
+import { BrowserWindow, Menu, app, clipboard, dialog, ipcMain, nativeTheme, protocol, session, shell } from "electron";
 
-import type { BackendState } from "../shared/api";
-import { WINDOW_BG } from "../shared/theme";
-import { type Backend, type BackendOptions, bundledBackend, startBackend } from "./backend";
+import type { BackendState } from "../../../desktop/app/shared/api";
+import { WINDOW_BG } from "../../../desktop/app/shared/theme";
+import { type Backend, type BackendOptions, backendEnv, cliPath, startBackend } from "./backend";
+import { headlessArgs } from "./cli";
+import { contentSecurityPolicy, inlineScriptHashes } from "./csp";
 import { fileIn, mimeOf } from "./files";
-import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
-import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
 import { appBundle, portableHome, untranslocate } from "./portable";
+import { terminalCommands } from "./terminal";
 import { type Lang, mt, setLang } from "./text";
 import { ThemeKeeper } from "./theme";
-import { type InstallHow, installKind, installRefusal, installStep, MAC_APP, nsisUpdateArgs, portableVersion, projectPage, swapHelper, swapPlanJson } from "./update";
+import { type InstallHow, installKind, installRefusal, installStep, MAC_APP, nsisUpdateArgs, portableVersion, projectPage, swapHelpers, swapPlanJson } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const APP_ORIGIN = "app://spaceknife";
+const APP_HOST = "spaceknife";
+const APP_ORIGIN = `app://${APP_HOST}`; // as 0.3.4: the page's storage stays where it was
 const APP_ID = "io.github.duskxi.spaceknife"; // electron-builder.yml appId: taskbar grouping, shortcuts
-const RENDERER_DIR = join(here, "../renderer");
-// --headless / --listen: no window, the interface in a browser (headless.ts); --help: the options
-const CLI = parseCommandLine(process.argv.slice(1));
+// --headless / --listen / --help: no window, spaceknife-cli headless in this terminal (cli.ts)
+const HEADLESS = headlessArgs(process.argv.slice(1));
+// a checkout only: the interface from Nuxt's dev server (`pnpm dev` in apps/desktop)
+const DEV_URL = !app.isPackaged && process.env.SPACEKNIFE_DEV_URL ? new URL(process.env.SPACEKNIFE_DEV_URL) : null;
 
 /** macOS: where a translocated copy really is (portable.ts), from the mount table; null when unknown. */
 function originalPath(path: string): string | null {
@@ -41,12 +52,13 @@ const portable = portableHome(process.execPath, process.platform, app.isPackaged
 if (portable) process.env.SPACEKNIFE_HOME = portable;
 // what the backend's update check downloads, and what main may start once it is downloaded
 const INSTALL_KIND = installKind(process.execPath, process.platform, app.isPackaged, process.env, portable);
-// started by 「无缝更新」 (the Windows installer passes it after a silent update): the renderer says so once
+// started by 「无缝更新」 (the Windows installer passes it after a silent update): the page says so once
 const JUST_UPDATED = process.argv.includes("--updated");
 
-// The Chromium profile (storage, caches) lives in an "electron" folder of SpaceKnife's own: an isolated
-// home (demos, tests, portable copies) gets its own; otherwise <appData>/SpaceKnife/electron, apart from
-// the backend's files (on Linux the backend's config folder is ~/.config/SpaceKnife as well).
+// The Chromium profile (storage, caches) lives in an "electron" folder of SpaceKnife's own, as in
+// 0.3.4 (nothing of the page's is lost on the way): an isolated home (demos, tests, portable copies)
+// gets its own; otherwise <appData>/SpaceKnife/electron, apart from the backend's files (on Linux
+// the backend's config folder is ~/.config/SpaceKnife as well).
 app.setPath(
   "userData",
   process.env.SPACEKNIFE_HOME ? join(resolve(process.env.SPACEKNIFE_HOME), "electron") : join(app.getPath("appData"), "SpaceKnife", "electron"),
@@ -61,18 +73,36 @@ let backend: Backend | null = null;
 let backendState: BackendState = { state: "starting" };
 let win: BrowserWindow | null = null;
 
+/** The repository of a checkout (SPACEKNIFE_REPO, else two folders above this app). */
 function repoRoot(): string {
   return process.env.SPACEKNIFE_REPO ? resolve(process.env.SPACEKNIFE_REPO) : resolve(app.getAppPath(), "../..");
 }
 
-/** How the backend starts, in the window and in headless mode alike. */
+/** The built interface: resources/ui of an installed app (electron-builder.yml extraResources, where
+ *  `spaceknife-cli headless` finds it too); apps/desktop/.output/public in a checkout; SPACEKNIFE_UI. */
+function uiDir(): string {
+  if (process.env.SPACEKNIFE_UI) return resolve(process.env.SPACEKNIFE_UI);
+  if (app.isPackaged) return join(process.resourcesPath, "ui");
+  return join(repoRoot(), "apps", "desktop", ".output", "public");
+}
+
+const cli = () => cliPath(process.execPath, process.platform, app.isPackaged, process.env, repoRoot());
+
+/** The system's interface language as Electron sees it ("" when it can't tell). */
+function systemLocale(): string {
+  try {
+    return app.getPreferredSystemLanguages()[0] ?? app.getLocale() ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function backendOptions(allowOrigins: string[], onLog: (line: string) => void): BackendOptions {
   return {
-    repoRoot: repoRoot(),
-    bundled: app.isPackaged ? bundledBackend(process.resourcesPath) : null,
+    cli: cli(),
     allowOrigins,
     home: process.env.SPACEKNIFE_HOME,
-    locale: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
+    locale: systemLocale(),
     appVersion: app.getVersion(),
     installKind: INSTALL_KIND,
     onLog,
@@ -85,8 +115,8 @@ function setBackend(state: BackendState): void {
 }
 
 async function launchBackend(): Promise<void> {
-  const devUrl = process.env.ELECTRON_RENDERER_URL;
-  const origins = devUrl ? [new URL(devUrl).origin] : [];
+  const origins = DEV_URL ? [DEV_URL.origin] : [];
+  setBackend({ state: "starting" });
   try {
     backend = await startBackend(backendOptions(origins, (line) => console.log(`[backend] ${line}`)));
     backend.proc.once("exit", (code) => setBackend({ state: "exited", code }));
@@ -153,7 +183,7 @@ function createWindow(): void {
       contextIsolation: true,
       sandbox: false,
       spellcheck: false,
-      // window.sk.version and window.sk.justUpdated (preload)
+      // window.skElectron.version and .justUpdated (preload)
       additionalArguments: [`--sk-app-version=${app.getVersion()}`, ...(JUST_UPDATED ? ["--sk-updated"] : [])],
     },
   });
@@ -169,11 +199,12 @@ function createWindow(): void {
     if (page) void shell.openExternal(page);
     return { action: "deny" };
   });
-  const origin = process.env.ELECTRON_RENDERER_URL ? new URL(process.env.ELECTRON_RENDERER_URL).origin : APP_ORIGIN;
+  const origin = DEV_URL ? DEV_URL.origin : APP_ORIGIN;
   win.webContents.on("will-navigate", (event, url) => {
     if (!url.startsWith(`${origin}/`)) event.preventDefault();
   });
-  if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
+  win.webContents.on("will-attach-webview", (event) => event.preventDefault());
+  if (DEV_URL) void win.loadURL(DEV_URL.href);
   else void win.loadURL(`${APP_ORIGIN}/index.html`);
 }
 
@@ -191,16 +222,18 @@ function registerIpc(): void {
   });
   app.on("browser-window-focus", (_e, w) => w.flashFrame(false));
   ipcMain.handle("sk:isMaximized", () => win?.isMaximized() ?? false);
-  ipcMain.on("sk:showItemInFolder", (_e, path: string) => shell.showItemInFolder(path));
-  ipcMain.handle("sk:openPath", (_e, path: string) => shell.openPath(path));
-  ipcMain.on("sk:copyText", (_e, text: string) => clipboard.writeText(text));
+  ipcMain.on("sk:showItemInFolder", (_e, path: unknown) => {
+    if (typeof path === "string") shell.showItemInFolder(path);
+  });
+  ipcMain.handle("sk:openPath", (_e, path: unknown) => (typeof path === "string" ? shell.openPath(path) : ""));
+  ipcMain.on("sk:copyText", (_e, text: unknown) => clipboard.writeText(String(text)));
   ipcMain.on("sk:setLanguage", (_e, lang: Lang) => setLang(lang));
-  // the renderer applies the setting to the page itself; here the window, Electron's UI and the file
+  // the page applies the setting to itself; here the window, Electron's UI and the file
   ipcMain.on("sk:setTheme", (_e, theme: unknown) => themes?.set(theme));
   // the system's theme changed (or themeSource did): the window's own background follows
   nativeTheme.on("updated", () => themes?.updated());
-  ipcMain.on("sk:openTerminal", (_e, dir: string) => openTerminal(dir));
-  // one fixed settings pane, not a URL from the renderer (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
+  ipcMain.on("sk:openTerminal", (_e, dir: unknown) => openTerminal(dir));
+  // one fixed settings pane, not a URL from the page (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
   ipcMain.on("sk:openFullDiskAccess", () => {
     if (process.platform === "darwin") void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles");
   });
@@ -326,8 +359,8 @@ async function replaceAppImage(file: string): Promise<string> {
 }
 
 /** A portable copy: unpack the new version next to the backend's downloads, then the new version's
- *  backend swaps the files once the app has quit (spaceknife.update_swap) and starts it again. No
- *  script: SpaceKnife's own program does it. The "data" folder stays. */
+ *  spaceknife-cli swaps the files once the app has quit (sk_core::update::swap) and starts it again.
+ *  No script: SpaceKnife's own program does it. The "data" folder stays. */
 async function replacePortable(file: string, updates: string): Promise<string> {
   const version = portableVersion(basename(file));
   const platform = process.platform;
@@ -350,9 +383,9 @@ async function replacePortable(file: string, updates: string): Promise<string> {
     console.warn(`[update] ${basename(file)} is not one folder with ${program}: ${found}`);
     return mt("updateUnpackFailed", { error: basename(file) });
   }
-  const helper = swapHelper(staged, platform);
-  if (!existsSync(helper)) {
-    console.warn(`[update] ${basename(file)} has no ${helper}`);
+  const helper = swapHelpers(staged, platform).find((h) => existsSync(h));
+  if (!helper) {
+    console.warn(`[update] ${basename(file)} has no ${swapHelpers(staged, platform).join(" nor ")}`);
     return mt("updateUnpackFailed", { error: basename(file) });
   }
   // the copy's folder holds its data folder; on macOS the executable is in the bundle there, which a
@@ -371,11 +404,11 @@ async function replacePortable(file: string, updates: string): Promise<string> {
   await rm(plan.previous, { recursive: true, force: true }); // left by an attempt that was undone
   const planFile = join(updates, `update-${version}.json`);
   await writeFile(planFile, swapPlanJson(plan), "utf8");
-  console.info(`[update] ${version} unpacked: its backend swaps the files once the app has quit (${planFile})`);
+  console.info(`[update] ${version} unpacked: its spaceknife-cli swaps the files once the app has quit (${planFile})`);
   return restartInto(() => startSwap(helper, planFile, updates));
 }
 
-/** Start the new version's backend in its --apply-update mode (spaceknife.update_swap): detached, so
+/** Start the new version's program in its --apply-update mode (sk_core::update::swap): detached, so
  *  it outlives the app. Resolves once it says the plan is usable; fails when it says otherwise, exits
  *  or doesn't answer within 30 s (then the app goes on as it was). */
 function startSwap(helper: string, plan: string, cwd: string): Promise<void> {
@@ -430,49 +463,98 @@ function unpack(file: string, into: string): Promise<void> {
   );
 }
 
-function openTerminal(dir: string): void {
-  if (process.platform === "win32") spawn("cmd.exe", ["/c", "start", "", "wt.exe", "-d", dir], { detached: true, shell: false });
-  else if (process.platform === "darwin") spawn("open", ["-a", "Terminal", dir], { detached: true });
-  else spawn("x-terminal-emulator", [], { cwd: dir, detached: true });
+/** 「在终端中打开」: the first terminal of terminal.ts that starts, never through a shell. */
+function openTerminal(dir: unknown): void {
+  if (typeof dir !== "string") return;
+  let folder = false;
+  try {
+    folder = statSync(dir).isDirectory();
+  } catch {
+    // gone: nothing to open
+  }
+  const tries = folder ? terminalCommands(process.platform, dir) : [];
+  if (!tries.length) {
+    console.warn(`[shell] no terminal for ${dir}: ${folder ? "a folder no terminal can open" : "not a folder"}`);
+    return;
+  }
+  const attempt = (i: number): void => {
+    const t = tries[i];
+    if (!t) {
+      console.warn(`[shell] no terminal for ${dir}: none of ${tries.map((c) => c.file).join(", ")} could start`);
+      return;
+    }
+    // a terminal is a window of its own: shown, and it outlives the app
+    const child = spawn(t.file, t.args, { cwd: t.cwd, detached: true, stdio: "ignore", windowsHide: false });
+    child.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT") attempt(i + 1);
+      else console.warn(`[shell] could not start ${t.file}: ${String(err)}`);
+    });
+    child.once("spawn", () => child.unref());
+  };
+  attempt(0);
 }
 
-function serveRenderer(): void {
+/** The interface's files on app://spaceknife, each page with its Content-Security-Policy (csp.ts). */
+function serveInterface(dir: string): void {
   protocol.handle("app", async (request) => {
-    const file = fileIn(RENDERER_DIR, new URL(request.url).pathname);
+    const url = new URL(request.url);
+    const file = url.host === APP_HOST ? fileIn(dir, url.pathname) : null;
     if (!file) return new Response("forbidden", { status: 403 });
+    let body: Buffer;
     try {
-      const body = await readFile(file);
-      return new Response(body, { headers: { "content-type": mimeOf(file) } });
+      body = await readFile(file);
     } catch {
       return new Response("not found", { status: 404 });
+    }
+    const headers: Record<string, string> = { "content-type": mimeOf(file), "x-content-type-options": "nosniff" };
+    if (/\.html?$/i.test(file)) headers["content-security-policy"] = contentSecurityPolicy(inlineScriptHashes(body.toString("utf8")));
+    return new Response(new Uint8Array(body), { headers });
+  });
+}
+
+/** `spaceknife-cli headless …` with this process's terminal; the app ends with its exit code. Ctrl+C
+ *  and the signals a service manager sends reach it (it stops the server and says so). */
+function runHeadless(args: string[]): void {
+  // no GPU, no Dock icon; Chromium's own --headless lets Electron start on a Linux machine without a
+  // display (X11 or Wayland), as 0.3.4's headless mode did
+  if (!app.commandLine.hasSwitch("headless")) app.commandLine.appendSwitch("headless");
+  app.commandLine.appendSwitch("disable-gpu");
+  app.disableHardwareAcceleration();
+  if (process.platform === "darwin") app.dock?.hide();
+  void app.whenReady().then(() => {
+    const program = cli();
+    const env = backendEnv({ home: process.env.SPACEKNIFE_HOME, locale: systemLocale(), appVersion: app.getVersion(), installKind: INSTALL_KIND }, process.env);
+    const child = spawn(program, args, { stdio: "inherit", env, windowsHide: true });
+    child.once("error", (err) => {
+      process.stderr.write(`SpaceKnife: ${mt("backendMissing", { path: program })} (${err.message})\n`);
+      app.exit(1);
+    });
+    child.once("exit", (code, signal) => app.exit(code ?? (signal ? 128 + (constants.signals[signal] ?? 0) : 1)));
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+      process.on(signal, () => {
+        if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+      });
     }
   });
 }
 
-if (CLI.mode === "help" || CLI.mode === "error") {
-  const lang = systemLang();
-  if (CLI.mode === "help") process.stdout.write(`${ht(lang, "usage", { port: DEFAULT_PORT })}\n`);
-  else process.stderr.write(`${ht(lang, CLI.error, { value: CLI.value, port: DEFAULT_PORT })}\n${ht(lang, "seeHelp")}\n`);
-  exitFlushed(CLI.mode === "help" ? 0 : 2);
-} else if (CLI.mode === "headless") {
-  prepareHeadless();
-  void app.whenReady().then(() =>
-    runHeadless(CLI, {
-      rendererDir: RENDERER_DIR,
-      startBackend: (origins, onLog) => startBackend(backendOptions(origins, onLog)),
-    }),
-  );
+if (HEADLESS) {
+  runHeadless(HEADLESS);
 } else {
-  app.whenReady().then(() => {
-    serveRenderer();
+  void app.whenReady().then(() => {
+    // no menu bar and none of Electron's default shortcuts (reload, developer tools) on Windows and
+    // Linux, as in the Tauri shell; macOS keeps its application menu (Edit: copy and paste)
+    if (process.platform !== "darwin") Menu.setApplicationMenu(null);
+    // the page asks for nothing (notifications, camera, location…): nothing is granted
+    session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+    serveInterface(uiDir());
     themes = restoreTheme();
     registerIpc();
     createWindow();
     void launchBackend();
   });
+  app.on("window-all-closed", () => app.quit());
 }
-
-app.on("window-all-closed", () => app.quit());
 
 let quitting = false;
 app.on("before-quit", (event) => {

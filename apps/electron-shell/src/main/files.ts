@@ -1,5 +1,5 @@
-// The built interface's files (out/renderer): their types, and a URL path resolved inside the folder.
-// Both the app's app:// scheme (index.ts) and headless mode's HTTP server (headless-server.ts) use it.
+// The built interface's files (apps/desktop's Nuxt build; resources/ui when packaged): their types,
+// and a URL path resolved inside the folder, for the app:// scheme (index.ts).
 
 import { extname, isAbsolute, normalize, relative, resolve } from "node:path";
 

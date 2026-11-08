@@ -6,7 +6,7 @@
 // settings arrive. Electron and the file system come in through ThemeHost (index.ts), so this is
 // tested without them.
 
-import { isThemeSetting, parseThemeFile, themeFileText, type ThemeSetting, WINDOW_BG } from "../shared/theme";
+import { isThemeSetting, parseThemeFile, themeFileText, type ThemeSetting, WINDOW_BG } from "../../../desktop/app/shared/theme";
 
 export interface ThemeHost {
   /** nativeTheme */

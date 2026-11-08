@@ -28,10 +28,23 @@ pub fn page_platform(os: &str) -> &'static str {
     }
 }
 
+/// The shell the window runs in and its web view (SkApi.versions, 「关于与更新」).
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Versions {
-    tauri: String,
+    runtime: &'static str,
+    runtime_version: String,
     webview: String,
+}
+
+impl Versions {
+    pub fn of_tauri(webview: String) -> Self {
+        Versions {
+            runtime: "Tauri",
+            runtime_version: tauri::VERSION.to_string(),
+            webview,
+        }
+    }
 }
 
 /// What the page knows before anything else (lib/tauriHost.ts AppInfo).
@@ -51,10 +64,7 @@ pub fn app_info(app: AppHandle) -> AppInfo {
         platform: page_platform(std::env::consts::OS),
         version: app.package_info().version.to_string(),
         just_updated: std::env::args().any(|a| a == "--updated"),
-        versions: Versions {
-            tauri: tauri::VERSION.to_string(),
-            webview: tauri::webview_version().unwrap_or_default(),
-        },
+        versions: Versions::of_tauri(tauri::webview_version().unwrap_or_default()),
     }
 }
 
@@ -292,6 +302,15 @@ mod tests {
         assert_eq!(page_platform("macos"), "darwin");
         assert_eq!(page_platform("linux"), "linux");
         assert_eq!(page_platform("freebsd"), "linux");
+    }
+
+    #[test]
+    fn names_the_shell_for_the_about_page() {
+        let json = serde_json::to_value(Versions::of_tauri("142.0".into())).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"runtime": "Tauri", "runtimeVersion": tauri::VERSION, "webview": "142.0"})
+        );
     }
 
     #[test]

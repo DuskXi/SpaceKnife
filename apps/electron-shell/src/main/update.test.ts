@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { type FileProbe, type InstallKind, installKind, installRefusal, installStep, nsisUpdateArgs, portableVersion, projectPage, stepQuits, swapHelper, swapPlanJson } from "./update";
+import { type FileProbe, type InstallKind, installKind, installRefusal, installStep, nsisUpdateArgs, portableVersion, projectPage, stepQuits, swapHelpers, swapPlanJson } from "./update";
 
 const none = () => false;
 const only = (...paths: string[]) => (path: string) => paths.includes(path);
@@ -271,13 +271,17 @@ describe("the swap of a portable copy", () => {
       keep: ["data"],
     });
   });
-  it("is done by the new version's own backend, not a script", () => {
-    expect(swapHelper(plan.staged, "win32")).toBe(`${plan.staged}\\resources\\backend\\spaceknife-backend.exe`);
-    expect(swapHelper("/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable", "darwin")).toBe(
-      "/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable/SpaceKnife.app/Contents/Resources/backend/spaceknife-backend",
-    );
-    expect(swapHelper("/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable", "linux")).toBe(
-      "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable/resources/backend/spaceknife-backend",
-    );
+  it("is done by the new version's own spaceknife-cli, else the backend 0.3.x releases carry", () => {
+    expect(swapHelpers(plan.staged, "win32")).toEqual([
+      `${plan.staged}\\spaceknife-cli.exe`,
+      `${plan.staged}\\resources\\backend\\spaceknife-backend.exe`,
+    ]);
+    const mac = "/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable";
+    expect(swapHelpers(mac, "darwin")).toEqual([
+      `${mac}/SpaceKnife.app/Contents/MacOS/spaceknife-cli`,
+      `${mac}/SpaceKnife.app/Contents/Resources/backend/spaceknife-backend`,
+    ]);
+    const linux = "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable";
+    expect(swapHelpers(linux, "linux")).toEqual([`${linux}/spaceknife-cli`, `${linux}/resources/backend/spaceknife-backend`]);
   });
 });
