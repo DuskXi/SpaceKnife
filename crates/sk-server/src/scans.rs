@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, RwLock};
 use sk_core::events::{self, EventLevel, Source};
-use sk_core::helper::{HelperClient, LaunchOptions, MftOptions, Phase, SharedHelper};
+use sk_core::helper::{HelperClient, HelperError, LaunchOptions, MftOptions, Phase, SharedHelper};
 use sk_core::io::{IoGovernor, IoRegistry, Level, RegistryOptions};
 use sk_core::scan::mft::{MftBuild, table_to_store};
 use sk_core::scan::{
@@ -782,10 +782,24 @@ impl ScanManager {
                 "只有整个本地 NTFS 卷能用 MFT 快速扫描"
             )));
         }
+        let helper = self.helper.clone();
+        self.upgrade_with(server, &h, move || helper.get(true))?;
+        Ok(h)
+    }
+
+    /// [`Self::use_mft`] past its volume check, with the helper from `get` (the real one asks
+    /// for administrator rights). Test seam: a `get` that fails or panics.
+    #[doc(hidden)]
+    pub fn upgrade_with(
+        &self,
+        server: &Arc<Server>,
+        h: &Arc<ScanHandle>,
+        get: impl FnOnce() -> Result<Arc<HelperClient>, HelperError> + Send + 'static,
+    ) -> RpcResult<()> {
         {
             let mut st = h.st.lock();
             if !st.running || st.method == ScanMethodUsed::Mft || st.upgrading {
-                return Ok(h.clone());
+                return Ok(());
             }
             st.upgrading = true;
             st.phase = "helper".into();
@@ -793,47 +807,34 @@ impl ScanManager {
         }
         h.publish(server);
         let (srv, hh) = (server.clone(), h.clone());
-        let helper = self.helper.clone();
-        std::thread::spawn(move || {
-            match helper.get(true) {
-                Err(e) => {
-                    hh.st.lock().fallback = tr!("{reason}，继续硬扫描", reason = e.message.clone());
-                    events::emit(
-                        Source::Scan,
-                        &tr!(
-                            "未能启用 MFT 快速扫描：{reason}；继续硬扫描",
-                            reason = e.message
-                        ),
-                        EventLevel::Warning,
-                        Some(&hh.id),
-                        None,
-                    );
-                }
-                Ok(client) => {
-                    let mut st = hh.st.lock();
-                    let scanner = hh.scanner.as_ref();
-                    if st.running
-                        && st.method == ScanMethodUsed::Hard
-                        && scanner.is_some_and(|s| !s.cancelled())
-                    {
-                        st.upgrade = Some(client);
-                        drop(st);
-                        if let Some(s) = scanner {
-                            s.cancel(); // the hard scan stops; run_hard switches over
-                        }
+        let spawned = std::thread::Builder::new()
+            .name(format!("upgrade-{}", h.id))
+            .spawn(move || {
+                // a panic (a bug) while the helper starts is this scan's error, told like a helper
+                // that would not start; the hard scan goes on, and the switch always ends here
+                let run =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| upgrade(&hh, get)));
+                if let Err(payload) = run {
+                    let why = sk_core::scan::panic_message(payload.as_ref());
+                    tracing::error!("scan {}: starting the helper panicked: {why}", hh.id);
+                    // unless the hard scan was already told to hand over
+                    if hh.st.lock().upgrade.is_none() {
+                        no_upgrade(
+                            &hh,
+                            &tr!("启动扫描助手时意外中断：{reason}", reason = why),
+                            EventLevel::Error,
+                        );
                     }
                 }
-            }
-            {
-                let mut st = hh.st.lock();
-                st.upgrading = false;
-                if st.phase == "helper" {
-                    st.phase.clear();
-                }
-            }
-            hh.publish(&srv);
-        });
-        Ok(h)
+                upgrade_ended(&hh);
+                hh.publish(&srv);
+            });
+        if let Err(e) = spawned {
+            upgrade_ended(h);
+            h.publish(server);
+            return Err(RpcError::internal(e.to_string()));
+        }
+        Ok(())
     }
 
     pub fn cancel(&self, id: &str) -> RpcResult<Arc<ScanHandle>> {
@@ -1101,6 +1102,52 @@ impl ScanManager {
         );
         Ok(h)
     }
+}
+
+/// scan.use_mft's thread: start the helper (`get`) and hand it to the running hard scan, which
+/// then stops and switches over (`run_hard`).
+fn upgrade(h: &ScanHandle, get: impl FnOnce() -> Result<Arc<HelperClient>, HelperError>) {
+    match get() {
+        Err(e) => no_upgrade(h, &e.message, EventLevel::Warning),
+        Ok(client) => {
+            let mut st = h.st.lock();
+            let scanner = h.scanner.as_ref();
+            if st.running
+                && st.method == ScanMethodUsed::Hard
+                && scanner.is_some_and(|s| !s.cancelled())
+            {
+                st.upgrade = Some(client);
+                drop(st);
+                if let Some(s) = scanner {
+                    s.cancel(); // the hard scan stops; run_hard switches over
+                }
+            }
+        }
+    }
+}
+
+/// scan.use_mft is through with the helper (it may be asked for again).
+fn upgrade_ended(h: &ScanHandle) {
+    let mut st = h.st.lock();
+    st.upgrading = false;
+    if st.phase == "helper" {
+        st.phase.clear();
+    }
+}
+
+/// The switch to the MFT fast scan did not happen: why, and the hard scan goes on.
+fn no_upgrade(h: &ScanHandle, reason: &str, level: EventLevel) {
+    h.st.lock().fallback = tr!("{reason}，继续硬扫描", reason = reason.to_owned());
+    events::emit(
+        Source::Scan,
+        &tr!(
+            "未能启用 MFT 快速扫描：{reason}；继续硬扫描",
+            reason = reason.to_owned()
+        ),
+        level,
+        Some(&h.id),
+        None,
+    );
 }
 
 /// One whole local NTFS volume on Windows: the $MFT holds exactly this tree.

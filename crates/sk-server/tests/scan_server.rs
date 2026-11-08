@@ -600,3 +600,74 @@ async fn a_panic_in_a_scan_fails_that_scan_and_the_server_goes_on() {
     assert!(plan.lock().unwrap().is_empty());
     srv.shutdown();
 }
+
+#[tokio::test]
+async fn a_panic_while_the_helper_starts_leaves_the_hard_scan_going() {
+    // scan.use_mft starts the helper on a thread of its own (the administrator prompt). A bug
+    // there is that scan's error, told like a helper that would not start: the switch is not left
+    // 芦starting the helper禄 for good (so it can be asked for again), and the hard scan goes on to
+    // the end (0.3.4 cleared it in a `finally` and kept scanning)
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let _g = SERIAL.lock().await;
+    init();
+    // the listing threads wait here, so the scan is still running when the switch is asked for
+    let hold = Arc::new(AtomicBool::new(true));
+    let held = hold.clone();
+    let srv = server_tuned(
+        sk_server::ServeOptions {
+            token: TOKEN.to_owned(),
+            ..sk_server::ServeOptions::default()
+        },
+        move |t| {
+            t.scan_fault = Some(Arc::new(move |step: &str| {
+                while step == "list" && held.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }));
+        },
+    )
+    .await;
+    let c = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let facts = build_tree(&tmp.path().join("root"));
+    let started = c
+        .ok(
+            "scan.start",
+            json!({"roots": [facts.root], "workers": 2, "auto_snapshot": false}),
+        )
+        .await;
+    let id = started["scan_id"].as_str().unwrap().to_owned();
+    let h = srv.server.scans.get(&id).unwrap();
+    for (attempt, why) in ["injected helper bug", "no helper here"]
+        .into_iter()
+        .enumerate()
+    {
+        let get = move || -> Result<_, sk_core::helper::HelperError> {
+            if attempt == 0 {
+                panic!("{why}");
+            }
+            Err(sk_core::helper::HelperError::error(why, "test"))
+        };
+        srv.server.scans.upgrade_with(&srv.server, &h, get).unwrap();
+        let mut status = json!(null);
+        for _ in 0..200 {
+            status = c.ok("scan.status", json!({"scan_id": id})).await;
+            if !h.st.lock().upgrading && status["phase"] != "helper" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(!h.st.lock().upgrading, "{why}: still starting the helper");
+        assert_ne!(status["phase"], "helper", "{why}: {status}");
+        assert_eq!(status["state"], "scanning", "{why}: {status}");
+        assert_eq!(status["method"], "hard", "{why}: {status}");
+        let fallback = status["fallback"].as_str().unwrap_or("");
+        assert!(fallback.contains(why), "{why}: {status}");
+    }
+    hold.store(false, Ordering::SeqCst);
+    let status = wait_done(&c, &id).await;
+    assert_eq!(status["state"], "done", "{status}");
+    assert_eq!(status["files"], facts.files);
+    srv.shutdown();
+}
