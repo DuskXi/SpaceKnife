@@ -81,6 +81,8 @@ token 是这次启动生成的，放在打印出的链接的片段里（`#token=
 | `layout.flame.v1` | 能解码并画 `flame.v1` 帧（火焰图） |
 | `layout.polar.v1` | 能解码并画 `polar.v1` 帧（火焰-极坐标图） |
 | `updates.v1` | 接收 `update.changed`（更新检查结果与下载进度，见 §3「更新检查」） |
+| `node-generation.v1` | 节点 id 带上它所属的编号：`FrameInfo`、`ViewResults`、`TreeSummaryResult` 的 `generation`（树重新编号——文件变化后的压缩、MFT 扫描接手、对比重新计算——之后换一个）；`basket.add` 带回读到 id 时的 `generation`，树已经重新编号过就拒绝（UNKNOWN_NODE），不会把同一个 id 现在指的别的项加进去 |
+| `basket-confirm.v1` | 删除篮的项带 `rev`（它覆盖的范围变大或重新加入时变）；`basket.execute` 用 `confirm`（用户确认时看到的每一项的 `id` 和 `rev`）代替 `ids`：只执行这些，其中有一项离开了删除篮或变了就什么都不执行（BASKET_CHANGED），界面按现在的内容再问一次 |
 
 `drawlist.v1`（树图）是基线，不需要能力。后端只给会话发它协商过的布局：没有对应能力的会话里，新视图和 `view.open` 的可视化退回树图，`view.set` 选不可用的可视化返回 INVALID_PARAMS；配色 `branch` 也只对带 `visuals.v1` 的会话开放。界面的能力列表由已注册的可视化组件生成。
 
@@ -313,4 +315,5 @@ kind 1 是框加标题栏，子块画在框里。`FrameInfo.geometry` 和 `Frame
 | -32011 | SCAN_BUSY |
 | -32012 | UNKNOWN_VIEW |
 | -32013 | SETTINGS_CONFLICT（设置已被其他窗口修改，带上新版本号重试） |
+| -32014 | BASKET_CHANGED（确认过的删除篮项在确认之后离开了删除篮或变了，什么都没有执行；按现在的内容再确认） |
 | -32800 | REQUEST_CANCELLED |

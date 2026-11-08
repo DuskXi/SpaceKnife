@@ -364,6 +364,240 @@ async fn execute_takes_only_the_items_confirmed() {
     );
 }
 
+fn confirm_of(state: &Value) -> Value {
+    state["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| json!({"id": i["id"], "rev": i["rev"]}))
+        .collect()
+}
+
+/// `confirm` names each item as the dialog showed it (`rev`): those run, not what another session
+/// put beside them meanwhile.
+#[tokio::test]
+async fn confirmed_items_run_and_nothing_beside_them() {
+    let (srv, c) = setup().await;
+    let other = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    make_tree(&root, &[("confirmed.tmp", 100), ("added later.tmp", 100)]);
+    let scan_id = scanned(&c, &root).await;
+    c.ok("basket.clear", json!({})).await;
+    let first = node_of(&c, &scan_id, &root.join("confirmed.tmp")).await;
+    let state = c
+        .ok("basket.add", json!({"scan_id": scan_id, "nodes": [first]}))
+        .await["state"]
+        .clone();
+    assert!(state["items"][0]["rev"].as_i64().unwrap() > 0, "{state}");
+    let confirmed = confirm_of(&state);
+    let later = node_of(&other, &scan_id, &root.join("added later.tmp")).await;
+    other
+        .ok("basket.add", json!({"scan_id": scan_id, "nodes": [later]}))
+        .await;
+    let task = c
+        .ok(
+            "basket.execute",
+            json!({"mode": "delete", "confirm": confirmed}),
+        )
+        .await;
+    assert_eq!(task["total"], 1);
+    phase(&c, task["task_id"].as_str().unwrap(), &["done"]).await;
+    assert!(!root.join("confirmed.tmp").exists());
+    assert!(root.join("added later.tmp").exists());
+    // both ways at once is no confirmation
+    let e = c
+        .err(
+            "basket.execute",
+            json!({"mode": "delete", "ids": [], "confirm": confirmed}),
+        )
+        .await;
+    assert_eq!(
+        e.code,
+        i64::from(sk_protocol::ErrorCode::InvalidParams.code())
+    );
+}
+
+/// The confirmation dialog is open when another session changes what a confirmed item covers
+/// (here: adds the folder that holds it, which takes it in): nothing runs and the client is told
+/// to ask again (BASKET_CHANGED); confirmed as the basket is now, it runs.
+#[tokio::test]
+async fn nothing_runs_when_a_confirmed_item_changed() {
+    let (srv, c) = setup().await;
+    let other = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    make_tree(
+        &root,
+        &[("sub/a.tmp", 100), ("sub/b.tmp", 100), ("keep.tmp", 1)],
+    );
+    let scan_id = scanned(&c, &root).await;
+    c.ok("basket.clear", json!({})).await;
+    let a = node_of(&c, &scan_id, &root.join("sub").join("a.tmp")).await;
+    let state = c
+        .ok("basket.add", json!({"scan_id": scan_id, "nodes": [a]}))
+        .await["state"]
+        .clone();
+    let confirmed = confirm_of(&state);
+    let sub = node_of(&other, &scan_id, &root.join("sub")).await;
+    other
+        .ok("basket.add", json!({"scan_id": scan_id, "nodes": [sub]}))
+        .await;
+    let e = c
+        .err(
+            "basket.execute",
+            json!({"mode": "delete", "confirm": confirmed}),
+        )
+        .await;
+    assert_eq!(e.code, -32014, "{e:?}");
+    assert_eq!(
+        e.code,
+        i64::from(sk_protocol::ErrorCode::BasketChanged.code())
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await; // past the undo window: nothing ran
+    assert!(root.join("sub").join("a.tmp").exists());
+    assert!(root.join("sub").join("b.tmp").exists());
+    // asked again, as it is now
+    let now = c.ok("basket.list", json!({})).await;
+    let task = c
+        .ok(
+            "basket.execute",
+            json!({"mode": "delete", "confirm": confirm_of(&now)}),
+        )
+        .await;
+    phase(&c, task["task_id"].as_str().unwrap(), &["done"]).await;
+    assert!(!root.join("sub").exists());
+    assert!(root.join("keep.tmp").exists());
+}
+
+/// Renumber the scan's tree as the file-change monitor does once enough rows are gone: a
+/// compacted copy adopted (every id changes).
+fn renumber(srv: &sk_server::ServerHandle, scan_id: &str) {
+    let h = srv.server.scans.lookup(scan_id).unwrap();
+    let (compacted, _) = {
+        let r = h.store.read();
+        sk_store::mutate::compact(&r).unwrap()
+    };
+    h.store.write().adopt(&compacted);
+    h.ctx.names.forget();
+}
+
+/// A folder read again (an entry added) and the tree renumbered between the moment the interface
+/// read an id and basket.add: the id names another item now. basket.add with the generation it
+/// was read in is refused (UNKNOWN_NODE) and adds nothing; read again, the item goes in.
+#[tokio::test]
+async fn a_node_id_read_before_a_renumbering_is_refused() {
+    let (srv, c) = setup().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    make_tree(&root, &[("b.tmp", 100), ("c.tmp", 100), ("d/e.tmp", 10)]);
+    let scan_id = scanned(&c, &root).await;
+    srv.server.monitors.stop(&scan_id);
+    c.ok("basket.clear", json!({})).await;
+    let b = node_of(&c, &scan_id, &root.join("b.tmp")).await;
+    let read = c
+        .ok("tree.summary", json!({"scan_id": scan_id, "node": b}))
+        .await;
+    assert_eq!(read["node"]["id"], b);
+    let g0 = read["generation"].as_u64().unwrap();
+    // the folder is read again with a new entry first: its entries move to new rows ...
+    std::fs::write(root.join("a.tmp"), b"a").unwrap();
+    c.ok("scan.rescan", json!({"scan_id": scan_id, "node": 1}))
+        .await;
+    for _ in 0..200 {
+        let found = c
+            .ok(
+                "tree.find",
+                json!({"scan_id": scan_id, "path": root.join("a.tmp").to_string_lossy()}),
+            )
+            .await;
+        if !found["node"].is_null() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // ... and the tree is renumbered
+    renumber(&srv, &scan_id);
+    let now = c
+        .call("tree.node", json!({"scan_id": scan_id, "node": b}))
+        .await;
+    eprintln!("the old id now names {now:?}");
+    let e = c
+        .err(
+            "basket.add",
+            json!({"scan_id": scan_id, "nodes": [b], "generation": g0}),
+        )
+        .await;
+    assert_eq!(
+        e.code,
+        i64::from(sk_protocol::ErrorCode::UnknownNode.code()),
+        "{e:?}"
+    );
+    assert!(
+        c.ok("basket.list", json!({})).await["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    // read again: the same file, by its new id and numbering
+    let b2 = node_of(&c, &scan_id, &root.join("b.tmp")).await;
+    let g1 = c
+        .ok("tree.summary", json!({"scan_id": scan_id, "node": b2}))
+        .await["generation"]
+        .as_u64()
+        .unwrap();
+    assert_ne!(g1, g0);
+    let added = c
+        .ok(
+            "basket.add",
+            json!({"scan_id": scan_id, "nodes": [b2], "generation": g1}),
+        )
+        .await;
+    assert_eq!(added["added"], 1, "{added}");
+    assert_eq!(names(&added["state"]), ["b.tmp".to_string()].into());
+}
+
+/// A block of a frame drawn before the tree was renumbered (the frame's `generation`) is refused
+/// too, even where the client does not say which numbering it read: the frame's own decides.
+#[tokio::test]
+async fn a_block_of_a_frame_from_before_a_renumbering_is_refused() {
+    let (srv, c) = setup().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    make_tree(&root, &[("b.tmp", 5000), ("c.tmp", 4000)]);
+    let scan_id = scanned(&c, &root).await;
+    srv.server.monitors.stop(&scan_id);
+    c.ok("basket.clear", json!({})).await;
+    let up = c
+        .ok(
+            "view.open",
+            json!({"scan_id": scan_id, "viewport": {"width": 400, "height": 300}}),
+        )
+        .await;
+    let view_id = up["state"]["view_id"].as_str().unwrap().to_owned();
+    let g0 = up["frame"]["generation"].as_u64().unwrap();
+    let b = node_of(&c, &scan_id, &root.join("b.tmp")).await; // a file's block key is its id
+    renumber(&srv, &scan_id);
+    for params in [
+        json!({"scan_id": scan_id, "view_id": view_id, "key": b, "generation": g0}),
+        json!({"scan_id": scan_id, "view_id": view_id, "key": b}),
+    ] {
+        let e = c.err("basket.add", params).await;
+        assert_eq!(
+            e.code,
+            i64::from(sk_protocol::ErrorCode::UnknownNode.code()),
+            "{e:?}"
+        );
+    }
+    assert!(
+        c.ok("basket.list", json!({})).await["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    c.ok("view.close", json!({"view_id": view_id})).await;
+}
+
 /// A move to the trash stopped midway can be undone: what went to the trash before the stop
 /// comes back (it could not: the undo only took finished runs). The Windows shell takes up to
 /// 64 items per operation and stops between operations, so there are more than that.

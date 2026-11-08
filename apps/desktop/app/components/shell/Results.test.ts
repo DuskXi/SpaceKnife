@@ -22,7 +22,7 @@ vi.mock("@/state/actions", () => ({
     api.requests.push(params);
     const offset = params.offset ?? 0;
     const rows = Array.from({ length: Math.max(0, Math.min(params.limit ?? PAGE, TOTAL - offset)) }, (_, k) => row(offset + k));
-    return { promise: Promise.resolve({ active: true, alloc: 0, files: TOTAL, max_alloc: 1000, offset, total: TOTAL, rows }), cancel: () => api.cancels++ };
+    return { promise: Promise.resolve({ active: true, alloc: 0, files: TOTAL, max_alloc: 1000, offset, total: TOTAL, rows, generation: 42 }), cancel: () => api.cancels++ };
   },
   viewCall: vi.fn(async () => undefined),
   basketAdd: vi.fn(async () => undefined),
@@ -115,7 +115,8 @@ describe("Results", () => {
     await box.trigger("keydown", { key: "Enter" });
     expect(viewCall).toHaveBeenLastCalledWith(VIEW, "view.zoom", { key: 1001 });
     await box.trigger("keydown", { key: "Delete" });
-    expect(basketAdd).toHaveBeenLastCalledWith("s1", 501);
+    // with the numbering the row's id was read in (view.results `generation`)
+    expect(basketAdd).toHaveBeenLastCalledWith("s1", 501, 42);
     await box.trigger("keydown", { key: " " });
     expect(viewCall).toHaveBeenLastCalledWith(VIEW, "view.reveal", { key: 1001 });
     // view shortcuts pass through

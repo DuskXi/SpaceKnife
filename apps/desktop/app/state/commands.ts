@@ -34,13 +34,13 @@ import { type AppState, activeTab, basketCount, focusedViewId, get, set, toast, 
 import { type ColorModeName, nextColor, nextVisual, offered } from "./visuals";
 
 /** The selected node of the focused view (not an aggregate block), or null. */
-export function selectedNode(): { scanId: string; viewId: string; node: number } | null {
+export function selectedNode(): { scanId: string; viewId: string; node: number; generation: number } | null {
   const viewId = focusedViewId();
   const view = viewId ? get().views[viewId] : undefined;
   const frame = view?.frame;
   const row = frame?.info.selected_row;
   if (!viewId || !view || !frame || row == null || frame.kind[row]! >= Kind.SMALL || frame.node[row]! <= 0) return null;
-  return { scanId: view.state.scan_id, viewId, node: frame.node[row]! };
+  return { scanId: view.state.scan_id, viewId, node: frame.node[row]!, generation: frame.info.generation };
 }
 
 /** V / Shift+V and 「切换可视化」: the view's next (dir 1) or previous visualization among those it
@@ -208,7 +208,7 @@ export async function runCommand(id: string): Promise<void> {
       return;
     case "basket.add": {
       const sel = selectedNode();
-      if (sel) basketAdd(sel.scanId, sel.node);
+      if (sel) basketAdd(sel.scanId, sel.node, sel.generation);
       return;
     }
     case "item.copy_path": {

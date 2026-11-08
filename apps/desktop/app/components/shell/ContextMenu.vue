@@ -192,7 +192,7 @@ const items = computed<Item[]>(() => {
       keys: "Delete",
       danger: true,
       disabled: gone,
-      run: () => void (group.value ? basketAddBlock(m.scanId, m.viewId, m.key) : n != null && basketAdd(m.scanId, n)),
+      run: () => void (group.value ? basketAddBlock(m.scanId, m.viewId, m.key, m.generation) : n != null && basketAdd(m.scanId, n, m.generation)),
     },
     { id: "system", icon: "more", label: t("系统菜单…"), disabled: t("系统原生右键菜单还没有接入（见 TODO）") },
   ];

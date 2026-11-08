@@ -129,6 +129,7 @@ export function frameInfo(patch: Partial<FrameInfo> = {}): FrameInfo {
     dpr: 1,
     filter: null,
     flash: [],
+    generation: 1,
     geometry: null,
     height: 100,
     layout: "drawlist.v1",

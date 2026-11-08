@@ -1,6 +1,6 @@
 // The pure parts of the delete basket drawer (shell/BasketDrawer in the Electron renderer).
 
-import type { BasketItem, BasketVolume, OpProgressEvent } from "@/protocol/generated";
+import type { BasketConfirm, BasketItem, BasketVolume, OpProgressEvent } from "@/protocol/generated";
 import { fmtInt, plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
@@ -29,24 +29,36 @@ export function sortedItems(items: readonly BasketItem[], sort: BasketSort): Bas
   return out;
 }
 
-/** What a confirmation was given for: each item as the drawer showed it then. */
-export type Confirmed = ReadonlyArray<{ id: string; members: number }>;
+/** What a confirmation was given for: each item as the drawer showed it then (its `rev`). */
+export type Confirmed = ReadonlyArray<BasketConfirm>;
 
 /** The items the user is asked to confirm (the basket is shared: another session, a browser in
  *  headless mode, can add to it while the dialog is open). */
-export const confirmedOf = (items: readonly BasketItem[]): Confirmed => items.map((i) => ({ id: i.id, members: i.members }));
+export const confirmedOf = (items: readonly BasketItem[]): Confirmed => items.map((i) => ({ id: i.id, rev: i.rev }));
 
-/** The confirmed items still in the basket now (what executing the confirmed ids runs). */
+/** The confirmed items still in the basket now (what executing the confirmation runs). */
 export function stillConfirmed(confirmed: Confirmed, now: readonly BasketItem[]): BasketItem[] {
   const ids = new Set(confirmed.map((c) => c.id));
   return now.filter((i) => ids.has(i.id));
 }
 
-/** Whether a confirmed item now holds more than it did (a group of small items another session
- *  added to keeps its id): executing the confirmed ids would delete what was not confirmed. */
-export function grewSince(confirmed: Confirmed, now: readonly BasketItem[]): boolean {
+/** Whether a confirmed item changed since (its `rev` moved: a group of small items another
+ *  session added to keeps its id, also where one member left as another came): executing the
+ *  confirmation would delete what was not confirmed. The backend checks the same and runs
+ *  nothing then (BASKET_CHANGED); asking again here saves the round trip. */
+export function changedSince(confirmed: Confirmed, now: readonly BasketItem[]): boolean {
   const byId = new Map(now.map((i) => [i.id, i]));
-  return confirmed.some((c) => (byId.get(c.id)?.members ?? 0) > c.members);
+  return confirmed.some((c) => {
+    const i = byId.get(c.id);
+    return i != null && i.rev !== c.rev;
+  });
+}
+
+/** What basket.execute is given for a confirmation: the confirmed items still in the basket, as
+ *  they were confirmed (one that left it is simply not run). */
+export function confirmation(confirmed: Confirmed, now: readonly BasketItem[]): BasketConfirm[] {
+  const ids = new Set(now.map((i) => i.id));
+  return confirmed.filter((c) => ids.has(c.id)).map((c) => ({ id: c.id, rev: c.rev }));
 }
 
 /** Whether the toast of a file operation offers undo: a deletion still waiting, a move to the

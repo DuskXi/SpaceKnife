@@ -69,6 +69,9 @@ int_codes! {
         UnknownView = -32012,
         /// The settings were changed by another window: retry with the new version.
         SettingsConflict = -32013,
+        /// An item of the basket the user confirmed left it or changed since (another session
+        /// added to it): nothing ran, ask again with what it holds now (basket-confirm.v1).
+        BasketChanged = -32014,
         /// Same value LSP uses for a request cancelled by the client.
         RequestCancelled = -32800,
     }
@@ -96,6 +99,7 @@ impl ErrorCode {
             ErrorCode::ScanBusy => "SCAN_BUSY",
             ErrorCode::UnknownView => "UNKNOWN_VIEW",
             ErrorCode::SettingsConflict => "SETTINGS_CONFLICT",
+            ErrorCode::BasketChanged => "BASKET_CHANGED",
             ErrorCode::RequestCancelled => "REQUEST_CANCELLED",
         }
     }

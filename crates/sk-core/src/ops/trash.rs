@@ -159,6 +159,13 @@ pub mod seams {
     /// path can hold, as WinBtrfs shows Linux names with a backslash).
     pub type ListedFn = Arc<dyn Fn(&Path, &mut Vec<OsString>) + Send + Sync>;
     pub static LISTED: Mutex<Option<ListedFn>> = Mutex::new(None);
+    /// POSIX: how many folder levels of a permanent deletion keep their descriptor open (0: the
+    /// default, `remove::OPEN_FOLDERS`; tests make it small to reach folders again sooner).
+    pub static OPEN_FOLDERS: AtomicUsize = AtomicUsize::new(0);
+    /// Windows: the name a handle opened by a permanent deletion reports (tests report it in
+    /// another case, as SMB redirectors, WinFsp and Dokan may).
+    pub type OpenedNameFn = Arc<dyn Fn(&mut Vec<u16>) + Send + Sync>;
+    pub static OPENED_NAME: Mutex<Option<OpenedNameFn>> = Mutex::new(None);
 
     pub fn max_path() -> usize {
         MAX_PATH.load(Ordering::Relaxed)
@@ -175,6 +182,14 @@ pub mod seams {
         let f = LISTED.lock().clone();
         if let Some(f) = f {
             f(folder, names);
+        }
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn opened_name(name: &mut Vec<u16>) {
+        let f = OPENED_NAME.lock().clone();
+        if let Some(f) = f {
+            f(name);
         }
     }
 }

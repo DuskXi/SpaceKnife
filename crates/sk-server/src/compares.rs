@@ -59,6 +59,15 @@ fn not_ready() -> RpcError {
     RpcError::invalid_request(tr!("对比还在计算"))
 }
 
+/// Nodes of a change tree found in the tab's live tree ([`CompareManager::live_nodes`]).
+pub struct LiveNodes {
+    pub scan_id: String,
+    /// per node asked: its live node, None where it is not on disk now
+    pub found: Vec<Option<NodeId>>,
+    /// the live tree's numbering they are in
+    pub generation: u64,
+}
+
 /// A computed comparison: the change tree, the views' context over it, the change source.
 pub struct Ready {
     pub tree: Arc<ChangeTree>,
@@ -633,17 +642,45 @@ impl CompareManager {
         }))
     }
 
-    /// The same item in the tab's live tree (file operations from a compare view).
-    pub fn live_node(&self, id: &str, node: NodeId) -> Option<(String, NodeId)> {
+    /// The same items in the tab's live tree (file operations from a compare view): for each
+    /// node of the change tree the live node, None where it is not on disk now. Ids read in
+    /// another numbering than `generation` (the comparison was computed again since) are refused
+    /// as a whole. None: no such comparison, or its tab's scan is gone.
+    pub fn live_nodes(
+        &self,
+        id: &str,
+        nodes: &[i64],
+        generation: Option<u64>,
+    ) -> Option<RpcResult<LiveNodes>> {
         let h = self.lookup(id)?;
         let r = h.ready()?;
-        if node == 0 || node as usize >= r.tree.len() || !h.on_disk(&r.tree, node) {
-            return None;
-        }
         let scan = h.scan.upgrade()?;
-        let path = r.tree.store().read().path_bytes(node);
-        let found = scan.store.read().find(&path)?;
-        Some((scan.id.clone(), found))
+        // a change tree is never renumbered: a comparison computed again is another one
+        if generation.is_some_and(|g| g != r.tree.store().generation()) {
+            return Some(Err(crate::ops_service::stale_nodes()));
+        }
+        let paths: Vec<Option<Vec<u8>>> = {
+            let tree = r.tree.store().read();
+            nodes
+                .iter()
+                .map(|&n| {
+                    let node = NodeId::try_from(n).ok()?;
+                    (node != 0 && (node as usize) < r.tree.len() && h.on_disk(&r.tree, node))
+                        .then(|| tree.path_bytes(node))
+                })
+                .collect()
+        };
+        let live = scan.store.read();
+        let found = paths
+            .iter()
+            .map(|p| p.as_ref().and_then(|p| live.find(p)))
+            .collect();
+        Some(Ok(LiveNodes {
+            scan_id: scan.id.clone(),
+            found,
+            // under the reader the ids were found with
+            generation: scan.store.generation(),
+        }))
     }
 
     fn host_ready(&self, host: &ViewHost) -> RpcResult<(Arc<CompareHandle>, Arc<Ready>)> {

@@ -174,8 +174,17 @@ pub(crate) struct Inner {
     published: Mutex<Published>,
     ext: RwLock<ExtTable>,
     version: AtomicU64,
+    /// the numbering of its ids ([`Store::generation`])
+    generation: AtomicU64,
     ram: AtomicUsize,
     policy: Arc<Policy>,
+}
+
+/// Generations of numberings, never one twice in a process.
+static GENERATIONS: AtomicU64 = AtomicU64::new(1);
+
+fn new_generation() -> u64 {
+    GENERATIONS.fetch_add(1, Ordering::Relaxed)
 }
 
 impl RamUser for Inner {
@@ -259,6 +268,7 @@ impl Store {
             published: Mutex::new(published),
             ext: RwLock::new(ext),
             version: AtomicU64::new(0),
+            generation: AtomicU64::new(new_generation()),
             ram: AtomicUsize::new(ram),
             policy: policy.clone(),
         });
@@ -342,6 +352,15 @@ impl Store {
     /// Bumped by every change (caches key on it).
     pub fn version(&self) -> u64 {
         self.inner.version.load(Ordering::Acquire)
+    }
+
+    /// The numbering of its node ids: the same while ids keep naming what they named (a relist
+    /// adds rows and marks the old ones gone), another one after every renumbering
+    /// ([`Writer::adopt`]: a compaction, a tree built aside), and never one another store of this
+    /// process has had. A client that read ids sends it back with them to have stale ids
+    /// refused. Stable while a reader is held (renumbering takes the writer).
+    pub fn generation(&self) -> u64 {
+        self.inner.generation.load(Ordering::Acquire)
     }
 
     /// Bytes held in plain memory: columns (with headroom) and name chunks.
@@ -1719,6 +1738,15 @@ impl Writer<'_> {
             + 1;
         self.app.inner.version.store(v, Ordering::Release);
         other.inner.version.store(v, Ordering::Release);
+        // every id is new on both sides
+        self.app
+            .inner
+            .generation
+            .store(new_generation(), Ordering::Release);
+        other
+            .inner
+            .generation
+            .store(new_generation(), Ordering::Release);
         {
             let theirs = other.inner.append.lock();
             other.inner.ram.store(

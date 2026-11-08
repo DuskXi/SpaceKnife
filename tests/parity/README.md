@@ -147,7 +147,8 @@ comparison (`steps/<step index>/…`; `*` within a segment, `**` any segments) w
 | `linux-root-ctime` | `scan_tree`, `system` | Linux: the scan root gets a creation time (std's `created()`, statx) while every other entry has none, as in 0.3.4 |
 
 The others are accepted differences (texts, a sort direction nobody calls, the empty `loc` of
-Rust's parameter errors).
+Rust's parameter errors, and the fields 0.3.5 adds by design: `generation` of frames, result pages
+and summaries, `rev` of basket items).
 
 ## The upgrade scenario
 

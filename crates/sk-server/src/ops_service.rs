@@ -70,6 +70,14 @@ mod text {
     pub const NOTHING: &str = "删除篮里没有可以执行的项";
     pub const TRASH_SAME: &str = "回收站在同一个卷上：清空回收站后才真正释放空间";
     pub const TRASH_USED: &str = "{note}，回收站现在有 {size}";
+    pub const STALE: &str = "树刚刚重新编号过，请在新的画面里再选一次";
+    pub const CHANGED: &str = "删除篮在确认之后有了变化，什么都没有执行；请按现在的内容再确认一次";
+}
+
+/// Node ids read in a numbering the tree no longer has (it was renumbered: compaction after file
+/// changes, an MFT scan taking over, a comparison computed again): they name other items now.
+pub(crate) fn stale_nodes() -> RpcError {
+    RpcError::new(ErrorCode::UnknownNode, tr!(text::STALE))
 }
 
 struct RunState {
@@ -160,6 +168,16 @@ impl OpRun {
     pub fn refs(&self) -> Vec<String> {
         self.st.lock().refs.clone()
     }
+}
+
+/// Rows of a compare view found in its tab's live tree ([`OpsService::live`]).
+struct Live {
+    scan_id: String,
+    nodes: Vec<i64>,
+    /// the rows that are not on disk now
+    refused: Vec<Refused>,
+    /// the live tree's numbering `nodes` are in (None: not known, nothing found)
+    generation: Option<u64>,
 }
 
 /// The basket and the operations of this backend.
@@ -332,31 +350,40 @@ impl OpsService {
         let mut scan_id = p.scan_id.clone();
         let mut nodes: Vec<i64> = p.nodes.iter().map(|&n| i64::from(n)).collect();
         let mut members: Option<Vec<i64>> = None;
+        // the numbering `nodes` are in: the client's word for its ids, the frame's for a block
+        let mut generation = p.generation;
         if let (Some(key), Some(view_id)) = (p.key, &p.view_id) {
             let host = server.views.get(session, view_id)?;
             let h = host.clone();
+            let asked = p.generation;
             let found = crate::compute::blocking(move || {
                 let v = h.view.lock();
                 let frame = v.last.as_ref()?;
+                if asked.is_some_and(|g| g != frame.generation) {
+                    return Some(Err(stale_nodes())); // the key is a frame's of another numbering
+                }
                 let key = u32::try_from(key).ok()?;
                 let row = frame.draw.row(key)?;
-                match frame.draw.members.get(&key).filter(|g| !g.is_empty()) {
+                let picked = match frame.draw.members.get(&key).filter(|g| !g.is_empty()) {
                     Some(group) => {
                         let parent = i64::from(v.store().read().parent(group[0]));
-                        Some((
+                        (
                             vec![parent],
                             Some(group.iter().map(|&m| i64::from(m)).collect::<Vec<_>>()),
-                        ))
+                        )
                     }
-                    None => Some((vec![i64::from(frame.draw.node[row])], None)),
-                }
+                    None => (vec![i64::from(frame.draw.node[row])], None),
+                };
+                Some(Ok((picked, frame.generation)))
             })
             .await?;
-            let Some((n, m)) = found else {
+            let Some(found) = found else {
                 return Err(RpcError::invalid_params(tr!(text::NO_BLOCK)));
             };
+            let ((n, m), g) = found?;
             nodes = n;
             members = m;
+            generation = Some(g);
             scan_id = host.scan_id.clone();
         }
         let mut refused: Vec<Refused> = Vec::new();
@@ -365,15 +392,19 @@ impl OpsService {
         {
             // a compare view's rows: the same items in the tab's live tree (a group: its folder
             // and its members, each)
-            let (target, live, more) = Self::live(server, &scan_id, &nodes);
-            refused.extend(more);
+            let found = Self::live(server, &scan_id, &nodes, generation)?;
+            refused.extend(found.refused);
             if let Some(m) = members.take() {
-                let (_, live_members, more) = Self::live(server, &scan_id, &m);
-                refused.extend(more);
-                members = Some(live_members);
+                let of_members = Self::live(server, &scan_id, &m, generation)?;
+                if of_members.generation != found.generation {
+                    return Err(stale_nodes());
+                }
+                refused.extend(of_members.refused);
+                members = Some(of_members.nodes);
             }
-            scan_id = target;
-            nodes = live;
+            scan_id = found.scan_id;
+            nodes = found.nodes;
+            generation = found.generation;
         }
         let Some(handle) = server.scans.lookup(&scan_id) else {
             return Err(RpcError::new(
@@ -387,10 +418,15 @@ impl OpsService {
             let id = handle.id.clone();
             result = crate::compute::compute(move || {
                 let r = handle.store.read();
-                basket.add(&r, &id, &nodes, members.as_deref())
+                // renumbered since the ids were read: they name other items now
+                if generation.is_some_and(|g| g != handle.store.generation()) {
+                    return Err(stale_nodes());
+                }
+                basket
+                    .add(&r, &id, &nodes, members.as_deref())
+                    .map_err(|e| RpcError::invalid_params(e.to_string()))
             })
-            .await?
-            .map_err(|e| RpcError::invalid_params(e.to_string()))?;
+            .await??;
         }
         result.refused.splice(0..0, refused);
         let out = self.added(server, result).await;
@@ -398,22 +434,29 @@ impl OpsService {
         out
     }
 
-    /// Rows of the comparison `compare_id`'s change tree → the same items in its tab's live tree
-    /// (the scan id, the nodes found) and the rows that are not on disk now, refused.
-    fn live(server: &Server, compare_id: &str, nodes: &[i64]) -> (String, Vec<i64>, Vec<Refused>) {
+    /// Rows of the comparison `compare_id`'s change tree (read in its numbering `generation`)
+    /// → the same items in its tab's live tree.
+    fn live(
+        server: &Server,
+        compare_id: &str,
+        nodes: &[i64],
+        generation: Option<u64>,
+    ) -> RpcResult<Live> {
         let mut target = server
             .compares
             .lookup(compare_id)
             .map(|h| h.scan_id.clone())
             .unwrap_or_default();
+        let found = match server.compares.live_nodes(compare_id, nodes, generation) {
+            Some(r) => Some(r?),
+            None => None,
+        };
+        let live_generation = found.as_ref().map(|f| f.generation);
         let (mut live, mut refused) = (Vec::new(), Vec::new());
-        for &n in nodes {
-            let found = u32::try_from(n)
-                .ok()
-                .and_then(|n| server.compares.live_node(compare_id, n as NodeId));
-            match found {
-                Some((scan, node)) => {
-                    target = scan;
+        for (i, &n) in nodes.iter().enumerate() {
+            match found.as_ref().and_then(|f| f.found[i]) {
+                Some(node) => {
+                    target = found.as_ref().unwrap().scan_id.clone();
                     live.push(i64::from(node));
                 }
                 None => {
@@ -429,7 +472,12 @@ impl OpsService {
                 }
             }
         }
-        (target, live, refused)
+        Ok(Live {
+            scan_id: target,
+            nodes: live,
+            refused,
+            generation: live_generation,
+        })
     }
 
     async fn added(
@@ -557,7 +605,26 @@ impl OpsService {
         if let Some(f) = registering {
             f();
         }
-        let targets = self.basket.targets(p.ids.as_deref());
+        let targets = match &p.confirm {
+            // exactly what the user confirmed, as it was then; nothing when it changed since
+            Some(confirm) => {
+                let shown: Vec<(String, u64)> = confirm
+                    .iter()
+                    .map(|c| (c.id.clone(), u64::try_from(c.rev).unwrap_or(u64::MAX)))
+                    .collect();
+                match self.basket.confirmed_targets(&shown) {
+                    Ok(t) => t,
+                    Err(changed) => {
+                        tracing::info!(
+                            "basket.execute: {} confirmed items changed since, nothing runs",
+                            changed.len()
+                        );
+                        return Err(RpcError::new(ErrorCode::BasketChanged, tr!(text::CHANGED)));
+                    }
+                }
+            }
+            None => self.basket.targets(p.ids.as_deref()),
+        };
         if targets.is_empty() {
             return Err(RpcError::invalid_request(tr!(text::NOTHING)));
         }

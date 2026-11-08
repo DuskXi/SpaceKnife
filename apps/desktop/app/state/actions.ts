@@ -1,7 +1,7 @@
 // Everything that talks to the backend: connection, scans, views, filter, tags, updates.
 
 import type { BackendInfo, BackendState } from "@/shared/api";
-import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, UpdateStatus, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
+import type { BasketConfirm, FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, UpdateStatus, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
 import { fmtInt, plural, setUnitBase } from "@/lib/format";
 import { Rpc, RpcError } from "@/protocol/rpc";
 // the built-in visualizations register before the first hello announces their layouts
@@ -285,17 +285,31 @@ async function openLike(scanId: string, like: ViewState | undefined): Promise<st
 
 // ------------------------------------------------------------------ delete basket (W5)
 
-/** Delete key / 「加入删除篮」 (UI-W3-33, UI-MAIN-46, UI-W5-18/28): the backend dedups by path. */
-export function basketAdd(scanId: string, node: number): Promise<void> {
-  return basketPut({ scan_id: scanId, nodes: [node] });
+/** Whether the backend of this connection negotiated `cap` (session.hello). */
+export function negotiated(cap: string): boolean {
+  return !!rpc?.hello?.capabilities.includes(cap);
 }
 
-/** An aggregate block of a view goes in as one item with its members (UI-W5-29). */
-export function basketAddBlock(scanId: string, viewId: string, key: number): Promise<void> {
-  return basketPut({ scan_id: scanId, view_id: viewId, key });
+/** Node ids come with the numbering they were read in (`generation` of the frame, result page
+ *  or summary they came from); the backend refuses ids of a tree renumbered since. */
+export const NODE_GENERATION = "node-generation.v1";
+/** basket.execute names the items the user confirmed as they were shown (`rev`). */
+export const BASKET_CONFIRM = "basket-confirm.v1";
+
+/** Delete key / 「加入删除篮」 (UI-W3-33, UI-MAIN-46, UI-W5-18/28): the backend dedups by path.
+ *  `generation`: the numbering `node` was read in. */
+export function basketAdd(scanId: string, node: number, generation?: number | null): Promise<void> {
+  return basketPut({ scan_id: scanId, nodes: [node] }, generation);
 }
 
-async function basketPut(params: Methods["basket.add"]["params"]): Promise<void> {
+/** An aggregate block of a view goes in as one item with its members (UI-W5-29); `generation`:
+ *  the frame's the key is from. */
+export function basketAddBlock(scanId: string, viewId: string, key: number, generation?: number | null): Promise<void> {
+  return basketPut({ scan_id: scanId, view_id: viewId, key }, generation);
+}
+
+async function basketPut(params: Methods["basket.add"]["params"], generation: number | null | undefined): Promise<void> {
+  if (generation != null && negotiated(NODE_GENERATION)) params = { ...params, generation };
   try {
     const r = await call("basket.add", params);
     set({ basket: r.state });
@@ -321,19 +335,28 @@ export async function basketClear(): Promise<void> {
   set({ basket: await call("basket.clear", {}) });
 }
 
-/** Run the items `ids` of the basket (the ones the user saw and confirmed; the basket is shared
- *  by every session): into the recycle bin, or deleted for good after the undo window (W5-41…47). */
-export async function basketExecute(mode: "trash" | "delete", ids: string[]): Promise<void> {
+/** BASKET_CHANGED: a confirmed item changed since; nothing ran. */
+const BASKET_CHANGED = -32014;
+
+/** Run the items the user saw and confirmed (`confirm`, each as it was shown; the basket is
+ *  shared by every session): into the recycle bin, or deleted for good after the undo window
+ *  (W5-41…47). "changed": one of them changed since and nothing ran (the backend checks it too;
+ *  the caller asks again); "failed": told in a toast. */
+export async function basketExecute(mode: "trash" | "delete", confirm: BasketConfirm[]): Promise<"started" | "changed" | "failed"> {
   try {
-    const task = await call("basket.execute", { mode, ids });
+    const params = negotiated(BASKET_CONFIRM) ? { mode, confirm } : { mode, ids: confirm.map((c) => c.id) };
+    const task = await call("basket.execute", params);
     // an ops.progress event may already be here: it wins
     set((s) =>
       s.op?.task_id === task.task_id
         ? s
         : { op: { task_id: task.task_id, mode, done: 0, total: task.total, current: "", phase: task.delay_s > 0 ? "waiting" : "running", results: [], freed: 0, can_undo: task.delay_s > 0 } },
     );
+    return "started";
   } catch (err) {
+    if (err instanceof RpcError && err.code === BASKET_CHANGED) return "changed";
     toast(err instanceof RpcError ? err.message : String(err));
+    return "failed";
   }
 }
 

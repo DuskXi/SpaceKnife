@@ -112,7 +112,10 @@ const actions = computed(() => {
       toast(t("已复制"));
     },
   });
-  list.push({ icon: "basket", danger: true, label: t("加入删除篮"), keys: "Delete", disabled: !s.on_disk, run: () => void (scanId.value && basketAdd(scanId.value, s.node.id)) });
+  // the summary must be of the numbering the node was picked in (the frame's): a tree renumbered
+  // in between names another item by that id, until the next frame and summary
+  const sameNumbering = s.generation === frame.value?.info.generation;
+  list.push({ icon: "basket", danger: true, label: t("加入删除篮"), keys: "Delete", disabled: !s.on_disk || !sameNumbering, run: () => void (scanId.value && basketAdd(scanId.value, s.node.id, s.generation)) });
   return list;
 });
 

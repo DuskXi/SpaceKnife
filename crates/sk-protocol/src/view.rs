@@ -542,6 +542,11 @@ pub struct FrameInfo {
     /// The zoom root (flame.v1 / polar.v1)
     #[serde(default)]
     pub root: Option<FrameRoot>,
+    /// The numbering of the node ids and keys in this frame: another one once the tree is
+    /// renumbered (compaction after file changes, an MFT scan taking over, a comparison computed
+    /// again). basket.add takes it with ids from this frame (node-generation.v1)
+    #[serde(default)]
+    pub generation: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -645,6 +650,9 @@ pub struct ViewResults {
     pub max_alloc: i64,
     pub offset: i64,
     pub rows: Vec<ResultRow>,
+    /// The numbering of the rows' node ids and keys (FrameInfo.generation of the frame `seq`)
+    #[serde(default)]
+    pub generation: u64,
 }
 
 /// One visualization this server offers (``visual.list``).

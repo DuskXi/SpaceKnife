@@ -92,6 +92,7 @@
  "小项聚合块不能加标签": "A small items block can't be tagged.",
  "已停止": "Stopped",
  "删除篮在确认时有了变化，请再确认一次": "The delete basket changed while you were confirming. Please confirm again.",
+ "删除篮刚刚有了变化，请看一眼再执行": "The delete basket just changed. Have a look, then try again.",
  "已删除": "Deleted",
  "已加入删除篮": "Added to the delete basket",
  "已加入删除篮（并入了篮里的 {n} 项）": "Added to the delete basket ({n} items already in it were merged)",

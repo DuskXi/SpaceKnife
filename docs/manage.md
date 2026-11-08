@@ -73,14 +73,14 @@ OpResult(path, ok, code: ok|missing|denied|locked|protected|no_trash|exists|canc
 - **移到回收站从不变成永久删除**：Windows 用 IFileOperation（FOFX_RECYCLEONDELETE），进度回调拒绝任何不进回收站的删除；卷没有回收站、超过回收站容量、路径太长时逐项返回 `no_trash`，原样不动。Linux 按 freedesktop Trash 规范（`renameat2(RENAME_NOREPLACE)`，跨设备返回 `no_trash`，从不复制）。
 - 执行前逐项复核：仍存在、仍不受保护、未被占用。
 - 只差大小写的同名项（0.3.4，docs/native.md 2.2）：`roots` 给出每个路径所在的扫描根（删除篮加入时就为每一项记下，`ops_service` 执行时传入，扫描已经关闭也照样核对）。Windows 上逐项按路径打开（不要任何权限、不跟随重解析点）读文件系统存的名字（`FileNormalizedNameInfo`，不支持时 `FileNameInfo`），与扫描根自己存的名字接上路径在根以下的各级比较（`worker.task_is`，同一次执行里每个根只读一次）。完全相同就照常执行。不同时，从扫描根往下逐级列出路径经过的文件夹：某一级里既有路径的这个名字、又有一个只差大小写的别的名字，就说明按这个路径可能打开另一项（WinBtrfs 上 `a` 的路径打开的是 `A`，`A` 是符号链接时还会跟着它到别处；NTFS 上不带区分大小写标志的文件夹里 ntfs-3g 写下的 POSIX 名字同理），返回 `ambiguous_name`（「另一项与它只差大小写，按名字会打开另一项；没有改动任何东西」），原样不动；哪一级列不出也同样拒绝。路上没有这样的一对时照常执行：扫描之后只改了大小写（例如 `Photos` 改成 `photos`）、网络盘上存的名字是最先打开它的那个程序用的大小写、存的名字在别处（硬链接的另一个名字、重定向），都不误拦。旧快照、对比视图、Python 遍历器扫出的树、只差大小写的文件都由这一条兜住。Windows 上路径里有名字以点或空格结尾的也拒绝（`ambiguous_name`，「它或上级文件夹的名字以点或空格结尾，Windows 按路径找到的不是它；没有改动任何东西」）：Win32 会去掉结尾的点和空格，`odd.` 的路径删的是旁边的 `odd`，而扫描按 NT 路径（worker 按 `\\?\` 路径）把两个都照原样列出。删除篮加入时拒绝没有路径单独指向的项：名字（或扫描根以下某一级上级的名字）里有路径分隔符（Windows 上 `\` 和 `/`，WinBtrfs 照原样显示 Linux 的文件名；POSIX 上 `\` 是普通字符）、与同一文件夹里另一项的名字完全相同（WinBtrfs 把无效的 UTF-8 显示成 U+FFFD：扫描按 ID 列出各自的内容，按路径删的却是其中一个），以及 Windows 上以点或空格结尾。
-- 永久删除文件夹（`ops/remove.rs`）：里面的项从不靠「列出的名字接到文件夹路径后面再按路径找」。列出的名字为空、是 `.` / `..`、含 NUL 或路径分隔符（Windows 上还有 `\`、`/` 和流分隔符 `:`）的不拼接（「其中有名字里带路径分隔符的项，按路径找不到它，未删除」）：WinBtrfs 照原样列出 Linux 上的 `..\x`，拼出来就在选中的文件夹外面。POSIX 上一律相对父目录的描述符操作（`fstatat`、带 `O_NOFOLLOW` 的 `openat`、`unlinkat`），打开的文件夹必须是 `fstatat` 看到的那一个，且与被删文件夹在同一个挂载上（Linux 比 `statx` 的 mount id，同一文件系统的 bind mount 也认得出；没有时查 `/proc/self/mountinfo`）。Windows 上每一项按完整的 `\\?\` 路径、不跟随重解析点打开，在句柄上核对同一个卷、打开后的名字等于父文件夹的名字加列出的名字（途中被换成链接就对不上），再通过这个句柄删除；文件夹通过核对过是同一个的句柄列出。被换成链接或别的项时不进入、不删（「删除过程中其中一项被换成了别的项或链接，未进入、未删除」）；链接只删链接本身；另一个卷的挂载点（Windows 的文件夹挂载点、Linux 的 bind mount）不进入、不移除（`mount_inside`）。
+- 永久删除文件夹（`ops/remove.rs`）：里面的项从不靠「列出的名字接到文件夹路径后面再按路径找」。列出的名字为空、是 `.` / `..`、含 NUL 或路径分隔符（Windows 上还有 `\`、`/` 和流分隔符 `:`）的不拼接（「其中有名字里带路径分隔符的项，按路径找不到它，未删除」）：WinBtrfs 照原样列出 Linux 上的 `..\x`，拼出来就在选中的文件夹外面。POSIX 上一律相对父目录的描述符操作（`fstatat`、带 `O_NOFOLLOW` 的 `openat`、`unlinkat`），打开的文件夹必须是 `fstatat` 看到的那一个，且与被删文件夹在同一个挂载上（Linux 比 `statx` 的 mount id，同一文件系统的 bind mount 也认得出；没有时查 `/proc/self/mountinfo`）。描述符只有被删的文件夹和最深的 32 级一直开着（每级一个的话，几千级深的树会半路用光：Linux 默认 1024 个，macOS 的程序 256 个）；往下走时关掉的上级，往回走时用下一级的 `..` 打开，不行再从最近一个开着的级别按名字逐级打开，每一级都必须仍是原来那个文件夹（设备号和 inode），否则这一级和它剩下的内容都不动（`moved_inside`）。Windows 上每一项按完整的 `\\?\` 路径、不跟随重解析点打开，在句柄上核对同一个卷、打开后的名字等于父文件夹的名字加列出的名字（途中被换成链接就对不上），再通过这个句柄删除；名字只差大小写时（SMB 重定向器、WinFsp、Dokan 报告的是最先打开它的程序用的大小写）不按名字算数，必须是父文件夹按列出的名字列着的那一项：同一个卷、文件 ID（`FileIdBothDirectoryInformation`，通过核对过是这个文件夹的句柄列出）等于句柄的文件索引，区分大小写的文件夹里只差大小写的另一项、移进来的别的文件夹都对不上；文件夹通过核对过是同一个的句柄列出。被换成链接或别的项时不进入、不删（「删除过程中其中一项被换成了别的项或链接，未进入、未删除」）；链接只删链接本身；另一个卷的挂载点（Windows 的文件夹挂载点、Linux 的 bind mount）不进入、不移除（`mount_inside`）。
 - 删除篮按路径的键比较（Windows 上不分大小写），但同一个文件夹里两个名字比较起来相同（大小写双胞胎、显示成同样 U+FFFD 的名字）时，这一级的名字按原样写进键：两项各是各的，下面的项只归各自那一项。执行结果按目标（而不是显示的路径）对回删除篮里的项。
 - 回收站引用留在后端，名字不是合法 Unicode 时逐单元记下（`ref_of`）；还原按 `$I` 记录 / `.trashinfo` 里原样的路径（孤立代理项、非法 UTF-8 字节都不变），名字不会变成 U+FFFD。
 
 ### 2.4 服务层（`crates/sk-server/src/ops_service.rs`）
 
 - 删除篮每个后端一份，所有会话共享，变化推 `basket.changed`；状态里每个卷带 `trash_status`（回收站说明、当前占用）。
-- `basket.execute {mode, ids}` → 任务 id；`ops.progress` 推给发起的会话（`mode`、进度、结束时逐项结果、`freed`、`can_undo`）。界面发它让用户确认的那些 id（删除篮所有会话共享，对话框打开之后别的会话加进来的不算在内；确认时某个确认过的小项聚合块被加了成员就再问一次）；`ids` 为空表示全部。同一时间只有一个操作：忙检查与登记在同一把锁下，两个同时的请求只有一个开始。
+- `basket.execute {mode, ids}` → 任务 id；`ops.progress` 推给发起的会话（`mode`、进度、结束时逐项结果、`freed`、`can_undo`）。界面发它让用户确认的那些项：`confirm` 是每一项的 `id` 和确认时看到的 `rev`（basket-confirm.v1；删除篮所有会话共享，对话框打开之后别的会话加进来的不算在内）。`rev` 在一项覆盖的范围变大时变（小项聚合块加了成员，即使同时少了一个、成员数不变），重新加入的项也是新的 `rev`；查锁、树变化后的重新核对不改它。执行时在登记任务的同一把锁下逐项核对，有一项离开了删除篮或 `rev` 不同，就什么都不执行，返回 BASKET_CHANGED（-32014），界面按现在的内容再问一次；界面发出之前自己也比一次。旧客户端照样可以发 `ids`（只执行这些）或都不发（全部），与 0.3.4 相同。同一时间只有一个操作：忙检查与登记在同一把锁下，两个同时的请求只有一个开始。
 - 永久删除先等 `DELETE_DELAY`（5 秒）：期间 `ops.undo` / `ops.cancel` 直接作废，什么都没碰。移到回收站完成后（或中途停下时已经移进去的部分）`ops.undo` 用 `restore` 放回原处并把条目放回删除篮。后端保留最近 8 个任务的撤销信息。
 - 加入后在后台检查占用（Restart Manager 等），树变化（监控事件）后 1 秒静默再 `refresh`。
 - 对比视图里的节点按路径映射到「现在」的树再加入；已删除的项、目标为历史快照时拒绝（「只能操作「现在」还在磁盘上的项」）。
@@ -155,7 +155,7 @@ def load_rules(extra_dir=None, *, host=None) -> RuleSet       # 内置 110 条 +
 | 方法 / 事件 | 说明 |
 |---|---|
 | `path.forms {scan_id, node}` | 四种格式 + `on_disk`（对比视图里同样可用） |
-| `basket.list / add / remove / clear / execute`，事件 `basket.changed` | `add {scan_id, nodes}` 或 `{view_id, key}`（聚合块的成员） |
+| `basket.list / add / remove / clear / execute`，事件 `basket.changed` | `add {scan_id, nodes}` 或 `{view_id, key}`（聚合块的成员），带 `generation`（读到这些 id 的画面、结果页或摘要的编号，node-generation.v1）：树在这之后重新编号过就拒绝（UNKNOWN_NODE，「树刚刚重新编号过，请在新的画面里再选一次」）；按块加入时以画面自己的编号为准，客户端不说也核对 |
 | `ops.cancel / undo`，事件 `ops.progress` | 见 2.4 |
 | `compare.sources / open / info / close / summary / node`，事件 `compare.progress` | 见 3.1 |
 | `export.targets / check / run` | 见 4 |

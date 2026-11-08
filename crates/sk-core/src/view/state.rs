@@ -276,6 +276,8 @@ pub struct Frame {
     pub dstat: Option<Vec<u8>>,
     /// render counter of the view (identifies the frame, e.g. for result caches)
     pub serial: u64,
+    /// the numbering its node ids and keys belong to ([`sk_store::Store::generation`])
+    pub generation: u64,
 }
 
 /// Python's `searchsorted(TONE_LIMITS, age, side="right")`; unknown times are the oldest.
@@ -989,6 +991,8 @@ impl View {
         frame.flash = self.flash_rows(&nodes, &frame.draw);
         self.serial += 1;
         frame.serial = self.serial;
+        // read under the reader: no renumbering in between
+        frame.generation = ctx.store.generation();
         drop(nodes);
         self.spare = self.last.replace(frame);
         self.last.as_ref().expect("just rendered")

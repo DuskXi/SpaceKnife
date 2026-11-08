@@ -277,6 +277,8 @@ pub fn summary_of(h: &ScanHandle, node: NodeId, top: usize) -> Result<TreeSummar
         on_disk: here,
         folder_class,
         gaps: gaps.into_items(),
+        // `nodes` is still held: the numbering its ids were read in
+        generation: h.store.generation(),
     })
 }
 
