@@ -252,12 +252,10 @@ Function SkPageScopeLeave
     SetErrorLevel $0
     Quit
   ${EndIf}
+  ; the earlier installation's folder in this scope, else /D= (for this scope as for the other),
+  ; else the default one
   Call SkFindPrevious
-  ${If} $SkOldDir != ""
-    StrCpy $INSTDIR $SkOldDir
-  ${Else}
-    Call SkDefaultDir
-  ${EndIf}
+  Call SkChooseFolder
 FunctionEnd
 
 ; 4. The folder: only for a new installation (an earlier one keeps its folder: shortcuts and pins)
@@ -484,11 +482,7 @@ Function .onInit
 
   Call SkFindPrevious
   ${SkLog} "found: '$SkOldKind' $SkOldVersion in '$SkOldDir'; stock Tauri in '$SkTauriDir'"
-  ${If} $SkOldDir != ""
-    StrCpy $INSTDIR $SkOldDir
-  ${ElseIf} $INSTDIR == "${PLACEHOLDER_INSTALL_DIR}"
-    Call SkDefaultDir
-  ${EndIf}
+  Call SkChooseFolder
   ; a stock Tauri test build lies (by default) in the data folder: never install there
   ${If} $SkOldDir == ""
   ${AndIf} $SkTauriDir != ""
