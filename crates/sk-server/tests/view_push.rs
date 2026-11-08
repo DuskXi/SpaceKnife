@@ -33,10 +33,10 @@ async fn view(c: &Client, scan_id: &str) -> String {
     v["state"]["view_id"].as_str().unwrap().to_owned()
 }
 
-/// The scan ends while a progress push renders; the view is closed before the final frame: no
-/// frame of the closed view is pushed after its close.
+/// The scan ends while a progress push waits for the view; the view is closed before the push
+/// renders: no frame of the closed view is pushed after its close, neither that progress frame nor
+/// the pending final one (0.3.4 cancelled the push).
 #[tokio::test]
-#[ignore = "bug: a view closed while a push renders still gets the pending scan-final frame (sk-server views.rs push() loops on final_pending without checking that the view is still open; 0.3.4 cancelled the push)"]
 async fn closing_the_view_drops_a_pending_final() {
     let srv = server().await;
     let c = Client::open(&srv.url).await;
@@ -46,7 +46,9 @@ async fn closing_the_view_drops_a_pending_final() {
     let view_id = view(&c, &scan_id).await;
     let host = srv.server.views.lookup(&view_id).unwrap();
     let server = srv.server.clone();
+    tokio::time::sleep(Duration::from_millis(200)).await;
     c.drain_events().await;
+    c.drain_binary().await;
     // hold the view: the progress push waits for it, the end of the scan arrives meanwhile
     let guard = host.lock.lock().await;
     server
@@ -65,9 +67,10 @@ async fn closing_the_view_drops_a_pending_final() {
         .filter(|(m, p)| m == "view.frame" && p["frame"]["view_id"] == view_id.as_str())
         .map(|(_, p)| p["frame"]["reason"].as_str().unwrap_or("").to_owned())
         .collect();
+    assert!(reasons.is_empty(), "frames of the closed view: {reasons:?}");
     assert!(
-        !reasons.iter().any(|r| r == "scan-final"),
-        "frames of the closed view: {reasons:?}"
+        c.drain_binary().await.is_empty(),
+        "binary frames of the closed view"
     );
     srv.shutdown();
 }
