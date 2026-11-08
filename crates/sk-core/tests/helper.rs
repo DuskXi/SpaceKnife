@@ -844,11 +844,18 @@ mod uac {
 
     #[test]
     fn launch_elevated_denied() {
+        // an installed app's folder: the window program and spaceknife-cli next to it
+        let app = tempfile::tempdir().unwrap();
+        let gui = app.path().join("SpaceKnife.exe");
+        let cli = app.path().join("spaceknife-cli.exe");
+        std::fs::write(&gui, b"").unwrap();
+        std::fs::write(&cli, b"").unwrap();
         let calls = Arc::new(Mutex::new(Vec::<ShellExecuteParams>::new()));
         let seen = calls.clone();
         let err = launch_err(LaunchOptions {
             elevate: true,
             assume_elevated: Some(false),
+            program: Some(gui.clone()),
             elevator: elevator(move |p| {
                 seen.lock().unwrap().push(p.clone());
                 Err(io::Error::from_raw_os_error(1223)) // ERROR_CANCELLED
@@ -859,10 +866,8 @@ mod uac {
         let calls = calls.lock().unwrap();
         let params = &calls[0];
         assert_eq!(params.verb, "runas");
-        assert_eq!(
-            params.file,
-            std::env::current_exe().unwrap().to_string_lossy()
-        );
+        // the console program is elevated, never the window program
+        assert_eq!(params.file, cli.to_string_lossy());
         assert!(
             params
                 .parameters
@@ -873,6 +878,35 @@ mod uac {
         let argv = split_cmdline(&params.parameters);
         let i = argv.iter().position(|a| a == "--token-file").unwrap();
         assert!(!Path::new(&argv[i + 1]).exists()); // cleaned up after the refusal
+    }
+
+    #[test]
+    fn no_console_program_no_prompt() {
+        // this test binary has no spaceknife-cli next to it: the helper is unavailable, and no UAC
+        // prompt ever shows for the running program itself
+        let calls = Arc::new(Mutex::new(Vec::<ShellExecuteParams>::new()));
+        let seen = calls.clone();
+        let err = launch_err(LaunchOptions {
+            elevate: true,
+            assume_elevated: Some(false),
+            elevator: elevator(move |p| {
+                seen.lock().unwrap().push(p.clone());
+                Err(io::Error::from_raw_os_error(1223))
+            }),
+            ..LaunchOptions::default()
+        });
+        let exe = std::env::current_exe().unwrap();
+        let calls = calls.lock().unwrap();
+        assert!(
+            calls.iter().all(|p| p.file != exe.to_string_lossy()),
+            "{:?}",
+            calls.iter().map(|p| &p.file).collect::<Vec<_>>()
+        );
+        if !exe.with_file_name("spaceknife-cli.exe").is_file() {
+            assert!(calls.is_empty());
+            assert!(err.is_unavailable() && err.code == "unavailable", "{err:?}");
+            assert!(err.message.contains("spaceknife-cli"), "{}", err.message);
+        }
     }
 
     #[test]
@@ -971,6 +1005,30 @@ fn launch_through_a_stand_in_pkexec() {
             "echo 'Error executing command as another user: No authentication agent found.' >&2; exit 127",
         );
         assert_eq!(launch_err(elevated_opts()).code, "no_agent");
+
+        // without a command given: pkexec runs the console program next to the app, never the
+        // window program
+        let app = tempfile::tempdir().unwrap();
+        let gui = app.path().join("spaceknife");
+        let cli = app.path().join("spaceknife-cli");
+        std::fs::write(&gui, "").unwrap();
+        std::fs::write(&cli, "").unwrap();
+        let argv_file = dir.path().join("argv");
+        write(&format!(
+            "printf '%s\\n' \"$@\" > '{}'; exit 126",
+            argv_file.display()
+        ));
+        let err = launch_err(LaunchOptions {
+            command: None,
+            program: Some(gui),
+            ..elevated_opts()
+        });
+        assert!(err.is_denied(), "{err:?}");
+        let argv = std::fs::read_to_string(&argv_file).unwrap();
+        let argv: Vec<&str> = argv.lines().collect();
+        assert_eq!(argv[0], cli.to_str().unwrap());
+        assert_eq!(argv[1], "helper");
+        assert!(argv.contains(&"--token-file"), "{argv:?}");
     }
 }
 
@@ -999,7 +1057,10 @@ fn disk_health_needs_linux_and_admin() {
 #[test]
 fn mac_elevation_not_supported() {
     if unprivileged() {
-        let err = launch_err(LaunchOptions::default());
+        let err = launch_err(LaunchOptions {
+            command: Some(command("real")),
+            ..LaunchOptions::default()
+        });
         assert_eq!(err.code, "not_supported");
     }
 }

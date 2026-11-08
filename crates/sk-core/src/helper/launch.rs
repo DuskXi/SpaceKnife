@@ -1,7 +1,7 @@
 //! Starting the helper process (Python `helper/launch.py`): a plain subprocess, or elevated through
-//! the UAC prompt (Windows) or polkit's `pkexec` (Linux). The helper is this very executable run
-//! with the `helper` subcommand ([`helper_command`]): the app binary dispatches it to
-//! [`super::run_main`].
+//! the UAC prompt (Windows) or polkit's `pkexec` (Linux). The helper is the console program
+//! `spaceknife-cli` next to the app, run with the `helper` subcommand ([`helper_command`]); it
+//! dispatches that to [`super::run_main`]. The window program is never the one elevated.
 
 use std::collections::VecDeque;
 use std::ffi::OsString;
@@ -282,14 +282,52 @@ pub fn start_pkexec(
     Ok(Box::new(PkexecProcess::new(child)))
 }
 
-/// This executable in helper mode: `[current_exe, "helper"]`. Elevated helpers run the same binary
-/// (never looked up in PATH), so nothing user-writable outside the installation can inject code
-/// into the administrator process.
+/// The console program every package puts next to the app's own executable (Tauri's `externalBin`,
+/// the portable archives, the Electron shell's backend): the helper runs as it.
+pub const CLI_FILE: &str = if cfg!(windows) {
+    "spaceknife-cli.exe"
+} else {
+    "spaceknife-cli"
+};
+
+/// Whether `name` is [`CLI_FILE`] (Windows and macOS compare without case, as their file systems
+/// usually do).
+fn is_cli_file(name: &std::ffi::OsStr) -> bool {
+    if cfg!(any(windows, target_os = "macos")) {
+        name.to_str()
+            .is_some_and(|n| n.eq_ignore_ascii_case(CLI_FILE))
+    } else {
+        name == CLI_FILE
+    }
+}
+
+/// The helper of the running program: [`helper_command_for`] `current_exe`.
 pub fn helper_command() -> io::Result<Vec<OsString>> {
-    Ok(vec![
-        std::env::current_exe()?.into_os_string(),
-        HELPER_SUBCOMMAND.into(),
-    ])
+    helper_command_for(&std::env::current_exe()?)
+}
+
+/// `[<spaceknife-cli>, "helper"]` for a program at `exe`: `exe` itself when it is the console
+/// program, else the console program next to it (absolute, never looked up in PATH). Never the
+/// window program: the administrator process loads nothing of the interface (WebView2, WebKitGTK,
+/// GTK and their libraries). An error when there is no console program to run.
+pub fn helper_command_for(exe: &std::path::Path) -> io::Result<Vec<OsString>> {
+    let cli = if exe.file_name().is_some_and(is_cli_file) {
+        exe.to_path_buf()
+    } else {
+        exe.parent()
+            .map(|dir| dir.join(CLI_FILE))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, CLI_FILE))?
+    };
+    if !cli.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            tr!(
+                "找不到扫描助手程序：{path}",
+                path = cli.display().to_string()
+            ),
+        ));
+    }
+    Ok(vec![cli.into_os_string(), HELPER_SUBCOMMAND.into()])
 }
 
 /// Unelevated helper: stdin / stdout null, stderr shared (the helper's log).
@@ -531,9 +569,52 @@ mod tests {
         assert_eq!(p.show, 0);
         assert_eq!(p.mask, 0x40 | 0x8000 | 0x400 | 0x100);
         assert_eq!(p.directory, None);
-        let cmd = helper_command().unwrap();
-        assert_eq!(cmd[0], std::env::current_exe().unwrap().into_os_string());
-        assert_eq!(cmd[1], "helper");
+    }
+
+    #[test]
+    fn never_the_window_program() {
+        // this test binary is not the console program: the helper is never it
+        let exe = std::env::current_exe().unwrap();
+        if let Ok(cmd) = helper_command() {
+            assert_ne!(cmd[0], exe.as_os_str());
+            assert!(is_cli_file(
+                std::path::Path::new(&cmd[0]).file_name().unwrap()
+            ));
+            assert_eq!(cmd[1], "helper");
+        }
+    }
+
+    #[test]
+    fn the_helper_is_the_console_program_next_to_the_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join(if cfg!(windows) {
+            "SpaceKnife.exe"
+        } else {
+            "spaceknife"
+        });
+        std::fs::write(&app, b"").unwrap();
+        // no console program: no helper at all (never the window program instead)
+        let err = helper_command_for(&app).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains(CLI_FILE), "{err}");
+        let cli = dir.path().join(CLI_FILE);
+        std::fs::write(&cli, b"").unwrap();
+        assert_eq!(
+            helper_command_for(&app).unwrap(),
+            vec![cli.clone().into_os_string(), OsString::from("helper")]
+        );
+        // the console program itself (the Electron shell runs the backend as `spaceknife-cli serve`)
+        assert_eq!(helper_command_for(&cli).unwrap()[0], cli.as_os_str());
+        // a folder of that name is not a program
+        let odd = tempfile::tempdir().unwrap();
+        std::fs::create_dir(odd.path().join(CLI_FILE)).unwrap();
+        assert!(helper_command_for(&odd.path().join("spaceknife")).is_err());
+        if cfg!(windows) {
+            let upper = dir.path().join("SPACEKNIFE-CLI.EXE");
+            assert_eq!(helper_command_for(&upper).unwrap()[0], upper.as_os_str());
+        } else if cfg!(target_os = "linux") {
+            assert!(!is_cli_file(std::ffi::OsStr::new("SpaceKnife-cli")));
+        }
     }
 
     const AGENT_MISSING: &str =

@@ -59,7 +59,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 ## 2. 后端与命令行
 
 - 后端就在应用进程里：`src-tauri/src/backend.rs` 调用 `sk_server::start`，在随机的回环端口上提供协议（每次启动一个新 token），界面连上它（[protocol.md](protocol.md) §1）。没有子进程，也没有 stdin 交接 token。
-- 同一个程序的另外两种用途在 `src-tauri/src/main.rs` 里、加载任何东西之前分派：`spaceknife helper …` 是提权的扫描助手（`sk_core::helper`），`spaceknife --apply-update <计划>` 是便携版的「无缝更新」（`sk_core::update::swap`）。
+- 提权的扫描助手（`sk_core::helper`）是应用旁边的 `spaceknife-cli helper …`，从来不是窗口程序；`spaceknife --apply-update <计划>` 是便携版的「无缝更新」（`sk_core::update::swap`），在 `src-tauri/src/main.rs` 里、加载任何东西之前分派。
 - 命令行：`spaceknife-cli`（`crates/sk-server/src/bin/spaceknife-cli.rs`，`cli/mod.rs`）装在应用旁边：`scan`、`run`、`snapshot list | show`、`serve`（给界面用的 WebSocket 后端，`--ready-file` 等）、`headless`、`version`；`--headless` / `--listen` 作为 `headless` 的别名仍然接受。
 - 安装目录本身是受保护路径（不能在应用里删除或移动它）。
 

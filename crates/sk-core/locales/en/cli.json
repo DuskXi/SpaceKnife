@@ -324,5 +324,6 @@
  "列 {key} 的长度或类型不一致": "Column {key} has the wrong length or type",
  "无效的助手地址：{address}": "Invalid helper address: {address}",
  "读写超时": "Read or write timed out",
- "等待连接超时": "Timed out waiting for the connection"
+ "等待连接超时": "Timed out waiting for the connection",
+ "找不到扫描助手程序：{path}": "Can't find the scan helper program: {path}"
 }
