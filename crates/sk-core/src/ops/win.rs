@@ -18,6 +18,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, LocalFree};
 use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
@@ -630,12 +631,17 @@ pub(crate) fn path_key(path: &str) -> String {
     super::paths::nt_normcase(&super::paths::nt_normpath(path))
 }
 
-/// The progress sink: a COM object whose first field is its vtable.
+/// The progress sink: a COM object whose first field is its vtable. It lives on the heap and counts
+/// its references: ours ([`SinkRef`]) and those the engine takes (Advise, QueryInterface); the
+/// last Release frees it.
 #[repr(C)]
 struct Sink<'a> {
     vtbl: *const SinkVtbl,
+    refs: AtomicU32,
+    /// the caller's callbacks: None once our reference is gone, so an engine that holds the sink
+    /// longer reaches none of them
     cancel: Option<&'a (dyn Fn() -> bool + Sync)>,
-    on_item: &'a mut (dyn FnMut(usize, &Recycled) + Send),
+    on_item: Option<&'a mut (dyn FnMut(usize, &Recycled) + Send)>,
     cancelled: bool,
     items: Vec<Recycled>,
     index: HashMap<String, usize>,
@@ -680,14 +686,87 @@ unsafe extern "system" fn sink_qi(this: P, riid: *const GUID, ppv: *mut P) -> HR
         };
         if same(&IID_IUNKNOWN) || same(&IID_IFILE_OPERATION_PROGRESS_SINK) {
             *ppv = this;
+            sink_add_ref(this); // the pointer handed out is a reference of its own
             return S_OK;
         }
         *ppv = null_mut();
         E_NOINTERFACE
     }
 }
-unsafe extern "system" fn sink_ref(_: P) -> u32 {
-    1
+unsafe extern "system" fn sink_add_ref(this: P) -> u32 {
+    // SAFETY: `this` is a live sink: whoever calls holds a reference to it.
+    unsafe {
+        (*(this as *const Sink<'_>))
+            .refs
+            .fetch_add(1, Ordering::Relaxed)
+            + 1
+    }
+}
+
+unsafe extern "system" fn sink_release(this: P) -> u32 {
+    // SAFETY: as in sink_add_ref; the reference given back is the caller's, so once none is left
+    // nobody can reach the sink and it is freed (it was made by SinkRef::new, a Box).
+    unsafe {
+        let left = (*(this as *const Sink<'_>))
+            .refs
+            .fetch_sub(1, Ordering::AcqRel)
+            - 1;
+        if left == 0 {
+            drop(Box::from_raw(this as *mut Sink<'_>));
+        }
+        left
+    }
+}
+
+/// Our reference to a [`Sink`] (made with one: ours). Dropping it detaches the caller's
+/// callbacks, then gives the reference back: the sink goes when the engine has let go too.
+struct SinkRef<'a>(std::ptr::NonNull<Sink<'a>>);
+
+impl<'a> SinkRef<'a> {
+    fn new(
+        cancel: Option<&'a (dyn Fn() -> bool + Sync)>,
+        on_item: &'a mut (dyn FnMut(usize, &Recycled) + Send),
+        items: Vec<Recycled>,
+        index: HashMap<String, usize>,
+    ) -> Self {
+        let sink = Box::new(Sink {
+            vtbl: &SINK_VTBL,
+            refs: AtomicU32::new(1),
+            cancel,
+            on_item: Some(on_item),
+            cancelled: false,
+            items,
+            index,
+            refused_other: Vec::new(),
+            unmatched: Vec::new(),
+        });
+        SinkRef(std::ptr::NonNull::from(Box::leak(sink)))
+    }
+
+    /// The sink as the engine takes it (an IFileOperationProgressSink).
+    fn com(&self) -> P {
+        self.0.as_ptr().cast()
+    }
+
+    /// # Safety
+    /// Not while one of the sink's methods runs (the engine calls them on this thread, from
+    /// inside its own calls).
+    unsafe fn get(&mut self) -> &mut Sink<'a> {
+        // SAFETY: our reference keeps it alive; the caller rules out other users.
+        unsafe { self.0.as_mut() }
+    }
+}
+
+impl Drop for SinkRef<'_> {
+    fn drop(&mut self) {
+        let s = self.0.as_ptr();
+        // SAFETY: alive until our reference goes, below; no sink method runs now.
+        unsafe {
+            (*s).cancel = None;
+            (*s).on_item = None;
+            sink_release(s.cast());
+        }
+    }
 }
 unsafe extern "system" fn ok0(_: P) -> HRESULT {
     S_OK
@@ -777,7 +856,9 @@ unsafe extern "system" fn sink_post_delete(
                 entry.hr = hr;
                 entry.recycled = item_ref(created);
                 let snapshot = entry.clone();
-                (sink.on_item)(i, &snapshot);
+                if let Some(on_item) = sink.on_item.as_mut() {
+                    on_item(i, &snapshot);
+                }
             }
             Some(_) => {}
         }
@@ -787,8 +868,8 @@ unsafe extern "system" fn sink_post_delete(
 
 static SINK_VTBL: SinkVtbl = SinkVtbl {
     query_interface: sink_qi,
-    add_ref: sink_ref,
-    release: sink_ref,
+    add_ref: sink_add_ref,
+    release: sink_release,
     start_operations: ok0,
     finish_operations: ok_finish,
     pre_rename_item: ok_pre_rename,
@@ -836,114 +917,116 @@ fn recycle_sta(
             std::iter::once((path_key(p), i)).chain(long)
         })
         .collect();
-    let mut sink = Box::new(Sink {
-        vtbl: &SINK_VTBL,
-        cancel,
-        on_item,
-        cancelled: false,
-        items,
-        index,
-        refused_other: Vec::new(),
-        unmatched: Vec::new(),
-    });
-    // SAFETY: COM on this (fresh) thread; every object is released; the sink outlives the
-    // operation (it is unadvised before it is dropped).
+    let mut sink = SinkRef::new(cancel, on_item, items, index);
+    // SAFETY: COM on this (fresh) thread; every interface pointer is released by its guard, the
+    // apartment's guard goes last; the sink counts its references, so the engine may hold it as
+    // long as it likes (it reaches the caller's callbacks only while `sink` lives).
     unsafe {
-        let init = CoInitializeEx(
+        let _apartment = Apartment(CoInitializeEx(
             null(),
             (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        ));
+        let done = |hr: HRESULT, sink: &mut SinkRef<'_>| RecycleRun {
+            items: std::mem::take(&mut sink.get().items),
+            hr,
+            cancelled: false,
+            refused: Vec::new(),
+            unmatched: Vec::new(),
+        };
+        let mut raw: Unknown = null_mut();
+        let hr = CoCreateInstance(
+            &CLSID_FILE_OPERATION,
+            null_mut(),
+            CLSCTX_ALL,
+            &IID_IFILE_OPERATION,
+            &mut raw,
         );
-        let run = (|| {
-            let mut op: Unknown = null_mut();
-            let hr = CoCreateInstance(
-                &CLSID_FILE_OPERATION,
-                null_mut(),
-                CLSCTX_ALL,
-                &IID_IFILE_OPERATION,
-                &mut op,
-            );
-            let done = |hr: HRESULT, sink: &mut Sink<'_>| RecycleRun {
-                items: std::mem::take(&mut sink.items),
-                hr,
-                cancelled: false,
-                refused: Vec::new(),
-                unmatched: Vec::new(),
-            };
-            if hr < 0 || op.is_null() {
-                return done(hr, &mut sink);
-            }
-            let set_flags: unsafe extern "system" fn(Unknown, u32) -> HRESULT = method(op, 5);
-            let advise: unsafe extern "system" fn(Unknown, P, *mut u32) -> HRESULT = method(op, 3);
-            let unadvise: unsafe extern "system" fn(Unknown, u32) -> HRESULT = method(op, 4);
-            let delete_item: unsafe extern "system" fn(Unknown, Unknown, P) -> HRESULT =
-                method(op, 18);
-            let perform: unsafe extern "system" fn(Unknown) -> HRESULT = method(op, 21);
-            let hr = set_flags(op, RECYCLE_FLAGS);
-            if hr < 0 {
-                release(op);
-                return done(hr, &mut sink);
-            }
-            let mut cookie = 0u32;
-            let sink_ptr: *mut Sink<'_> = &mut *sink;
-            let hr = advise(op, sink_ptr as P, &mut cookie);
-            if hr < 0 {
-                release(op);
-                return done(hr, &mut sink);
-            }
-            let mut queued = 0;
-            for (i, path) in paths.iter().enumerate() {
-                // as given: a name with a lone surrogate is parsed exactly
-                let w = wide_path(path);
-                let mut item: Unknown = null_mut();
-                let hr = SHCreateItemFromParsingName(
-                    w.as_ptr(),
-                    null_mut(),
-                    &IID_ISHELL_ITEM,
-                    &mut item,
-                );
-                if hr < 0 || item.is_null() {
-                    let s = &mut *sink_ptr;
-                    s.items[i].hr = hr;
-                    s.items[i].reached = true;
-                    continue;
-                }
-                let hr = delete_item(op, item, null_mut());
-                release(item);
-                if hr < 0 {
-                    let s = &mut *sink_ptr;
-                    s.items[i].hr = hr;
-                    s.items[i].reached = true;
-                } else {
-                    queued += 1;
-                }
-            }
-            let result = if queued > 0 { perform(op) } else { S_OK };
-            unadvise(op, cookie);
-            release(op);
-            let sink = &mut *sink_ptr;
-            let mut refused: Vec<String> = sink
-                .items
-                .iter()
-                .filter(|e| e.refused)
-                .map(|e| e.path.clone())
-                .collect();
-            refused.append(&mut sink.refused_other);
-            RecycleRun {
-                items: std::mem::take(&mut sink.items),
-                hr: result,
-                cancelled: sink.cancelled,
-                refused,
-                unmatched: std::mem::take(&mut sink.unmatched),
-            }
-        })();
-        if init >= 0 {
-            // S_OK / S_FALSE: balance it (RPC_E_CHANGED_MODE: not ours to undo)
-            CoUninitialize();
+        if hr < 0 || raw.is_null() {
+            return done(hr, &mut sink);
         }
-        run
+        let op = ComPtr(raw);
+        let set_flags: unsafe extern "system" fn(Unknown, u32) -> HRESULT = method(op.0, 5);
+        let advise: unsafe extern "system" fn(Unknown, P, *mut u32) -> HRESULT = method(op.0, 3);
+        let unadvise: unsafe extern "system" fn(Unknown, u32) -> HRESULT = method(op.0, 4);
+        let delete_item: unsafe extern "system" fn(Unknown, Unknown, P) -> HRESULT =
+            method(op.0, 18);
+        let perform: unsafe extern "system" fn(Unknown) -> HRESULT = method(op.0, 21);
+        let hr = set_flags(op.0, RECYCLE_FLAGS);
+        if hr < 0 {
+            return done(hr, &mut sink);
+        }
+        let mut cookie = 0u32;
+        let hr = advise(op.0, sink.com(), &mut cookie);
+        if hr < 0 {
+            return done(hr, &mut sink);
+        }
+        let mut queued = 0;
+        for (i, path) in paths.iter().enumerate() {
+            // as given: a name with a lone surrogate is parsed exactly
+            let w = wide_path(path);
+            let mut raw: Unknown = null_mut();
+            let hr =
+                SHCreateItemFromParsingName(w.as_ptr(), null_mut(), &IID_ISHELL_ITEM, &mut raw);
+            if hr < 0 || raw.is_null() {
+                let s = sink.get();
+                s.items[i].hr = hr;
+                s.items[i].reached = true;
+                continue;
+            }
+            let item = ComPtr(raw);
+            let hr = delete_item(op.0, item.0, null_mut());
+            drop(item);
+            if hr < 0 {
+                let s = sink.get();
+                s.items[i].hr = hr;
+                s.items[i].reached = true;
+            } else {
+                queued += 1;
+            }
+        }
+        let result = if queued > 0 { perform(op.0) } else { S_OK };
+        unadvise(op.0, cookie);
+        drop(op);
+        let s = sink.get();
+        let mut refused: Vec<String> = s
+            .items
+            .iter()
+            .filter(|e| e.refused)
+            .map(|e| e.path.clone())
+            .collect();
+        refused.append(&mut s.refused_other);
+        RecycleRun {
+            items: std::mem::take(&mut s.items),
+            hr: result,
+            cancelled: s.cancelled,
+            refused,
+            unmatched: std::mem::take(&mut s.unmatched),
+        }
     }
 }
 
+/// A COM interface pointer holding one reference, released when dropped.
+struct ComPtr(Unknown);
+
+impl Drop for ComPtr {
+    fn drop(&mut self) {
+        // SAFETY: a live object whose reference is ours (release skips null).
+        unsafe { release(self.0) };
+    }
+}
+
+/// `CoInitializeEx` on this thread (its HRESULT), balanced when dropped: S_OK and S_FALSE are
+/// ours to undo, a failure (RPC_E_CHANGED_MODE) is not.
+struct Apartment(HRESULT);
+
+impl Drop for Apartment {
+    fn drop(&mut self) {
+        if self.0 >= 0 {
+            // SAFETY: this thread's own successful CoInitializeEx.
+            unsafe { CoUninitialize() };
+        }
+    }
+}
 /// Move `paths` to the recycle bin in one shell operation, on a fresh STA thread.
 ///
 /// Returns one [`Recycled`] per path (same order) and the operation's HRESULT. `on_item` is
@@ -963,4 +1046,63 @@ pub fn recycle(
             .join()
             .map_err(|_| io::Error::other("the recycle thread panicked"))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vtbl(com: P) -> &'static SinkVtbl {
+        // SAFETY: a live sink, whose first field points at the static vtable.
+        unsafe { &**(com as *const *const SinkVtbl) }
+    }
+
+    /// The engine's AddRef / Release count (the engine may hold the sink past our part in it),
+    /// QueryInterface hands out a reference of its own, and an engine that still holds the sink
+    /// once ours is gone reaches none of the caller's callbacks; the last Release frees it.
+    #[test]
+    fn the_progress_sink_counts_its_references() {
+        let mut seen = Vec::new();
+        let stop = || true;
+        {
+            let cancel: &(dyn Fn() -> bool + Sync) = &stop;
+            let mut on_item = |i: usize, _: &Recycled| seen.push(i);
+            let item = Recycled {
+                path: String::new(),
+                hr: E_ABORT,
+                recycled: None,
+                refused: false,
+                reached: false,
+            };
+            // a null item has the path "": it is item 0
+            let index = HashMap::from([(String::new(), 0usize)]);
+            let sink = SinkRef::new(Some(cancel), &mut on_item, vec![item], index);
+            let com = sink.com();
+            let vt = vtbl(com);
+            let recycle = TSF_DELETE_RECYCLE_IF_POSSIBLE;
+            // SAFETY: the sink is alive while a reference to it is held, as COM has it.
+            unsafe {
+                assert_eq!((vt.add_ref)(com), 2, "the engine's reference (Advise)");
+                let mut out: P = null_mut();
+                let qi = (vt.query_interface)(com, &IID_IFILE_OPERATION_PROGRESS_SINK, &mut out);
+                assert_eq!((qi, out), (S_OK, com));
+                assert_eq!((vt.release)(out), 2, "QueryInterface counted one");
+                // ours alive: the callbacks are reached
+                assert_eq!((vt.pre_delete_item)(com, recycle, null_mut()), E_ABORT);
+                assert_eq!(
+                    (vt.post_delete_item)(com, 0, null_mut(), S_OK, null_mut()),
+                    S_OK
+                );
+                drop(sink);
+                // only the engine's left: the sink is still there, the callbacks are not
+                assert_eq!((vt.pre_delete_item)(com, recycle, null_mut()), S_OK);
+                assert_eq!(
+                    (vt.post_delete_item)(com, 0, null_mut(), S_OK, null_mut()),
+                    S_OK
+                );
+                assert_eq!((vt.release)(com), 0, "the last reference frees it");
+            }
+        }
+        assert_eq!(seen, [0]);
+    }
 }
