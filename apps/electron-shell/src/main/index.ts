@@ -30,13 +30,16 @@ import { ThemeKeeper } from "./theme";
 import { type InstallHow, installKind, installRefusal, installStep, MAC_APP, nsisUpdateArgs, portableVersion, projectPage, swapHelpers, swapPlanJson } from "./update";
 
 // The swap helper's question before it puts this version of a portable copy in place
-// (cli.ts STARTUP_CHECK): the libraries loaded, so the answer is yes; then the end, with none of
-// what follows (no window, profile or backend: the last lines start nothing then).
-const STARTUP_CHECK_ONLY = isStartupCheck(process.argv.slice(1));
-if (STARTUP_CHECK_ONLY) {
+// (cli.ts STARTUP_CHECK): the libraries loaded, so the answer is yes; then the end. Answered
+// before any other line of this file runs: the version asked is still unpacked in the updates
+// folder, where its portable data folder, a Chromium profile (data/electron) or the app:// scheme
+// do not belong. The module's evaluation stops here (an await that never settles), so nothing
+// below runs; `end` quits.
+if (isStartupCheck(process.argv.slice(1))) {
   const end = () => app.exit(0);
   setTimeout(end, 2000); // the answer may not be read
   process.stdout.write(startupCheckAnswer(process.versions), end);
+  await new Promise<never>(() => {});
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -549,9 +552,7 @@ function runHeadless(args: string[]): void {
   });
 }
 
-if (STARTUP_CHECK_ONLY) {
-  // answered at the top: nothing starts
-} else if (HEADLESS) {
+if (HEADLESS) {
   runHeadless(HEADLESS);
 } else {
   void app.whenReady().then(() => {
