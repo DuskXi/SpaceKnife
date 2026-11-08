@@ -47,9 +47,9 @@ shasum -a 256 SpaceKnife-<版本>-mac-arm64.dmg
 
 1. 运行 `SpaceKnife-<版本>-Setup-x64.exe`。
 2. 安装包还没有代码签名，第一次运行时 SmartScreen 会提示「未知发布者」：点「更多信息」，再点「仍要运行」。
-3. 选择装给谁：「仅为我安装」（默认，不需要管理员权限），或为这台电脑的所有用户安装（需要管理员权限）。新装时可以改安装目录；默认目录是 `%LOCALAPPDATA%\Programs\SpaceKnife`（仅为我）和 `C:\Program Files\SpaceKnife`（所有用户）。
+3. 选择装给谁：「仅为我安装」（默认，不需要管理员权限），或为这台电脑的所有用户安装（需要管理员权限）。新装时可以改安装目录；默认目录是 `%LOCALAPPDATA%\Programs\SpaceKnife`（仅为我）和 `C:\Program Files\SpaceKnife`（所有用户）。自己选的目录路径里没有「SpaceKnife」时，和 0.3.4 一样在后面加上 `\SpaceKnife`（`D:\Tools` 变成 `D:\Tools\SpaceKnife`），SpaceKnife 的文件不会和别的程序的文件混在一起。
 
-安装向导跟随系统语言（中文或英文），会创建开始菜单和桌面快捷方式，装完可以直接启动 SpaceKnife。窗口由 Microsoft Edge WebView2 Runtime 绘制：Windows 11 自带，多数 Windows 10 电脑也已经装好；缺少时安装程序先从微软下载并装上它，这需要联网。
+安装向导跟随系统语言（中文或英文），会创建开始菜单和桌面快捷方式，装完可以直接启动 SpaceKnife。窗口由 Microsoft Edge WebView2 Runtime 绘制：Windows 11 自带，多数 Windows 10 电脑也已经装好；缺少时安装程序先从微软下载并装上它，这需要联网。SpaceKnife 需要 89.0.774.44 或更新的版本（更旧的打不开它的窗口），较旧的运行时会先经微软自己的更新程序升级。运行时装不上或升级不了时，安装程序在改动任何东西之前停下。
 
 已经装了 SpaceKnife（包括 0.3.4）时，安装程序沿用原来的安装目录和安装范围，就地升级：见[从 0.3.4 升级](#从-034-升级)。
 
@@ -65,13 +65,13 @@ shasum -a 256 SpaceKnife-<版本>-mac-arm64.dmg
 .\SpaceKnife-<版本>-Setup-x64.exe /S /currentuser
 ```
 
-装给整台电脑就把 `/currentuser` 换成 `/allusers`（以管理员身份运行）。`/D=<目录>`（放在命令行最后）指定新装时的安装目录。静默卸载用注册表里 SpaceKnife 卸载项的 `QuietUninstallString`，也就是安装目录里的 `"uninstall.exe" /currentuser /S`（或 `/allusers /S`）。卸载程序会先把自己复制到临时目录再运行，所以命令会立即返回。静默卸载会保留快照、设置和日志；加上 `--delete-app-data` 就连它们一起删除。
+装给整台电脑就把 `/currentuser` 换成 `/allusers`（以管理员身份运行）。`/D=<目录>`（放在命令行最后）指定新装时的安装目录，两种范围都认，照原样使用。静默卸载用注册表里 SpaceKnife 卸载项的 `QuietUninstallString`，也就是安装目录里的 `"uninstall.exe" /currentuser /S`（或 `/allusers /S`）。卸载程序会先把自己复制到临时目录再运行，所以命令会立即返回。它按安装程序在旁边留下的清单（`installed-files.txt`）删除安装进去的文件，再删掉这些文件空出来的文件夹；文件夹里别的东西都留着。静默卸载会保留快照、设置和日志；加上 `--delete-app-data` 就连它们一起删除。
 
 ### 便携版 zip
 
 把 `SpaceKnife-<版本>-win-x64-portable.zip` 解压到自己能写入的位置（用户目录、U 盘；不要放进 Program Files），运行 `SpaceKnife.exe`。解压后第一次启动会慢几秒，Windows 要先检查这些新文件。
 
-便携版需要 Microsoft Edge WebView2 Runtime。Windows 11 自带，多数 Windows 10 电脑也已经装好；SpaceKnife 打不开时，从微软免费下载安装这个运行时，或者改用会自动装上它的安装包。
+便携版需要 Microsoft Edge WebView2 Runtime，89.0.774.44 或更新的版本。Windows 11 自带，多数 Windows 10 电脑也已经装好；SpaceKnife 打不开时，从微软免费下载安装这个运行时，或者改用会自动装上它的安装包。
 
 `SpaceKnife.exe` 旁边有一个 `data` 文件夹。只要它在，SpaceKnife 就把所有东西（快照、设置、日志、缓存）都存在里面，不写进你的用户目录。见[便携模式](../data-locations/#便携模式)。
 
@@ -178,7 +178,7 @@ SpaceKnife 每天最多检查一次新版本，有新版本时在标题栏提示
 | 安装方式 | 新版本怎么替换旧版本 |
 |---|---|
 | Windows 安装包 | 在更新卡片里点「无缝更新」：SpaceKnife 关闭，安装程序在后台替换旧版本（不显示安装向导），然后 SpaceKnife 自动重新打开。为所有用户安装的，Windows 会请求一次管理员权限。点「运行安装程序」则是 SpaceKnife 退出、打开安装向导，和手动运行新的安装包一样。 |
-| 便携版（Windows、Linux、macOS） | 点「无缝更新」：SpaceKnife 自己换上新的程序文件，`data` 文件夹保留。点「自己替换」或手动升级：退出 SpaceKnife，解压新的压缩包，用新文件替换旧文件夹里的内容，但留下其中的 `data` 文件夹。 |
+| 便携版（Windows、Linux、macOS） | 点「无缝更新」：SpaceKnife 自己换上新的程序文件，`data` 文件夹保留，然后启动新版本，最多等 90 秒让它启动起来；新版本在那之前出错退出，或者到时还没起来（这时把它关掉），就撤回这次更新：旧版本的文件换回来，旧版本重新打开。点「自己替换」或手动升级：退出 SpaceKnife，解压新的压缩包，用新文件替换旧文件夹里的内容，但留下其中的 `data` 文件夹。 |
 | macOS dmg | 点「打开磁盘映像」：SpaceKnife 退出并打开磁盘映像，把 SpaceKnife 拖进「应用程序」替换旧版本。然后再放行一次，并把「完全磁盘访问权限」关掉再打开（见上文）。 |
 | deb / rpm | 点「打开安装包」：SpaceKnife 退出，并用系统的软件安装器打开安装包。也可以照上面的方法用 `apt` 或 `dnf` 安装新包。 |
 | AppImage | 点「无缝更新」：新的 AppImage 替换旧文件。点「自己替换」或手动升级：退出 SpaceKnife，用新的 AppImage 文件替换旧文件。 |
@@ -195,8 +195,8 @@ SpaceKnife 0.3.5 底下整个重写了：后端是新的，包着同一套界面
 
 | 0.3.4 的安装方式 | 更新到 0.3.5 |
 |---|---|
-| Windows 安装包 | 「无缝更新」运行新的安装程序。它用 0.3.4 自己的卸载程序移除 0.3.4（数据保留），把 0.3.5 装进同一个目录、装给同样的用户：应用列表里只有一个 SpaceKnife，开始菜单和桌面快捷方式还是原来那些，固定到任务栏的图标照样能用。缺少 WebView2 Runtime 时先装上它；装不了时（比如没有联网）什么都不改，0.3.4 重新打开。 |
-| Windows 便携版 | 「无缝更新」先确认 0.3.5 能在这台电脑上启动（它需要 WebView2 Runtime）。不能时什么都不换，卡片显示「无法启动更新：…」，0.3.4 照常使用。ARM 版 Windows 上的 x64 副本会换成 ARM 版。 |
+| Windows 安装包 | 「无缝更新」运行新的安装程序。它用 0.3.4 自己的卸载程序移除 0.3.4（数据保留），把 0.3.5 装进同一个目录、装给同样的用户：应用列表里只有一个 SpaceKnife，开始菜单和桌面快捷方式还是原来那些，固定到任务栏的图标照样能用。缺少 WebView2 Runtime 或版本低于 89.0.774.44 时先装上或升级它；做不到时（比如没有联网）什么都不改，0.3.4 重新打开。 |
+| Windows 便携版 | 「无缝更新」先确认 0.3.5 能在这台电脑上启动（它需要 89.0.774.44 或更新的 WebView2 Runtime）。不能时什么都不换，卡片显示「无法启动更新：…」，0.3.4 照常使用。换上的 0.3.5 在 90 秒内没有启动起来时，换回 0.3.4。ARM 版 Windows 上的 x64 副本会换成 ARM 版。 |
 | macOS dmg | 「打开磁盘映像」，把 SpaceKnife 拖进「应用程序」替换 0.3.4。和每次更新后一样，放行一次，并把「完全磁盘访问权限」关掉再打开。 |
 | macOS 便携版 | 和以前一样「无缝更新」；之后和每次更新后一样，把「完全磁盘访问权限」关掉再打开。 |
 | deb | 「打开安装包」：软件安装器升级 `spaceknife` 这个包。程序从 `/opt/SpaceKnife` 搬到 `/usr/bin` 和 `/usr/lib/SpaceKnife`，包管理器会装上 WebKitGTK 4.1。 |
@@ -208,7 +208,7 @@ SpaceKnife 0.3.5 底下整个重写了：后端是新的，包着同一套界面
 
 | 安装方式 | 怎么卸载 |
 |---|---|
-| Windows 安装包 | 在 Windows 设置的应用列表里卸载 SpaceKnife。程序、界面缓存、缓存和下载的更新都会删除。卸载程序的第二页「你的数据」问其余的：勾上「同时删除快照、设置和日志」（默认不勾）就连 `%LOCALAPPDATA%\SpaceKnife` 一起删掉。 |
+| Windows 安装包 | 在 Windows 设置的应用列表里卸载 SpaceKnife。程序（安装程序清单里的文件；你放进那个文件夹的文件留着）、界面缓存、缓存和下载的更新都会删除。卸载程序的第二页「你的数据」问其余的：勾上「同时删除快照、设置和日志」（默认不勾）就连 `%LOCALAPPDATA%\SpaceKnife` 一起删掉。 |
 | 便携版 | 删除整个文件夹，`data` 文件夹也一起删掉。 |
 | macOS | 退出 SpaceKnife，把它从「应用程序」移到废纸篓。 |
 | deb | `sudo apt remove spaceknife` |

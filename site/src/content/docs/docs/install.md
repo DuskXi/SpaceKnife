@@ -47,9 +47,9 @@ shasum -a 256 SpaceKnife-<version>-mac-arm64.dmg
 
 1. Run `SpaceKnife-<version>-Setup-x64.exe`.
 2. The installer isn't code-signed yet, so on the first run SmartScreen warns about an unknown publisher. Click **More info**, then **Run anyway**.
-3. Choose who it is for: **Only for me** (the default, no administrator rights needed) or everyone who uses the computer (all users, asks for administrator rights). For a new installation you can change the folder; the defaults are `%LOCALAPPDATA%\Programs\SpaceKnife` for you alone and `C:\Program Files\SpaceKnife` for all users.
+3. Choose who it is for: **Only for me** (the default, no administrator rights needed) or everyone who uses the computer (all users, asks for administrator rights). For a new installation you can change the folder; the defaults are `%LOCALAPPDATA%\Programs\SpaceKnife` for you alone and `C:\Program Files\SpaceKnife` for all users. A folder you choose that has no "SpaceKnife" in its path gets `\SpaceKnife` added, as with 0.3.4 (`D:\Tools` becomes `D:\Tools\SpaceKnife`), so SpaceKnife's files never mix with other programs' files.
 
-The installer speaks English or Chinese, following the system language. It creates Start menu and desktop shortcuts and can start SpaceKnife when it is done. The window is drawn by the Microsoft Edge WebView2 Runtime, which Windows 11 includes and most Windows 10 computers already have; where it is missing, the installer downloads and installs it from Microsoft first, which needs an internet connection.
+The installer speaks English or Chinese, following the system language. It creates Start menu and desktop shortcuts and can start SpaceKnife when it is done. The window is drawn by the Microsoft Edge WebView2 Runtime, which Windows 11 includes and most Windows 10 computers already have; where it is missing, the installer downloads and installs it from Microsoft first, which needs an internet connection. SpaceKnife needs version 89.0.774.44 or later (older ones can't open its window); an older runtime is updated through Microsoft's own updater first. If the runtime can't be installed or updated, the installer stops before it changes anything.
 
 If SpaceKnife is already installed (also 0.3.4), the installer keeps its folder and who it was installed for, and upgrades it in place: see [Upgrading from 0.3.4](#upgrading-from-034).
 
@@ -65,13 +65,13 @@ For scripted deployment, the installer takes the usual switches:
 .\SpaceKnife-<version>-Setup-x64.exe /S /currentuser
 ```
 
-Use `/allusers` instead of `/currentuser` for a machine-wide install (run it as administrator). `/D=<folder>` (last on the line) picks the folder of a new installation. To uninstall silently, run the `QuietUninstallString` from SpaceKnife's uninstall entry in the registry, which is `"uninstall.exe" /currentuser /S` (or `/allusers /S`) in the install folder. The uninstaller copies itself to a temporary folder and runs from there, so the command returns at once. A silent uninstall keeps the snapshots, settings and logs; add `--delete-app-data` to remove them too.
+Use `/allusers` instead of `/currentuser` for a machine-wide install (run it as administrator). `/D=<folder>` (last on the line) picks the folder of a new installation, for either scope, and is used as given. To uninstall silently, run the `QuietUninstallString` from SpaceKnife's uninstall entry in the registry, which is `"uninstall.exe" /currentuser /S` (or `/allusers /S`) in the install folder. The uninstaller copies itself to a temporary folder and runs from there, so the command returns at once. It removes the files the installer put there, by the list it keeps next to them (`installed-files.txt`), and then the folders those files leave empty; anything else in the folder stays. A silent uninstall keeps the snapshots, settings and logs; add `--delete-app-data` to remove them too.
 
 ### Portable zip
 
 Unzip `SpaceKnife-<version>-win-x64-portable.zip` somewhere you can write (your user folder, a USB drive; not Program Files) and run `SpaceKnife.exe`. The first launch takes a few seconds longer while Windows checks the new files.
 
-The portable copy needs the Microsoft Edge WebView2 Runtime. Windows 11 includes it, and most Windows 10 computers already have it; if SpaceKnife doesn't open, install the runtime from Microsoft (it is free), or use the installer, which installs it for you.
+The portable copy needs the Microsoft Edge WebView2 Runtime, version 89.0.774.44 or later. Windows 11 includes it, and most Windows 10 computers already have it; if SpaceKnife doesn't open, install the runtime from Microsoft (it is free), or use the installer, which installs it for you.
 
 Next to `SpaceKnife.exe` there is a `data` folder. While it is there, SpaceKnife keeps everything in it (snapshots, settings, logs, cache) and writes nothing to your user profile. See [Portable mode](../data-locations/#portable-mode).
 
@@ -178,7 +178,7 @@ Whichever way you upgrade, your scans, snapshots and settings stay: they live ou
 | Install | How the new version replaces the old one |
 |---|---|
 | Windows installer | Click **Seamless update** in the update card: SpaceKnife closes, the installer replaces the old version in the background without showing its pages, and SpaceKnife opens again. For an installation for all users, Windows asks once for administrator permission. **Run the installer** instead quits SpaceKnife and opens the installer's wizard, the same as running a newer installer by hand. |
-| Portable (Windows, Linux, macOS) | Click **Seamless update**: SpaceKnife puts the new program files in place itself and keeps the `data` folder. With **Replace it yourself**, or by hand: quit SpaceKnife, unpack the new archive and replace the contents of the old folder, but keep its `data` folder. |
+| Portable (Windows, Linux, macOS) | Click **Seamless update**: SpaceKnife puts the new program files in place itself and keeps the `data` folder. Then it starts the new version and waits up to 90 seconds for it to come up; if it quits with an error before that, or isn't up in time (then it is closed), the update is undone: the old version's files come back and the old version opens again. With **Replace it yourself**, or by hand: quit SpaceKnife, unpack the new archive and replace the contents of the old folder, but keep its `data` folder. |
 | macOS dmg | Click **Open the disk image**: SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one. Then allow it once more and switch Full Disk Access off and on (see above). |
 | deb or rpm | Click **Open the package**: SpaceKnife quits and opens the package in the system's software installer. Or install the new package with `apt` or `dnf` as above. |
 | AppImage | Click **Seamless update**: the new AppImage takes the place of the old file. With **Replace it yourself**, or by hand: quit SpaceKnife and replace the old file with the new one. |
@@ -195,8 +195,8 @@ What the first update does, by kind of install:
 
 | 0.3.4 install | The update to 0.3.5 |
 |---|---|
-| Windows installer | **Seamless update** runs the new installer. It removes 0.3.4 with 0.3.4's own uninstaller, keeping your data, and installs 0.3.5 into the same folder, for the same users: one SpaceKnife in the app list, the same Start menu and desktop shortcuts, and pins on the taskbar keep working. Where the WebView2 Runtime is missing, it installs that first; if it can't (no internet connection, for example), nothing is changed and 0.3.4 opens again. |
-| Windows portable | **Seamless update** first checks that 0.3.5 can start on this computer (it needs the WebView2 Runtime). If it can't, nothing is replaced, the card says **Can't start the update: …** and 0.3.4 goes on as before. On Windows on ARM, an x64 copy moves to the ARM build. |
+| Windows installer | **Seamless update** runs the new installer. It removes 0.3.4 with 0.3.4's own uninstaller, keeping your data, and installs 0.3.5 into the same folder, for the same users: one SpaceKnife in the app list, the same Start menu and desktop shortcuts, and pins on the taskbar keep working. Where the WebView2 Runtime is missing, or older than 89.0.774.44, it installs or updates that first; if it can't (no internet connection, for example), nothing is changed and 0.3.4 opens again. |
+| Windows portable | **Seamless update** first checks that 0.3.5 can start on this computer (it needs the WebView2 Runtime, 89.0.774.44 or later). If it can't, nothing is replaced, the card says **Can't start the update: …** and 0.3.4 goes on as before. If 0.3.5 is put in place but doesn't come up within 90 seconds, 0.3.4 is put back. On Windows on ARM, an x64 copy moves to the ARM build. |
 | macOS dmg | **Open the disk image**, then drag SpaceKnife into Applications to replace 0.3.4. Allow it once and switch Full Disk Access off and on, as after every update. |
 | macOS portable | **Seamless update**, as before; then switch Full Disk Access off and on, as after every update. |
 | deb | **Open the package**: the software installer upgrades the `spaceknife` package. The program moves from `/opt/SpaceKnife` to `/usr/bin` and `/usr/lib/SpaceKnife`, and the package manager adds WebKitGTK 4.1. |
@@ -208,7 +208,7 @@ What the first update does, by kind of install:
 
 | Install | How to remove it |
 |---|---|
-| Windows installer | Uninstall SpaceKnife from the app list in Windows Settings. It removes the program, the window's caches, the cache and the downloaded updates. Its second page, **Your data**, asks about the rest: tick **Also delete the snapshots, settings and logs** (unticked by default) to remove `%LOCALAPPDATA%\SpaceKnife` too. |
+| Windows installer | Uninstall SpaceKnife from the app list in Windows Settings. It removes the program (the files the installer listed; a file of yours in the folder stays), the window's caches, the cache and the downloaded updates. Its second page, **Your data**, asks about the rest: tick **Also delete the snapshots, settings and logs** (unticked by default) to remove `%LOCALAPPDATA%\SpaceKnife` too. |
 | Portable | Delete the folder. Its `data` folder goes with it. |
 | macOS | Quit SpaceKnife and move it from Applications to the Trash. |
 | deb | `sudo apt remove spaceknife` |
