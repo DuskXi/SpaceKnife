@@ -128,7 +128,7 @@ export function pack(dir, name, archive) {
 
 /** The program in an unpacked portable folder (on macOS inside the app bundle). */
 export function programIn(folder) {
-  if (MAC) return join(folder, "SpaceKnife.app", "Contents", "MacOS", "spaceknife");
+  if (MAC) return join(folder, "SpaceKnife.app", "Contents", "MacOS", "SpaceKnife");
   return join(folder, WIN ? "SpaceKnife.exe" : "spaceknife");
 }
 

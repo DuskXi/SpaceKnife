@@ -1,0 +1,18 @@
+{
+  // The modules shared with the Electron shell's main process (apps/electron-shell imports them):
+  // plain TypeScript with relative imports only. Their own settings, so that a build that has not run
+  // `nuxt prepare` (the Electron shell's) finds a complete tsconfig next to them instead of the one
+  // above, which points at the generated .nuxt/ configuration. `nuxt typecheck` checks them with the
+  // rest of the interface as before.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM"],
+    "strict": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["*.ts"]
+}
