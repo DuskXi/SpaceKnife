@@ -63,8 +63,12 @@ fn shown(name: &OsStr) -> String {
     printable(name)
 }
 
+/// Names that are not valid Unicode reach the protocol escaped as 0.3.4 sent them (`\udc80` on
+/// Windows, `\xff` on POSIX: [`printable`]) in NodeInfo (name, extension) and tree.node paths,
+/// never as U+FFFD; `path.forms` keeps U+FFFD in its text forms (the interface hands those to the
+/// system and refuses such paths: an escaped one could name another item) and the stored bytes in
+/// its URI.
 #[tokio::test]
-#[ignore = "bug: names that are not valid Unicode reach the protocol decoded lossily (U+FFFD, sk-store Nodes::name → decode_lossy in NodeInfo and tree.node paths); 0.3.4 sent them escaped (\\udc80 on Windows, \\xff on POSIX: events::printable)"]
 async fn scan_of_undecodable_names_over_the_protocol() {
     let srv = server().await;
     let c = Client::open(&srv.url).await;
@@ -125,10 +129,33 @@ async fn scan_of_undecodable_names_over_the_protocol() {
     let mut want = vec!["inner.bin".to_owned(), shown(&tail)];
     want.sort();
     assert_eq!(names(&inner), want);
+    let odd_ext = inner["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["name"] == shown(&tail).as_str())
+        .unwrap()["ext"]
+        .clone();
+    assert_eq!(odd_ext, shown(&name).as_str());
     let node = c
         .ok("tree.node", json!({"scan_id": id, "node": folder}))
         .await;
     assert_eq!(node["path"], shown(odd_dir.as_os_str()).as_str());
+    assert_eq!(node["node"]["name"], shown(&name).as_str());
+    // what the interface hands the system to open or reveal: the text forms mark the name as not
+    // Unicode (U+FFFD, refused there), the URI keeps the bytes
+    let forms = c
+        .ok("path.forms", json!({"scan_id": id, "node": folder}))
+        .await;
+    let raw = forms["raw"].as_str().unwrap();
+    assert!(raw.contains('\u{FFFD}'), "{forms}");
+    assert!(!raw.contains(&shown(&name)), "{forms}");
+    let escaped = if cfg!(windows) {
+        "x%ED%B2%80y"
+    } else {
+        "x%FFy"
+    };
+    assert!(forms["uri"].as_str().unwrap().ends_with(escaped), "{forms}");
 
     // a log record naming it reaches the session, escaped
     let text = format!("无法访问 {}", shown(odd_dir.as_os_str()));

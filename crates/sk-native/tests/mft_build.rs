@@ -531,3 +531,66 @@ fn the_build_runs_on_a_pool_of_its_own() {
     let name = spy.0.expect("a named thread");
     assert!(name.starts_with("sk-mft-build-"), "{name}");
 }
+
+/// An extension's text in the table is the sink's ([`TreeSink::ext_text`]): by default U+FFFD
+/// for what is not valid Unicode, so two such extensions share one id; a sink that escapes gets
+/// its own text, and an id per distinct extension.
+#[test]
+fn extensions_take_the_sinks_text() {
+    struct Escaping(Cols);
+    impl TreeSink for Escaping {
+        type Error = String;
+        fn columns(
+            &mut self,
+            nodes: usize,
+            image_len: usize,
+            ext: Vec<String>,
+        ) -> Result<(NodeColumns<'_>, &mut [u8]), String> {
+            self.0.columns(nodes, image_len, ext)
+        }
+        fn ext_text(raw: &[u8]) -> String {
+            raw.iter()
+                .map(|&b| match b.is_ascii() {
+                    true => char::from(b).to_string(),
+                    false => format!(r"\x{b:02x}"),
+                })
+                .collect()
+        }
+    }
+    let file = |n: u64, name: Vec<u16>| im::Rec {
+        streams: vec![im::stream(10)],
+        ..im::rec(n, vec![im::nm16(im::ROOT, name, im::WIN32)])
+    };
+    // `a.X` + a lone surrogate (WTF-8 ED B2 80), `b.x` + another one (ED B2 81), `c.TXT`
+    let mut recs = im::metafile_records();
+    recs.extend([
+        file(100, [im::w("a.X"), vec![0xDC80]].concat()),
+        file(101, [im::w("b.x"), vec![0xDC81]].concat()),
+        file(102, im::w("c.TXT")),
+    ]);
+    let table = || parsed(&recs);
+    let ext_of = |c: &Cols, name: &[u8]| {
+        let i = c
+            .names()
+            .iter()
+            .position(|n| *n == name)
+            .expect("a node of that name");
+        c.ext_table[c.ext[i] as usize].clone()
+    };
+    let (a, b) = (b"a.X\xED\xB2\x80".as_slice(), b"b.x\xED\xB2\x81".as_slice());
+
+    let mut plain = Cols::default();
+    build_tree(table(), &NAMES, &TreeOptions::default(), &mut plain).unwrap();
+    assert_eq!(ext_of(&plain, a), "x\u{FFFD}\u{FFFD}\u{FFFD}");
+    assert_eq!(ext_of(&plain, b), ext_of(&plain, a));
+    assert_eq!(ext_of(&plain, b"c.TXT"), "txt");
+    assert_eq!(plain.ext_table.len(), 3); // "", the U+FFFD one, "txt"
+
+    let mut escaping = Escaping(Cols::default());
+    build_tree(table(), &NAMES, &TreeOptions::default(), &mut escaping).unwrap();
+    let c = &escaping.0;
+    assert_eq!(ext_of(c, a), r"x\xed\xb2\x80");
+    assert_eq!(ext_of(c, b), r"x\xed\xb2\x81");
+    assert_eq!(ext_of(c, b"c.TXT"), "txt");
+    assert_eq!(c.ext_table.len(), 4);
+}

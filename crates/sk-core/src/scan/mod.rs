@@ -139,10 +139,8 @@ pub fn path_inside(path: &Path, root: &Path) -> bool {
 pub fn entry_batch(app: &Appender<'_>, mut entries: Entries, ext_table: &[Vec<u8>]) -> EntryBatch {
     let remap: Vec<u16> = ext_table
         .iter()
-        .map(|e| match std::str::from_utf8(e) {
-            Ok(s) => app.ext_id(s),
-            Err(_) => app.ext_id(&String::from_utf8_lossy(e)),
-        })
+        // an extension that is not valid Unicode escaped, as 0.3.4 showed it (never U+FFFD)
+        .map(|e| app.ext_id(&sk_store::names::printable(e)))
         .collect();
     if !remap.iter().enumerate().all(|(i, &v)| v as usize == i) {
         entries.map_ext(&remap);

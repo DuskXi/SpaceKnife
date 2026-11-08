@@ -3,11 +3,6 @@
   "description": "Live file monitoring over the protocol: the monitor of a finished scan, files and folders created, deleted and renamed reach the tree, the scan topic tells the UI, switching scan.monitor off stops it.",
   "fixtures": {"small": "small"},
   "normalize": {"time_keys": ["mtime"]},
-  "known_diffs": [
-    {"path": "steps/1/wait_scan/monitor/**", "bug": "scan-topic-silent-monitor", "why": "Rust: the final status of a scan has monitor=null (the monitor is still starting); 0.3.4 reports it running. With the next bug the status bar then says live monitoring is off."},
-    {"path": "steps/3/got/0/status/monitor/**", "bug": "scan-topic-silent-monitor", "why": "the same status, pushed when subscribing"},
-    {"path": "steps/21/**", "bug": "scan-topic-silent-monitor", "why": "Rust never pushes scan.progress when the monitor applies changes (sk-server/src/monitors.rs ServerHooks::applied only flashes views); 0.3.4 does, and the interface reads the monitor state and counts only from these pushes (apps/desktop/app/state/actions.ts onScanStatus)."}
-  ],
   "steps": [
     {"call": "scan.start", "params": {"roots": ["$ROOT/small"], "workers": 0, "auto_snapshot": false}, "as": "s", "pick": ["source"]},
     {"wait_scan": "$s.scan_id", "pick": ["state", "items", "monitor"]},

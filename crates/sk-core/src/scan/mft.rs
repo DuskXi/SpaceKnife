@@ -208,4 +208,10 @@ impl TreeSink for StoreSink {
         b.set_ext_table(ext_table);
         Ok(self.builder.insert(b).parts())
     }
+
+    /// Escaped where it is not valid Unicode, as on the protocol and as 0.3.4 showed it (never
+    /// U+FFFD), like the hard scan's extensions ([`crate::scan::entry_batch`]).
+    fn ext_text(raw: &[u8]) -> String {
+        sk_store::names::printable(raw).into_owned()
+    }
 }

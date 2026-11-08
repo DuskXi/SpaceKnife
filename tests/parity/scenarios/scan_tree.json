@@ -5,13 +5,8 @@
   "known_diffs": [
     {"path": "steps/12/result/items/**", "why": "tree.children sort=name: Rust sorts A→Z, 0.3.4 Z→A (store.sorted_children descending by default). The interface does not call tree.children."},
     {"path": "steps/15/result/items/**", "why": "the same name order, one page"},
-    {"path": "steps/*/wait_scan/monitor/**", "bug": "scan-topic-silent-monitor", "why": "Rust: monitor=null in the final status of a scan (see monitor.json)"},
-    {"path": "steps/3/result/monitor/**", "bug": "scan-topic-silent-monitor", "why": "scan.status right after the scan, the same"},
-    {"path": "steps/4/result/scans/0/monitor/**", "bug": "scan-topic-silent-monitor", "why": "scan.list right after the scan, the same"},
     {"path": "steps/48/wait_scan/io", "why": "not compared since `io` is dropped (normalize.json); seen live: a pooled scan's final status keeps the I/O governor state in Rust, 0.3.4 clears it (the details panel can then show the load section of a finished scan)"},
-    {"path": "steps/57/result/scans/*/items", "why": "after the rescan both backends count rows the change left behind (322 on Windows, 323 on Linux for 319 entries: files and dirs are right), and how many depends on how the live monitor and the rescan meet: not compared (step 42 leaves it out too)"},
-    {"path": "steps/*/result/node/ctime", "bug": "linux-root-ctime", "why": "Linux: the scan root's creation time comes from std's created() (statx birth time) while every other entry has none, as in 0.3.4 (sk-core scan/scanner.rs root Times; sk-native st_birth is 0 on Linux)"},
-    {"path": "steps/*/result/parent/ctime", "bug": "linux-root-ctime", "why": "the same root, as a parent"}
+    {"path": "steps/57/result/scans/*/items", "why": "after the rescan both backends count rows the change left behind (322 on Windows, 323 on Linux for 319 entries: files and dirs are right), and how many depends on how the live monitor and the rescan meet: not compared (step 42 leaves it out too)"}
   ],
   "steps": [
     {"call": "scan.check_paths", "params": {"paths": ["$ROOT/tree", "$ROOT/tree/a", "$ROOT/small", "$ROOT/nope", "$ROOT/tree/c.txt", "relative/path", ""]}},

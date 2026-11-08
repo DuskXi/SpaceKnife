@@ -600,3 +600,153 @@ async fn a_panic_in_a_scan_fails_that_scan_and_the_server_goes_on() {
     assert!(plan.lock().unwrap().is_empty());
     srv.shutdown();
 }
+
+/// The state of the scan's monitor in a status (null: not watched).
+fn monitor_state(status: &serde_json::Value) -> serde_json::Value {
+    status["monitor"]["state"].clone()
+}
+
+#[tokio::test]
+async fn a_watched_scan_says_so_from_its_final_status_on() {
+    // the status bar reads live monitoring only from the `scan` topic's pushes: the final status
+    // of a scan already names its running monitor, as in 0.3.4 (which started the watchers before
+    // the scan), never null («live monitoring off») because the watchers were still starting
+    let _g = SERIAL.lock().await;
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let dir = sample_tree();
+    let started = c
+        .ok(
+            "scan.start",
+            json!({"roots": [dir.path()], "workers": 0, "auto_snapshot": false}),
+        )
+        .await;
+    let id = started["scan_id"].as_str().unwrap().to_owned();
+    let last = wait_final(&c, &id, false).await;
+    assert_eq!(last["state"], "done", "{last}");
+    assert_eq!(monitor_state(&last), "running", "{last}");
+    let status = c.ok("scan.status", json!({"scan_id": id})).await;
+    assert_eq!(monitor_state(&status), "running", "{status}");
+    c.ok("scan.close", json!({"scan_id": id})).await;
+    srv.shutdown();
+}
+
+#[tokio::test]
+async fn applied_changes_and_the_monitor_switch_push_the_scan_status() {
+    // 0.3.4 pushed scan.progress whenever the monitor applied changes (the status bar's counts and
+    // its monitor state come from these pushes only); switching live monitoring off and on again
+    // pushes too, so the status bar never keeps a state the scan left
+    let _g = SERIAL.lock().await;
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let dir = sample_tree();
+    let started = c
+        .ok(
+            "scan.start",
+            json!({"roots": [dir.path()], "workers": 0, "auto_snapshot": false}),
+        )
+        .await;
+    let id = started["scan_id"].as_str().unwrap().to_owned();
+    let done = wait_final(&c, &id, false).await;
+    let files = done["files"].as_i64().unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    c.drain_events().await;
+    std::fs::write(dir.path().join("live.bin"), vec![0u8; 7000]).unwrap();
+    let want = id.clone();
+    let ev = c
+        .event_where("scan.progress", 20.0, move |p| {
+            p["status"]["scan_id"] == want.as_str()
+                && p["status"]["files"].as_i64() == Some(files + 1)
+        })
+        .await;
+    assert_eq!(monitor_state(&ev["status"]), "running", "{ev}");
+    assert!(
+        ev["status"]["monitor"]["changes"].as_i64().unwrap() >= 1,
+        "the counts are the monitor's own after the change: {ev}"
+    );
+
+    let set = |on: bool| {
+        let c = &c;
+        async move {
+            let v = c.ok("settings.get", json!({})).await["version"].clone();
+            c.ok(
+                "settings.update",
+                json!({"values": {"scan.monitor": on}, "version": v}),
+            )
+            .await;
+        }
+    };
+    c.drain_events().await;
+    set(false).await;
+    let want = id.clone();
+    c.event_where("scan.progress", 10.0, move |p| {
+        p["status"]["scan_id"] == want.as_str() && p["status"]["monitor"].is_null()
+    })
+    .await;
+    set(true).await;
+    let want = id.clone();
+    c.event_where("scan.progress", 10.0, move |p| {
+        p["status"]["scan_id"] == want.as_str() && p["status"]["monitor"]["state"] == "running"
+    })
+    .await;
+    c.ok("scan.close", json!({"scan_id": id})).await;
+    srv.shutdown();
+}
+
+/// A disk sampler that knows one disk and takes `delay` to start (PDH, sysfs on a busy machine).
+struct SlowSampler(sk_core::io::sampler::RefSet);
+
+impl sk_core::io::DiskSampler for SlowSampler {
+    fn name(&self) -> &'static str {
+        "slow"
+    }
+    fn sample(
+        &mut self,
+    ) -> std::collections::HashMap<sk_core::io::DiskId, sk_core::io::DiskSample> {
+        std::collections::HashMap::new()
+    }
+    fn refs(&self) -> Vec<sk_core::io::DiskRef> {
+        self.0.refs()
+    }
+    fn disk_ref(&self, disk: &str) -> Option<sk_core::io::DiskRef> {
+        self.0.get(disk)
+    }
+    fn watch(&mut self, r: sk_core::io::DiskRef) {
+        self.0.watch(r)
+    }
+}
+
+#[tokio::test]
+async fn an_io_subscription_made_at_once_gets_the_disks_of_the_started_registry() {
+    // disk sampling starts with the backend (on a blocking thread); an `io` subscription made
+    // before it is through still gets the load of every disk it knows then, as in 0.3.4 (which had
+    // started it before the first session), not nothing for good
+    let srv = server_tuned(
+        sk_server::ServeOptions {
+            token: TOKEN.to_owned(),
+            ..sk_server::ServeOptions::default()
+        },
+        |t| {
+            t.io_sampling = true;
+            t.io_sampler = Some(std::sync::Arc::new(|| {
+                std::thread::sleep(Duration::from_millis(800));
+                let mut refs = sk_core::io::sampler::RefSet::default();
+                refs.watch(sk_core::io::DiskRef::physical("test-disk-0"));
+                Box::new(SlowSampler(refs)) as Box<dyn sk_core::io::DiskSampler>
+            }));
+        },
+    )
+    .await;
+    let c = Client::open(&srv.url).await;
+    // (not `running()`: it waits for the start)
+    assert!(
+        srv.server.scans.io.governors().is_empty(),
+        "subscribed before the sampler started"
+    );
+    c.subscribe("io", json!({})).await;
+    let ev = c
+        .event_where("io.load", 10.0, |p| p["status"]["disk"] == "test-disk-0")
+        .await;
+    assert!(ev["sub"].is_string(), "{ev}");
+    srv.shutdown();
+}

@@ -247,7 +247,10 @@ zero-filled columns of `nodes` rows and an image of `image_len` bytes (the store
 `StoreBuilder`: sk-core's `table_to_store` is the sink; tests use vectors). Errors:
 `BuildError::Table` (columns of different lengths, name offsets out of range), `TooManyRows`,
 `NameTooLong` (a pseudo folder's name), `Sink` (the sink's own error); a sink that gives other
-shapes is a panic. Constants: `mft::build::{ROOT_RECORD, BADCLUS_RECORD, FIRST_USER_RECORD,
+shapes is a panic. `TreeSink::ext_text(raw)` turns each distinct lower-cased extension into the
+table's text (by default UTF-8 with U+FFFD; sk-core's sink escapes what is not valid Unicode as
+0.3.4 showed it, like the hard scan's extensions); extensions of the same text share an id.
+Constants: `mft::build::{ROOT_RECORD, BADCLUS_RECORD, FIRST_USER_RECORD,
 CYCLE_LIMIT}`.
 
 ## `fold`
@@ -288,7 +291,8 @@ surrogates / ACLs / trailing dots / relative opens / path limit / case-sensitive
 names / modes / mounts / skip / protect, `LinkSet`), `tests/mft.rs` with `tests/mft_image`
 (a port of `backend/tests/mft_image.py`: synthetic records, volumes and fuzzing),
 `tests/mft_build.rs` (the tree build into vectors: the tree's shape, every row once, metafiles,
-orphans and cycles, extensions, totals, refused tables and sinks, the build's own pool),
+orphans and cycles, extensions and the sink's text for them, totals, refused tables and sinks,
+the build's own pool),
 `tests/fold.rs` (random slices against listings folded one at a time, skipped listings, refused
 slices, every lent row filled and nothing past them), `tests/layering.rs`. Tests that need
 case-sensitive folders, symlinks or ACL changes skip themselves (printing why) where the system

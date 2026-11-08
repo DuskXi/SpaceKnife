@@ -78,6 +78,19 @@ async function selectionPath(): Promise<{ path: string; dir: boolean } | null> {
   return { path: r.path, dir: r.node.kind === "dir" };
 }
 
+/** The selection's path as the system is handed it: `path.forms`' text, which shows a name that is
+ *  not valid Unicode as U+FFFD (`handable` refuses it). tree.node's path writes such a name escaped,
+ *  as 0.3.4 did (`\xff`, `\udc80`): as a path that names nothing, or another item. */
+async function selectionHandOff(): Promise<{ path: string; dir: boolean } | null> {
+  const sel = selectedNode();
+  if (!sel) return null;
+  const [forms, r] = await Promise.all([
+    call("path.forms", { scan_id: sel.scanId, node: sel.node }),
+    call("tree.node", { scan_id: sel.scanId, node: sel.node }),
+  ]);
+  return { path: forms.raw, dir: r.node.kind === "dir" };
+}
+
 /** Where the user is, as the backend's commands see it (palette.query, palette.check). */
 export function paletteContext(s: AppState = get()): PaletteContext {
   const tab = activeTab(s);
@@ -220,7 +233,7 @@ export async function runCommand(id: string): Promise<void> {
       return;
     }
     case "item.reveal": {
-      const p = await selectionPath();
+      const p = await selectionHandOff();
       if (p && !handable(p.path)) toast(notOpenable());
       else if (p) {
         window.sk.shell.showItemInFolder(p.path);
@@ -229,7 +242,7 @@ export async function runCommand(id: string): Promise<void> {
       return;
     }
     case "item.terminal": {
-      const p = await selectionPath();
+      const p = await selectionHandOff();
       const here = p && folderOf(p.path, p.dir);
       if (here && !handable(here)) toast(notOpenable());
       else if (here) window.sk.shell.openTerminal(here);

@@ -140,21 +140,24 @@ export function onKey(e: KeyboardEvent): unknown {
     if (row == null || !frame || frame.node[row]! <= 0) return;
     done();
     void (async () => {
-      const r = await call("tree.node", {
-        scan_id: st.scan_id,
-        node: frame.node[row]!,
-      });
+      const node = frame.node[row]!;
+      const r = await call("tree.node", { scan_id: st.scan_id, node });
       if (lower === "c") {
         window.sk.shell.copyText(r.path);
         toast(t("已复制"));
-      } else if (!r.on_disk) {
-        toast(notOnDisk());
-      } else if (!handable(lower === "e" ? r.path : folderOf(r.path, r.node.kind === "dir"))) {
+        return;
+      }
+      if (!r.on_disk) return toast(notOnDisk());
+      // the system is handed path.forms' text: a name that is not valid Unicode shows as U+FFFD
+      // there (refused), escaped in tree.node's path (which then names nothing, or another item)
+      const path = (await call("path.forms", { scan_id: st.scan_id, node })).raw;
+      const dir = r.node.kind === "dir";
+      if (!handable(lower === "e" ? path : folderOf(path, dir))) {
         toast(notOpenable());
       } else if (lower === "e") {
-        window.sk.shell.showItemInFolder(r.path);
+        window.sk.shell.showItemInFolder(path);
         toast(revealLabel());
-      } else window.sk.shell.openTerminal(folderOf(r.path, r.node.kind === "dir"));
+      } else window.sk.shell.openTerminal(folderOf(path, dir));
     })();
   }
 }

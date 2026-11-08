@@ -3,9 +3,7 @@
   "description": "Settings (get, update with versions and conflicts, invalid values, reset by page, export and import, settings.changed to every session in order) and file classes (get, update, folder classes, reset, classes.changed), and that both survive a restart.",
   "fixtures": {"small": "small"},
   "known_diffs": [
-    {"path": "**/meta/45/description", "why": "scan.workers: the Rust text drops 0.3.4's mention of worker processes without the native extension (there is no Python fallback any more)"},
-    {"path": "steps/15/result/changes/**", "bug": "import-change-order", "why": "settings.import lists the changes A→Z by key (appearance.theme before general.update_channel); 0.3.4 lists them in the settings' own order, page by page, as the import dialog shows them"},
-    {"path": "steps/16/result/changes/**", "bug": "import-change-order", "why": "the same list when applied"}
+    {"path": "**/meta/45/description", "why": "scan.workers: the Rust text drops 0.3.4's mention of worker processes without the native extension (there is no Python fallback any more)"}
   ],
   "steps": [
     {"connect": "other"},

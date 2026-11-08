@@ -188,6 +188,14 @@ impl ViewManager {
         self.views.lock().get(view_id).cloned()
     }
 
+    /// `host` is still open (not closed, nor its session or its scan).
+    fn is_open(&self, host: &Arc<ViewHost>) -> bool {
+        self.views
+            .lock()
+            .get(&host.id)
+            .is_some_and(|h| Arc::ptr_eq(h, host))
+    }
+
     pub fn target(&self, server: &Server, id: &str) -> RpcResult<Target> {
         if let Some(h) = server.scans.lookup(id) {
             return Ok(Target {
@@ -350,12 +358,17 @@ impl ViewManager {
     }
 
     /// Render a frame for a push (the caller holds `host.lock`); the binary frame is queued.
+    /// `None`: the view was closed before or while it rendered, nothing of it is sent (0.3.4
+    /// cancelled its push).
     async fn render_push(
         &self,
         host: &Arc<ViewHost>,
         reason: &'static str,
         refilter: bool,
-    ) -> RpcResult<FrameInfo> {
+    ) -> RpcResult<Option<FrameInfo>> {
+        if !self.is_open(host) {
+            return Ok(None);
+        }
         let h = host.clone();
         let (info, buf) = compute(move || {
             let mut v = h.view.lock();
@@ -366,21 +379,25 @@ impl ViewManager {
             render_locked(&h, &mut v, reason, None)
         })
         .await?;
+        if !self.is_open(host) {
+            return Ok(None);
+        }
         if let Some(s) = host.session() {
             s.send_binary(buf);
         }
-        Ok(info)
+        Ok(Some(info))
     }
 
     /// Render and push a frame without a request (settings, tags, classes, changes).
     pub async fn repaint(&self, host: &Arc<ViewHost>, reason: &'static str, refilter: bool) {
         let _guard = host.lock.lock().await;
         match self.render_push(host, reason, refilter).await {
-            Ok(info) => {
+            Ok(Some(info)) => {
                 if let Some(s) = host.session() {
                     s.emit::<ViewFrame>(&ViewFrameEvent { frame: info });
                 }
             }
+            Ok(None) => {}
             Err(e) => tracing::error!("repainting {} failed: {e}", host.id),
         }
     }
@@ -619,11 +636,19 @@ impl ViewManager {
                     v.scanning = false;
                 }
                 match self.render_push(host, why, refilter).await {
-                    Ok(info) => {
+                    Ok(Some(info)) => {
                         host.push.lock().last_push = Some(Instant::now());
                         if let Some(s) = host.session() {
                             s.emit::<ViewFrame>(&ViewFrameEvent { frame: info });
                         }
+                    }
+                    Ok(None) => {
+                        // closed: what was still pending for it goes too
+                        let mut p = host.push.lock();
+                        p.final_pending = false;
+                        p.change_pending = false;
+                        p.running = false;
+                        return;
                     }
                     Err(e) => tracing::error!("pushing a frame of {} failed: {e}", host.id),
                 }

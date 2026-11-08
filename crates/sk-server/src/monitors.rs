@@ -5,12 +5,18 @@
 //! sits behind a mutex so that its status can be read meanwhile; [`ServerHooks`] lets the views
 //! follow moved node ids (with the store's writer held: views not busy follow at once, busy ones
 //! before their next use) and flash what changed.
+//!
+//! As in 0.3.4, the scan's status is pushed (`scan.progress`) after every batch of changes
+//! applied, after a moved free space and once the watchers of a finished scan started: the status
+//! bar reads the monitor's state and the counts only from these pushes. A new scan waits for its
+//! watchers ([`MonitorManager::wait_started`]): changes count from the scan's start, and its
+//! final status names the running monitor.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use sk_core::events::{self, EventLevel, Source};
 use sk_core::monitor::pipeline::{
     IdRemap, MAX_WAIT, MonitorHandle, MonitorHooks, MonitorOptions, ScanMonitor,
@@ -28,8 +34,15 @@ use crate::scans::ScanHandle;
 struct Mon {
     monitor: Mutex<ScanMonitor>,
     handle: MonitorHandle,
-    status: Mutex<Option<MonitorStatus>>,
+    /// the last status read (while the monitor is busy); «starting» until its watchers started
+    status: Mutex<MonitorStatus>,
+    /// the watchers started (or failed to)
+    started: Mutex<bool>,
+    started_cv: Condvar,
 }
+
+/// How long a new scan waits for its watchers at most (a watch of a network share may hang).
+const START_WAIT: Duration = Duration::from_secs(10);
 
 /// Starts and stops the monitors of open scans.
 #[derive(Default)]
@@ -44,6 +57,8 @@ struct ServerHooks {
     server: Weak<Server>,
     scan: Weak<ScanHandle>,
     scan_id: String,
+    /// changes were applied or the free space moved since the last push of the scan's status
+    publish: bool,
 }
 
 impl ServerHooks {
@@ -112,6 +127,8 @@ impl MonitorHooks for ServerHooks {
         if let Some(server) = self.server.upgrade() {
             server.views.flash(&server, &self.scan_id, flashes);
         }
+        // pushed once the step is through and the monitor's lock is free (its counts are new)
+        self.publish = true;
     }
 
     fn volumes_changed(&mut self, roots: &[RootInfo]) {
@@ -135,6 +152,7 @@ impl MonitorHooks for ServerHooks {
             }
         }
         server.views.volumes_changed(&server, &self.scan_id);
+        self.publish = true; // the status bar's free space
     }
 
     fn message(&mut self, text: String) {
@@ -162,7 +180,8 @@ impl MonitorManager {
         server.settings.get_bool("scan.monitor")
     }
 
-    fn spawn(server: &Arc<Server>, h: &Arc<ScanHandle>, watch: bool) -> Option<Arc<Mon>> {
+    /// A monitor for `h`, not started yet ([`MonitorManager::launch`]).
+    fn prepare(server: &Arc<Server>, h: &Arc<ScanHandle>, watch: bool) -> Option<Arc<Mon>> {
         let scanner = h.scanner.as_ref()?;
         let opts = MonitorOptions {
             watch,
@@ -193,25 +212,46 @@ impl MonitorManager {
             opts,
         );
         let handle = monitor.handle();
-        let mon = Arc::new(Mon {
+        let status = monitor.status(); // «starting»: no watchers yet
+        Some(Arc::new(Mon {
             monitor: Mutex::new(monitor),
             handle,
-            status: Mutex::new(None),
-        });
+            status: Mutex::new(status),
+            started: Mutex::new(false),
+            started_cv: Condvar::new(),
+        }))
+    }
+
+    /// Run `mon` (in its map already: what it publishes names it) on a thread of its own: start
+    /// its watchers, then wait for changes and apply them until it is stopped.
+    fn launch(server: &Arc<Server>, h: &Arc<ScanHandle>, mon: &Arc<Mon>, watch: bool) -> bool {
         let mut hooks = ServerHooks {
             server: Arc::downgrade(server),
             scan: Arc::downgrade(h),
             scan_id: h.id.clone(),
+            publish: false,
         };
         let m = mon.clone();
         let wait = coalesce(server);
+        let publish = move |hooks: &ServerHooks| {
+            if let (Some(server), Some(h)) = (hooks.server.upgrade(), hooks.scan.upgrade()) {
+                h.publish(&server);
+            }
+        };
         std::thread::Builder::new()
             .name(format!("monitor-{}", h.id))
             .spawn(move || {
                 {
                     let mut g = m.monitor.lock();
                     g.start();
-                    *m.status.lock() = Some(g.status());
+                    *m.status.lock() = g.status();
+                }
+                *m.started.lock() = true;
+                m.started_cv.notify_all();
+                // live monitoring switched on for a finished scan: the status bar learns it now (a
+                // running scan's next tick or final status says it)
+                if watch && hooks.scan.upgrade().is_some_and(|h| !h.running()) {
+                    publish(&hooks);
                 }
                 if cfg!(windows) {
                     // the checkpoint may wait for the helper (reading this very scan's MFT)
@@ -230,17 +270,22 @@ impl MonitorManager {
                     if h.stopped() {
                         break;
                     }
-                    let mut g = m.monitor.lock();
-                    g.step(&mut hooks);
-                    *m.status.lock() = Some(g.status());
+                    {
+                        let mut g = m.monitor.lock();
+                        g.step(&mut hooks);
+                        *m.status.lock() = g.status();
+                    }
+                    if std::mem::take(&mut hooks.publish) && !h.stopped() {
+                        publish(&hooks);
+                    }
                 }
                 m.monitor.lock().stop();
             })
-            .ok()?;
-        Some(mon)
+            .is_ok()
     }
 
-    /// Watch a scan from its start (UI-W2-09).
+    /// Watch a scan from its start (UI-W2-09); the scan's thread waits for the watchers
+    /// ([`MonitorManager::wait_started`]).
     pub fn start(&self, server: &Arc<Server>, h: &Arc<ScanHandle>) {
         if h.source != ScanSource::Scan
             || self.monitors.lock().contains_key(&h.id)
@@ -248,8 +293,32 @@ impl MonitorManager {
         {
             return;
         }
-        if let Some(mon) = Self::spawn(server, h, true) {
-            self.monitors.lock().insert(h.id.clone(), mon);
+        let Some(mon) = Self::prepare(server, h, true) else {
+            return;
+        };
+        {
+            let mut map = self.monitors.lock();
+            if map.contains_key(&h.id) {
+                return; // started meanwhile (the scan's start and the switch at once)
+            }
+            map.insert(h.id.clone(), mon.clone());
+        }
+        if !Self::launch(server, h, &mon, true) {
+            self.monitors.lock().remove(&h.id);
+        }
+    }
+
+    /// Wait (at most [`START_WAIT`]) until the watchers of the scan's monitor started, as 0.3.4's
+    /// scan did before listing anything; at once without a monitor.
+    pub fn wait_started(&self, scan_id: &str) {
+        let Some(m) = self.find(scan_id) else { return };
+        let deadline = Instant::now() + START_WAIT;
+        let mut started = m.started.lock();
+        while !*started {
+            if m.started_cv.wait_until(&mut started, deadline).timed_out() {
+                tracing::warn!("the watchers of scan {scan_id} are slow to start");
+                return;
+            }
         }
     }
 
@@ -283,10 +352,10 @@ impl MonitorManager {
         let m = self.find(scan_id)?;
         if let Some(g) = m.monitor.try_lock() {
             let s = g.status();
-            *m.status.lock() = Some(s.clone());
+            *m.status.lock() = s.clone();
             return Some(s);
         }
-        m.status.lock().clone()
+        Some(m.status.lock().clone())
     }
 
     /// The scan's last folders get their watches now.
@@ -321,9 +390,13 @@ impl MonitorManager {
         {
             Some(m) => m,
             None => {
-                let m = Self::spawn(server, h, false)
+                let m = Self::prepare(server, h, false)
                     .ok_or_else(|| RpcError::internal("cannot start a rescan"))?;
                 self.passive.lock().insert(h.id.clone(), m.clone());
+                if !Self::launch(server, h, &m, false) {
+                    self.passive.lock().remove(&h.id);
+                    return Err(RpcError::internal("cannot start a rescan"));
+                }
                 m
             }
         };

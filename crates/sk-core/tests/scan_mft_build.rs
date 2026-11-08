@@ -378,7 +378,10 @@ fn reference(t: &MftTable, root: &str, opts: &MftBuild) -> Vec<Expect> {
         }
         let ext = if kind == Kind::File as u8 {
             raw_ext(t.name(r))
-                .map(|e| String::from_utf8_lossy(&sk_native::hardscan::lower_ext(e)).into_owned())
+                // escaped where it is not valid Unicode, as on the protocol (never U+FFFD)
+                .map(|e| {
+                    sk_store::names::printable(&sk_native::hardscan::lower_ext(e)).into_owned()
+                })
                 .unwrap_or_default()
         } else {
             String::new()

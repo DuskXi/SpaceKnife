@@ -137,18 +137,19 @@ names}` (the `names` blob cut by `name_len`).
 
 `known_diffs.json` (every scenario) and a scenario's `known_diffs` list path patterns of the
 comparison (`steps/<step index>/…`; `*` within a segment, `**` any segments) with why. One with
-`"bug"` is a product bug found by the gate, kept visible in the status line until it is fixed:
+`"bug"` is a product bug found by the gate, kept visible in the status line until it is fixed.
+None is open. Those found so far are fixed, each with a test in the normal suites:
 
-| bug | where | what |
+| bug | what it was | test |
 |---|---|---|
-| `scan-topic-silent-monitor` | `monitor`, `scan_tree` | the final status of a scan has `monitor: null`, and applied monitor changes never push `scan.progress`: the status bar (which reads only these pushes) says live monitoring is off |
-| `import-change-order` | `settings_classes` | `settings.import` lists changes A→Z by key instead of the settings' own order |
-| `io-topic-before-registry` | `system` | an `io` subscription made right after start never delivers `io.load` |
-| `linux-root-ctime` | `scan_tree`, `system` | Linux: the scan root gets a creation time (std's `created()`, statx) while every other entry has none, as in 0.3.4 |
+| `scan-topic-silent-monitor` | the final status of a scan had `monitor: null`, and applied monitor changes never pushed `scan.progress`: the status bar (which reads only these pushes) said live monitoring was off | sk-server `scan_server.rs` `a_watched_scan_says_so_from_its_final_status_on`, `applied_changes_and_the_monitor_switch_push_the_scan_status` |
+| `import-change-order` | `settings.import` listed changes A→Z by key instead of the settings' own order | sk-core `settings::io` `changes_are_listed_in_the_settings_order` |
+| `io-topic-before-registry` | an `io` subscription made before disk sampling had started never delivered `io.load` | sk-server `scan_server.rs` `an_io_subscription_made_at_once_gets_the_disks_of_the_started_registry` |
+| `linux-root-ctime` | Linux: the scan root had a creation time (std's `created()`, statx) while every other entry has none, as in 0.3.4 | sk-core `scan_scanner.rs` `the_root_has_a_creation_time_where_its_entries_do` |
 
-The others are accepted differences (texts, a sort direction nobody calls, the empty `loc` of
-Rust's parameter errors, and the fields 0.3.5 adds by design: `generation` of frames, result pages
-and summaries, `rev` of basket items).
+The known differences left are accepted ones (texts, a sort direction nobody calls, the empty
+`loc` of Rust's parameter errors, and the fields 0.3.5 adds by design: `generation` of frames,
+result pages and summaries, `rev` of basket items).
 
 ## The upgrade scenario
 

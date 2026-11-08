@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use sk_protocol::io::TOPIC_IO;
 use sk_protocol::methods::{AppShutdown, Subscribe, SystemInfoMethod, SystemPing, Unsubscribe};
 use sk_protocol::streams::{SubscribeResult, TOPIC_LOG};
 use sk_protocol::system::{PingResult, PlatformInfo, ShutdownResult, SystemInfo};
@@ -137,6 +138,11 @@ pub fn install(r: &mut Router, t: &mut TopicRegistry) {
             return Err(RpcError::invalid_request(
                 "log-stream capability was not negotiated",
             ));
+        }
+        if p.topic == TOPIC_IO {
+            // the `io` topic follows the disks the registry knows when subscribing: right after
+            // the backend's start, those it is still finding (0.3.4 had them by the first session)
+            call.server.scans.io_started().await;
         }
         let sub = call.server.topics.open(&call.server, s, &p)?;
         let id = sub.id.clone();

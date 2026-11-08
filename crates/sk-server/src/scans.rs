@@ -439,7 +439,8 @@ pub fn node_info(nodes: &Nodes, node: NodeId) -> NodeInfo {
     NodeInfo {
         id: node,
         parent: i64::from(nodes.parent(node)),
-        name: nodes.name(node).into_owned(),
+        // a name that is not valid Unicode escaped, as 0.3.4 sent it (never U+FFFD)
+        name: nodes.name_printable(node).into_owned(),
         kind: match kind {
             Kind::File => NodeKindName::File,
             Kind::Dir => NodeKindName::Dir,
@@ -503,11 +504,19 @@ impl ScanManager {
             ..RegistryOptions::default()
         };
         let (io_ready, _) = tokio::sync::watch::channel(false);
+        let io = match config.io_sampler.clone() {
+            Some(make) => IoRegistry::with_sampler(
+                opts,
+                Box::new(move || make()),
+                Arc::new(sk_core::io::sampler::monotonic),
+            ),
+            None => IoRegistry::new(opts),
+        };
         ScanManager {
             scans: Mutex::new(HashMap::new()),
             order: Mutex::new(Vec::new()),
             settings: settings.clone(),
-            io: Arc::new(IoRegistry::new(opts)),
+            io: Arc::new(io),
             helper: Arc::new(SharedHelper::new(LaunchOptions::default())),
             io_ready,
             io_starting: AtomicBool::new(false),
@@ -526,6 +535,15 @@ impl ScanManager {
             io.start();
             ready.send_replace(true);
         });
+    }
+
+    /// Resolves once disk sampling started at the backend's start (its disks are known then), at
+    /// most [`IO_START_WAIT`] later; at once when it is not starting.
+    pub async fn io_started(&self) {
+        if self.io_starting.load(Ordering::SeqCst) && !*self.io_ready.borrow() {
+            let mut rx = self.io_ready.subscribe();
+            let _ = tokio::time::timeout(IO_START_WAIT, rx.wait_for(|r| *r)).await;
+        }
     }
 
     pub fn list(&self) -> Vec<Arc<ScanHandle>> {
@@ -617,9 +635,8 @@ impl ScanManager {
                 && sk_core::privacy::full_disk_access(None) == Some(false)
         });
         // a scan right after the backend started waits a moment for disk sampling
-        if gated && self.io_starting.load(Ordering::SeqCst) && !*self.io_ready.borrow() {
-            let mut rx = self.io_ready.subscribe();
-            let _ = tokio::time::timeout(IO_START_WAIT, rx.wait_for(|r| *r)).await;
+        if gated {
+            self.io_started().await;
         }
         let governor = if gated && self.io.running() && !params.roots.is_empty() {
             let io = self.io.clone();
@@ -713,7 +730,11 @@ impl ScanManager {
         let (srv, h) = (server.clone(), handle.clone());
         std::thread::Builder::new()
             .name(format!("scan-{}", handle.id))
-            .spawn(move || run_scan(&srv, &h))
+            .spawn(move || {
+                // the watchers first, as in 0.3.4: nothing listed before them goes unwatched
+                srv.monitors.wait_started(&h.id);
+                run_scan(&srv, &h)
+            })
             .map_err(|e| RpcError::new(ErrorCode::ScanFailed, e.to_string()))?;
         tracing::info!(
             "scan {} started: {}",

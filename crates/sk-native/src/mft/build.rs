@@ -87,6 +87,17 @@ pub trait TreeSink {
         image_len: usize,
         ext_table: Vec<String>,
     ) -> Result<(NodeColumns<'_>, &mut [u8]), Self::Error>;
+
+    /// The text of a lower-cased extension (bytes in the store's encoding) in the extension
+    /// table; extensions with the same text share one id. Called once per distinct extension,
+    /// from the build's threads. By default UTF-8 with U+FFFD for what is not; a backend that
+    /// shows such names another way (escaped, say) says so here.
+    fn ext_text(raw: &[u8]) -> String
+    where
+        Self: Sized,
+    {
+        String::from_utf8_lossy(raw).into_owned()
+    }
 }
 
 /// Why a table could not be built.
@@ -369,7 +380,7 @@ fn build<S: TreeSink>(
     keys.par_sort_unstable(); // Short (as integers) before Long (as bytes)
     let lowered: Vec<String> = keys
         .par_iter()
-        .map(|k| String::from_utf8_lossy(&lower_ext(&ext_bytes(k))).into_owned())
+        .map(|k| S::ext_text(&lower_ext(&ext_bytes(k))))
         .collect();
     let mut ext_table: Vec<String> = vec![String::new()];
     let mut numbered: HashMap<String, u16> = HashMap::from([(String::new(), 0)]);

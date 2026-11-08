@@ -65,39 +65,10 @@ pub fn emit(
 
 /// A file name or path as text for logs and the wire: undecodable parts escaped (`\xff` for a
 /// byte that is not UTF-8 on POSIX, `\udc80` for a lone surrogate on Windows), so it never fails.
+/// The same text as the protocol's names and paths ([`sk_store::names::printable`] of the bytes the
+/// store keeps: WTF-8 on Windows, the raw bytes on POSIX).
 pub fn printable(name: &OsStr) -> String {
-    if let Some(s) = name.to_str() {
-        return s.to_owned();
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        let units: Vec<u16> = name.encode_wide().collect();
-        let mut out = String::with_capacity(units.len());
-        for r in char::decode_utf16(units.iter().copied()) {
-            match r {
-                Ok(c) => out.push(c),
-                Err(e) => out.push_str(&format!("\\u{:04x}", e.unpaired_surrogate())),
-            }
-        }
-        out
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        let mut out = String::new();
-        for chunk in name.as_bytes().utf8_chunks() {
-            out.push_str(chunk.valid());
-            for b in chunk.invalid() {
-                out.push_str(&format!("\\x{b:02x}"));
-            }
-        }
-        out
-    }
-    #[cfg(not(any(windows, unix)))]
-    {
-        name.to_string_lossy().into_owned()
-    }
+    sk_store::names::printable(name.as_encoded_bytes()).into_owned()
 }
 
 const DENIED_ZH: &str = "拒绝"; // in a Chinese system's "access denied" message

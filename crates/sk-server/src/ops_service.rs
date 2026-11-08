@@ -322,10 +322,12 @@ impl OpsService {
         scan_id: &str,
         node: NodeId,
     ) -> RpcResult<PathForms> {
-        if let Some(r) = server.compares.tree_node(scan_id, node) {
-            let r = r?;
-            let mut f = sk_core::ops::path_forms(&r.path, None);
-            f.on_disk = r.on_disk;
+        // from the stored bytes: the text forms show what is not Unicode as U+FFFD, which the
+        // interface never hands the system (tree.node's escaped path could name another item)
+        if let Some(r) = server.compares.path_bytes(scan_id, node) {
+            let (raw, on_disk) = r?;
+            let mut f = sk_core::ops::paths::path_forms_bytes(&raw, None);
+            f.on_disk = on_disk;
             return Ok(f);
         }
         let h = server.scans.get(scan_id)?;

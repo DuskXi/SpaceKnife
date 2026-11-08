@@ -290,9 +290,10 @@ fn a_failed_output_keeps_the_snapshots() {
     assert_complete(&snaps[0]);
 }
 
-/// `stored_language` (the scan's fast path) gives what the settings store would.
+/// `stored_language` (the scan's fast path) gives what the settings store would: a file the store
+/// rejects as invalid (another value out of range, a version that is not a number) leaves the
+/// defaults there, so the scan speaks the system's language too, as in 0.3.4.
 #[test]
-#[ignore = "bug: spaceknife-cli's fast language path (cli/mod.rs stored_language) reads general.language from a settings file the settings store rejects as invalid (another value out of range, a version that is not a number) and falls back from: the scan speaks English where the app uses the defaults (system); 0.3.4 read both alike"]
 fn stored_language_reads_what_the_settings_store_reads() {
     let tmp = tempfile::tempdir().unwrap();
     let file = tmp.path().join("settings.json");

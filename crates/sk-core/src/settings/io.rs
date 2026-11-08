@@ -73,6 +73,9 @@ pub struct ImportPlan {
     pub source: ImportSource,
     /// Only what changes
     pub values: Values,
+    /// The keys of `values` in the order they were read: the settings' page order for a
+    /// SpaceKnife export, the file's for SpaceSniffer's (how 0.3.4 listed the changes)
+    order: Vec<String>,
     /// A new class table, if it changes
     pub classes: Option<Arc<ClassTable>>,
     /// New folder choices (UI-W7-38) as (path, class id), if they change
@@ -86,16 +89,21 @@ impl ImportPlan {
         ImportPlan {
             source,
             values: Values::new(),
+            order: Vec::new(),
             classes: None,
             folders: None,
             skipped: Vec::new(),
         }
     }
 
-    /// The changes as `settings.import` lists them (names in the current language).
+    /// The changes as `settings.import` lists them (names in the current language), in the order
+    /// they were read ([`ImportPlan::order`]).
     pub fn changes(&self, current: &Values) -> Vec<SettingChange> {
-        self.values
+        let rest = self.values.keys().filter(|k| !self.order.contains(k));
+        self.order
             .iter()
+            .chain(rest)
+            .filter_map(|k| self.values.get_key_value(k))
             .map(|(k, v)| SettingChange {
                 key: k.clone(),
                 name: by_key(k).map_or_else(|| k.clone(), |s| t(s.name).to_owned()),
@@ -250,8 +258,9 @@ fn finish(plan: &mut ImportPlan, wanted: Vec<(String, Value)>, current: &Values)
             ));
             continue;
         };
-        if current.get(&key) != Some(&checked) {
-            plan.values.insert(key, checked);
+        let changes = current.get(&key) != Some(&checked);
+        if changes && plan.values.insert(key.clone(), checked).is_none() {
+            plan.order.push(key);
         }
     }
 }
@@ -768,5 +777,53 @@ mod tests {
         };
         let plan = read_plan(&out, &values, &c).unwrap();
         assert!(plan.values.is_empty() && plan.folders.is_none() && plan.skipped.is_empty());
+    }
+
+    #[test]
+    fn changes_are_listed_in_the_settings_order() {
+        // the import dialog shows the changes as settings.import lists them: 0.3.4 listed a
+        // SpaceKnife export's in the settings' own order (page by page), a SpaceSniffer file's in
+        // the order they were read from it; never A→Z by key
+        let _g = crate::i18n::TEST_LOCK.lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("mine.json");
+        let mut values = defaults().clone();
+        for (k, v) in [
+            ("treemap.initial_detail", SettingValue::Int(7)),
+            ("appearance.theme", SettingValue::Str("dark".into())),
+            ("general.update_channel", SettingValue::Str("stable".into())),
+            ("tags.name_red", SettingValue::Str("Delete me".into())),
+        ] {
+            assert!(by_key(k).is_some(), "{k}");
+            values.insert(k.to_owned(), v);
+        }
+        export_to(&out, &values, &ClassTable::builtin(), &[]).unwrap();
+        let builtin = ClassTable::builtin();
+        let plan = read_plan(&out, defaults(), &ctx(&builtin)).unwrap();
+        let keys: Vec<String> = plan
+            .changes(defaults())
+            .into_iter()
+            .map(|c| c.key)
+            .collect();
+        let page_order: Vec<String> = super::super::registry()
+            .iter()
+            .map(|s| s.key.to_owned())
+            .filter(|k| keys.contains(k))
+            .collect();
+        assert_eq!(keys.len(), 4, "{keys:?}");
+        assert_eq!(keys, page_order);
+
+        let plan = read_plan(Path::new(SS_DEFAULT), defaults(), &ctx(&builtin)).unwrap();
+        let keys: Vec<String> = plan
+            .changes(defaults())
+            .into_iter()
+            .map(|c| c.key)
+            .collect();
+        let at = |k: &str| keys.iter().position(|x| x == k).unwrap();
+        // initialDetailLevel is read before initialStyle
+        assert!(
+            at("treemap.initial_detail") < at("appearance.default_color_mode"),
+            "{keys:?}"
+        );
     }
 }
