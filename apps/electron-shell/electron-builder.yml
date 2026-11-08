@@ -99,7 +99,10 @@ rpm:
   artifactName: spaceknife-${version}.x86_64.${ext}
   # electron-builder's own scripts (the /usr/bin/spaceknife link, chrome-sandbox) plus
   # /usr/bin/spaceknife-cli; after a whole upgrade transaction, the links 0.3.4's removal script
-  # took away are put back (build/linux/rpm-posttrans.sh)
+  # took away are put back, and the folders 0.3.4 left removed (build/linux/rpm-posttrans.sh).
+  # --directories: the package owns /opt/SpaceKnife and every folder in it (%dir), which rpm
+  # removes with it; fpm lists only files otherwise (so did 0.3.4's rpm), and a removal leaves the
+  # folders behind, empty
   afterInstall: build/linux/after-install.sh
   afterRemove: build/linux/after-remove.sh
-  fpm: ["--rpm-posttrans", "build/linux/rpm-posttrans.sh"]
+  fpm: ["--rpm-posttrans", "build/linux/rpm-posttrans.sh", "--directories", "/opt/SpaceKnife"]

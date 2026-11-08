@@ -25,6 +25,7 @@ What is already done for the next version, **0.3.5**, and not in a release yet. 
 - **Open, Show in Explorer and Open terminal here no longer pass on a name the system would read as another item** (Windows drops a trailing dot or space: **Open** on `setup.` started `setup` next to it), nor a name that isn't valid Unicode; for such items the commands are greyed out and say why. Such names show as they did in 0.3.4: escaped (`\xff` on Linux and macOS, `\udc80` on Windows) in lists, paths, the delete basket and the command palette, which finds them written so, and as `?` in the labels drawn on the views.
 - **An update is downloaded only when the release lists its SHA-256**: 0.3.4 downloaded a file without a published checksum and marked it unverified; now nothing is downloaded and the card says why.
 - **Open in Terminal on Linux without `x-terminal-emulator`** (RHEL 9, Fedora) opened nothing; now it starts the first installed of GNOME Terminal, Ptyxis, Console, Konsole, Xfce Terminal, MATE Terminal, Tilix and xterm.
+- **Removing the rpm leaves nothing in `/opt`**: 0.3.4's rpm owned none of its folders, so `dnf remove` left an empty `/opt/SpaceKnife` behind. The rpm now owns them, and the update from 0.3.4 also removes the empty folders 0.3.4's backend left in `/opt/SpaceKnife/resources/backend`.
 - **Command-line output to NUL**: `scan` with its output sent to `NUL` (`> NUL` in the command prompt, `>/dev/null` in Git Bash) ended with an error and without its snapshot; now it finishes and saves the snapshot.
 - **Singular English counts on the command line**: a scan with one unreadable folder says "1 folder couldn't be accessed", `snapshot list` says "1 snapshot in …" and `snapshot show` "· 1 item ·". Thanks to @swastiktawate ([#9](https://github.com/DuskXi/SpaceKnife/pull/9)).
 
@@ -55,5 +56,6 @@ What is already done for the next version, **0.3.5**, and not in a release yet. 
 - **「打开」「在资源管理器中显示」「在此打开终端」不再把系统会当成另一项的名字交出去**（Windows 会去掉名字末尾的点或空格：对 `setup.` 点「打开」，启动的是旁边的 `setup`），也不再交出不是合法 Unicode 的名字；这些项的命令显示为灰色，并说明原因。这样的名字和 0.3.4 一样显示成转义的写法（Linux 和 macOS 上是 `\xff`，Windows 上是 `\udc80`）：列表、路径、删除篮和命令面板里都是（命令面板也认这种写法），视图上画出的标签里是 `?`。
 - **发布里列出了 SHA-256 才下载更新**：0.3.4 会下载没有公布校验值的文件，标为未经校验；现在不下载，卡片说明原因。
 - **Linux 上没有 `x-terminal-emulator` 时**（RHEL 9、Fedora），「在终端中打开」什么也不打开；现在启动装了的第一个：GNOME Terminal、Ptyxis、Console、Konsole、Xfce Terminal、MATE Terminal、Tilix、xterm。
+- **卸载 rpm 后 `/opt` 里不再留下东西**：0.3.4 的 rpm 不拥有自己的文件夹，`dnf remove` 之后会留下空的 `/opt/SpaceKnife`。现在 rpm 拥有这些文件夹；从 0.3.4 更新时，0.3.4 的后端在 `/opt/SpaceKnife/resources/backend` 里留下的空文件夹也会删掉。
 - **命令行输出到 NUL**：`scan` 的输出送到 `NUL`（命令提示符里的 `> NUL`、Git Bash 里的 `>/dev/null`）时会报错退出、不存快照；现在照常完成并保存快照。
 - **命令行的英文单数**：有一个文件夹读不了的扫描写「1 folder couldn't be accessed」，`snapshot list` 写「1 snapshot in …」，`snapshot show` 写「· 1 item ·」。感谢 @swastiktawate（[#9](https://github.com/DuskXi/SpaceKnife/pull/9)）。
