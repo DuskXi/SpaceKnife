@@ -10,7 +10,9 @@
 ; The uninstaller's un.SkRemoveData runs in this program's own uninstaller (the "uninstaller" case
 ; writes it, packaging/nsis-logic.mjs runs it with _?= so that it runs where it is, "removedata"):
 ; its folders (SK_LOCALAPPDATA, SK_APPDATA) are the sandbox's Local and Roaming here, never the
-; user's. Its un.onInit does only that, its Uninstall section is empty.
+; user's. Its un.onInit does only that, its Uninstall section is empty. The WebView2 processes it
+; may end (un.SkWebView2In: --user-data-dir in the shell's folder, here the sandbox's) are the
+; runner's stand-ins.
 ;
 ;   makensis -DSK_HELPERS=<spaceknife.nsh> -DSK_UTILS=<Tauri's utils.nsh> -DSK_PLUGINS=<dir> -DSK_OUT=<exe> logic-test.nsi
 

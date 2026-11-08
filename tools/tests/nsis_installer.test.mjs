@@ -77,6 +77,26 @@ test("the uninstaller removes SpaceKnife's own folders by 0.3.4's rules", () => 
   assert.equal(at(body(installer, "un.SkDataPage"), "SkDeleteAppData"), -1);
 });
 
+test("the shell's folder waits for its WebView2 processes, and only those are ended", () => {
+  const remove = body(helpers, "un.SkRemoveData");
+  const shell = 'RMDir /r "${SK_LOCALAPPDATA}\\${BUNDLEID}"';
+  const end = at(remove, "Call un.SkEndWebView2In");
+  assert.ok(at(remove, shell) >= 0 && at(remove, shell) < end, "the WebView2 processes are looked for before the folder is tried once");
+  assert.ok(remove.slice(end).includes(shell), "the folder is not tried again after them");
+  const wait = body(helpers, "un.SkEndWebView2In");
+  assert.ok(at(wait, "Sleep") >= 0 && at(wait, "StrCpy $R2 1") > at(wait, "Sleep"), "they are ended without being waited for");
+  // by name and by --user-data-dir: the folder itself or one in it, never another program's
+  const wv2 = body(helpers, "un.SkWebView2In");
+  const name = at(wv2, '${If} $4 == "msedgewebview2.exe"');
+  const dir = at(wv2, '"--user-data-dir="');
+  const inside = at(wv2, '${OrIf} $R4 == "inside"');
+  const kill = at(wv2, "TerminateProcess");
+  assert.ok(name >= 0 && name < dir && dir < inside && inside < kill);
+  assert.equal(wv2[inside - 1], '${If} $R4 == "same"');
+  assert.equal(wv2.filter((l) => l.includes("TerminateProcess")).length, 1);
+  assert.ok(at(wv2, "${If} $8 = 1") < kill && at(wv2, "${If} $8 = 1") > inside, "ended without being asked to");
+});
+
 test("the files go by name: the list an installation wrote, the next update and the uninstaller read", () => {
   const install = body(installer, "Install");
   // step 5, an update of a forked installation in place: its own list
