@@ -52,6 +52,7 @@ Var SkRun            ; 1: --force-run or /R: start the app after a silent instal
 Var SkRunArgs        ; /ARGS …
 Var SkKeepShortcuts  ; uninstaller: --keep-shortcuts / --updated / /UPDATE
 Var SkDeleteData     ; uninstaller: --delete-app-data or the 「你的数据」 box
+Var SkDeleteAppData  ; uninstaller: --delete-app-data itself, whatever the box says
 Var SkIsAdmin        ; 1: elevated
 Var SkOldDir         ; electron-builder (0.3.4) or forked install found in this scope
 Var SkOldKind        ; "eb" (0.3.4) | "fork" (0.3.5+) | ""
@@ -212,6 +213,7 @@ Function ${UN}SkParseFlags
   StrCpy $SkInner 0
   StrCpy $SkKeepShortcuts 0
   StrCpy $SkDeleteData 0
+  StrCpy $SkDeleteAppData 0
   ${GetParameters} $R9
   ClearErrors
   ${GetOptions} $R9 "/P" $R8
@@ -279,11 +281,13 @@ Function ${UN}SkParseFlags
   ${GetOptions} $R9 "--delete-app-data" $R8
   ${IfNot} ${Errors}
     StrCpy $SkDeleteData 1
+    StrCpy $SkDeleteAppData 1
   ${EndIf}
   ; an update keeps the shortcuts (and the data) whatever else is said
   ${If} $UpdateMode = 1
     StrCpy $SkKeepShortcuts 1
     StrCpy $SkDeleteData 0
+    StrCpy $SkDeleteAppData 0
   ${EndIf}
   ; the app starts with --updated after an update (0.3.4's StartApp did; 0.3.5 passes /ARGS)
   ${If} $UpdateMode = 1
@@ -1325,17 +1329,38 @@ FunctionEnd
   !define SK_APPDATA "$APPDATA"
 !endif
 
-; What SpaceKnife keeps for itself only: always gone after an uninstall (not after an update).
-; With $SkDeleteData = 1 the snapshots, settings and logs go too. The uninstalling user's folders,
-; also for a per-machine installation (installer.nsh of 0.3.4 did the same).
+; $R4 = how $INSTDIR and DIR are related (un.SkRelation: "" when neither holds the other)
+!macro SK_UN_INSTDIR_RELATION DIR
+  StrCpy $R0 $INSTDIR
+  Call un.SkNormalize
+  StrCpy $R2 $R0
+  StrCpy $R0 "${DIR}"
+  Call un.SkNormalize
+  StrCpy $R3 $R0
+  Call un.SkRelation
+!macroend
+
+; What SpaceKnife keeps for itself only, by 0.3.4's rules (its installer.nsh customUnInstall and
+; electron-builder's own --delete-app-data part). The uninstalling user's folders, also for a
+; per-machine installation (0.3.4 did the same).
+;   - always, also in an update: electron-builder's copy of its installer (0.3.4);
+;   - not in an update: 0.3.4's Chromium profile, the shell's own folders of 0.3.5+ (WebView2
+;     profile, theme.json), the backend's cache and downloaded updates; %APPDATA%\SpaceKnife
+;     itself only when nothing else is in it;
+;   - $SkDeleteData = 1 (the 「你的数据」 box, or --delete-app-data): the snapshots, settings and
+;     logs too, %LOCALAPPDATA%\SpaceKnife as a whole;
+;   - $SkDeleteAppData = 1 (--delete-app-data, whatever the box says): %APPDATA%\SpaceKnife as a
+;     whole too.
+; Never a folder the program itself is in (a pathological 0.3.4 folder choice).
 Function un.SkRemoveData
+  SetShellVarContext current
+  ${If} ${SK_LOCALAPPDATA} != ""
+    RMDir /r "${SK_LOCALAPPDATA}\spaceknife-electron-updater"
+  ${EndIf}
   ${If} $UpdateMode = 1
+    Call un.SkRestoreContext
     Return
   ${EndIf}
-  SetShellVarContext current
-  ; electron-builder's copy of its installer (0.3.4), 0.3.4's Chromium profile, the shell's own
-  ; folder of 0.3.5+ (WebView2 profile, theme.json), the backend's cache and downloaded updates
-  RMDir /r "${SK_LOCALAPPDATA}\spaceknife-electron-updater"
   ${If} ${SK_APPDATA} != ""
     RMDir /r "${SK_APPDATA}\${SK_DATA}\electron"
     RMDir "${SK_APPDATA}\${SK_DATA}"
@@ -1347,18 +1372,17 @@ Function un.SkRemoveData
     RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\Cache"
     RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\updates"
     ${If} $SkDeleteData = 1
-      ; never when the program itself is in there (a pathological 0.3.4 folder choice)
-      StrCpy $R0 $INSTDIR
-      Call un.SkNormalize
-      StrCpy $R2 $R0
-      StrCpy $R0 "${SK_LOCALAPPDATA}\${SK_DATA}"
-      Call un.SkNormalize
-      StrCpy $R3 $R0
-      Call un.SkRelation
+      !insertmacro SK_UN_INSTDIR_RELATION "${SK_LOCALAPPDATA}\${SK_DATA}"
       ${If} $R4 == ""
         RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}"
-        RMDir /r "${SK_APPDATA}\${SK_DATA}"
       ${EndIf}
+    ${EndIf}
+  ${EndIf}
+  ${If} $SkDeleteAppData = 1
+  ${AndIf} ${SK_APPDATA} != ""
+    !insertmacro SK_UN_INSTDIR_RELATION "${SK_APPDATA}\${SK_DATA}"
+    ${If} $R4 == ""
+      RMDir /r "${SK_APPDATA}\${SK_DATA}"
     ${EndIf}
   ${EndIf}
   Call un.SkRestoreContext

@@ -53,6 +53,30 @@ test("nothing deletes a folder as a whole but the uninstaller's data and cache f
   assert.deepEqual(found, [], "a recursive delete outside SpaceKnife's own data folders");
 });
 
+test("the uninstaller removes SpaceKnife's own folders by 0.3.4's rules", () => {
+  // the user's own folders in the installer; only the logic test points them elsewhere
+  assert.match(helpers, /^!ifndef SK_LOCALAPPDATA\n {2}!define SK_LOCALAPPDATA "\$LOCALAPPDATA"\n!endif$/m);
+  assert.match(helpers, /^!ifndef SK_APPDATA\n {2}!define SK_APPDATA "\$APPDATA"\n!endif$/m);
+  assert.doesNotMatch(installer, /SK_(LOCAL)?APPDATA/);
+  const remove = body(helpers, "un.SkRemoveData");
+  assert.deepEqual(remove.filter((l) => /\$(LOCALAPPDATA|APPDATA)\b/.test(l)), [], "un.SkRemoveData names the shell's folders itself");
+  // electron-builder's copy of its installer goes in an update too, nothing else does
+  const update = at(remove, "${If} $UpdateMode = 1");
+  assert.ok(at(remove, 'RMDir /r "${SK_LOCALAPPDATA}\\spaceknife-electron-updater"') < update);
+  assert.equal(remove[update + 2], "Return");
+  assert.equal(remove.findIndex((l, i) => i < update && /^RMDir/.test(l) && !l.includes("spaceknife-electron-updater")), -1);
+  // %APPDATA%\SpaceKnife: when empty, and as a whole only with --delete-app-data (not the box)
+  assert.ok(at(remove, 'RMDir "${SK_APPDATA}\\${SK_DATA}"') > update);
+  const whole = remove.filter((l) => l === 'RMDir /r "${SK_APPDATA}\\${SK_DATA}"');
+  assert.equal(whole.length, 1);
+  const flag = at(remove, "${If} $SkDeleteAppData = 1");
+  assert.ok(flag > at(remove, "${If} $SkDeleteData = 1") && at(remove, 'RMDir /r "${SK_APPDATA}\\${SK_DATA}"') > flag);
+  assert.ok(at(remove, 'RMDir /r "${SK_LOCALAPPDATA}\\${SK_DATA}"') < flag);
+  // the box is $SkDeleteData only; --delete-app-data sets both, an update neither
+  assert.equal(at(body(installer, "un.SkDataPageLeave"), "SkDeleteAppData"), -1);
+  assert.equal(at(body(installer, "un.SkDataPage"), "SkDeleteAppData"), -1);
+});
+
 test("the files go by name: the list an installation wrote, the next update and the uninstaller read", () => {
   const install = body(installer, "Install");
   // step 5, an update of a forked installation in place: its own list

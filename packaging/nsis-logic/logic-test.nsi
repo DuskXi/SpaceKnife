@@ -579,6 +579,7 @@ Function un.RemoveData
   ${EndIf}
   !insertmacro OUT "update=$UpdateMode"
   !insertmacro OUT "deletedata=$SkDeleteData"
+  !insertmacro OUT "deleteappdata=$SkDeleteAppData"
   Call un.SkRemoveData
   !insertmacro EXISTS "updater" "$TestLocal\spaceknife-electron-updater\*.*"
   !insertmacro EXISTS "cache" "$TestLocal\SpaceKnife\Cache\*.*"
@@ -638,6 +639,7 @@ Function .onInit
     !insertmacro OUT "inner=$SkInner"
     !insertmacro OUT "keepshortcuts=$SkKeepShortcuts"
     !insertmacro OUT "deletedata=$SkDeleteData"
+    !insertmacro OUT "deleteappdata=$SkDeleteAppData"
     ; what the registry says (read only; depends on the machine)
     Call SkDetectScope
     Call SkElevatedParams

@@ -116,7 +116,7 @@ try {
 
   // 0.3.4's flags (v0.3.4 update.ts nsisUpdateArgs, its uninstaller's) and Tauri's; the elevated
   // copy gets the same ones, its own flag and the scope, /D= last
-  const none = { passive: "0", update: "0", noshortcut: "0", run: "0", runargs: "", scope: "", forced: "0", inner: "0", keepshortcuts: "0", deletedata: "0" };
+  const none = { passive: "0", update: "0", noshortcut: "0", run: "0", runargs: "", scope: "", forced: "0", inner: "0", keepshortcuts: "0", deletedata: "0", deleteappdata: "0" };
   const flags = [
     ["--updated /S --force-run /currentuser", { update: "1", run: "1", runargs: "--updated", scope: "user", forced: "1", keepshortcuts: "1", flag: "/currentuser", elevated: "--updated /S --force-run /currentuser --sk-elevated /currentuser" }],
     ["--updated /S --force-run /allusers", { update: "1", run: "1", runargs: "--updated", scope: "machine", forced: "1", keepshortcuts: "1", flag: "/allusers", elevated: "--updated /S --force-run /allusers --sk-elevated /allusers" }],
@@ -125,7 +125,7 @@ try {
     ["/S /R /ARGS --minimized", { run: "1", runargs: "--minimized" }],
     ["/S /P /NS", { passive: "1", noshortcut: "1" }],
     ["/S /KEEP_APP_DATA /currentuser --keep-shortcuts --updated _?=C:\\Program Files\\Space Knife", { update: "1", runargs: "--updated", scope: "user", forced: "1", keepshortcuts: "1", flag: "/currentuser" }],
-    ["/S --delete-app-data", { deletedata: "1" }],
+    ["/S --delete-app-data", { deletedata: "1", deleteappdata: "1" }],
     ["/S --updated --delete-app-data", { update: "1", runargs: "--updated", keepshortcuts: "1", deletedata: "0" }],
     ["/S /R --updated --no-desktop-shortcut", { update: "1", noshortcut: "1", run: "1", runargs: "--updated", keepshortcuts: "1" }],
     ["/s --UPDATED /r /AllUsers /D=C:\\Some Dir\\SpaceKnife", { update: "1", run: "1", runargs: "--updated", scope: "machine", forced: "1", keepshortcuts: "1", elevated: "/s --UPDATED /r /AllUsers --sk-elevated /allusers /D=C:\\Some Dir\\SpaceKnife" }],
@@ -316,13 +316,19 @@ try {
     const data = { snapshots: "0", settings: "0", local: "0" };
     const roaming = { roaming: "0", roaming_other: "0" };
     for (const [what, cmdline, env, want] of [
+      ["an update: electron-builder's copy of its installer goes, nothing else", "/S /KEEP_APP_DATA /currentuser --keep-shortcuts --updated", { SK_LOGIC_ROAMING_OTHER: "1" }, { ...kept, updater: "0" }],
+      ["an update with --delete-app-data: the same, the data stays", "/S --updated --delete-app-data", { SK_LOGIC_ROAMING_OTHER: "1" }, { ...kept, updater: "0" }],
       ["an uninstall: the caches go, %APPDATA%\\SpaceKnife with something else in it stays", "/S", { SK_LOGIC_ROAMING_OTHER: "1" }, caches],
       ["an uninstall: an empty %APPDATA%\\SpaceKnife goes", "/S", {}, { ...caches, ...roaming }],
+      ["the box: the data goes, %APPDATA%\\SpaceKnife with something else in it stays", "/S", { SK_LOGIC_BOX: "1", SK_LOGIC_ROAMING_OTHER: "1" }, { ...caches, ...data }],
       ["the box: an empty %APPDATA%\\SpaceKnife goes", "/S", { SK_LOGIC_BOX: "1" }, { ...caches, ...data, ...roaming }],
       ["--delete-app-data: the data and %APPDATA%\\SpaceKnife as a whole", "/S --delete-app-data", { SK_LOGIC_ROAMING_OTHER: "1" }, { ...caches, ...data, ...roaming }],
+      ["--delete-app-data with the box unticked: %APPDATA%\\SpaceKnife as a whole, the data stays", "--delete-app-data", { SK_LOGIC_BOX: "0", SK_LOGIC_ROAMING_OTHER: "1" }, { ...caches, ...roaming }],
+      ["--delete-app-data, the program in the data folder: that stays", "/S --delete-app-data", { SK_LOGIC_ROAMING_OTHER: "1", SK_LOGIC_INSTDIR: "Local\\SpaceKnife\\app" }, { ...caches, ...roaming, instdir_user: "1" }],
+      ["--delete-app-data, the program in %APPDATA%\\SpaceKnife: that stays", "/S --delete-app-data", { SK_LOGIC_INSTDIR: "Roaming\\SpaceKnife\\app" }, { ...caches, ...data, roaming_other: "0", instdir_user: "1" }],
     ]) {
       const { got } = run("removedata", `${cmdline} _?=${sandbox}\\Programs\\SpaceKnife`, env, uninstaller);
-      expect(`un.SkRemoveData: ${what}`, got, want, ["error", "update", "deletedata"]);
+      expect(`un.SkRemoveData: ${what}`, got, want, ["error", "update", "deletedata", "deleteappdata"]);
     }
   }
   {
