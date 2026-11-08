@@ -4,7 +4,7 @@
 import { basketAdd, call, clearFilter, closeTab, moveActiveTab, newStartTab, openSettingsTab, settingsHistory, setViewSettings, viewCall } from "@/state/actions";
 import { activeTab, focusedViewId, get, set, setting, toast, toggleLog } from "@/state/store";
 import { focusFilter } from "@/lib/filterInput";
-import { notOnDisk, revealLabel } from "@/lib/reveal";
+import { folderOf, handable, notOnDisk, notOpenable, revealLabel } from "@/lib/reveal";
 import { t } from "@/lib/i18n";
 import { Kind } from "@/visual/frame";
 import { hosts } from "@/visual/hosts";
@@ -149,10 +149,12 @@ export function onKey(e: KeyboardEvent): unknown {
         toast(t("已复制"));
       } else if (!r.on_disk) {
         toast(notOnDisk());
+      } else if (!handable(lower === "e" ? r.path : folderOf(r.path, r.node.kind === "dir"))) {
+        toast(notOpenable());
       } else if (lower === "e") {
         window.sk.shell.showItemInFolder(r.path);
         toast(revealLabel());
-      } else window.sk.shell.openTerminal(r.node.kind === "dir" ? r.path : r.path.replace(/[\\/][^\\/]*$/, ""));
+      } else window.sk.shell.openTerminal(folderOf(r.path, r.node.kind === "dir"));
     })();
   }
 }

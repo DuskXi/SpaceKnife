@@ -13,7 +13,7 @@ import { fmtAgo, fmtInt, fmtShare, fmtSize, plural, sizeParts } from "@/lib/form
 import { inBrowser } from "@/lib/host";
 import { t } from "@/lib/i18n";
 import type { IconName } from "@/lib/icons";
-import { notOnDisk, revealLabel } from "@/lib/reveal";
+import { handable, notOnDisk, revealLabel } from "@/lib/reveal";
 import { isRunning } from "@/lib/scanProgress";
 import { tagLabel } from "@/lib/tags";
 import { summaryInterval } from "@/lib/throttle";
@@ -102,7 +102,7 @@ const actions = computed(() => {
   const s = summary.value;
   if (!s) return [];
   const list: { icon: IconName; label: string; keys: string; danger?: boolean; disabled?: boolean; run: () => void }[] = [];
-  if (!inBrowser()) list.push({ icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: !s.on_disk, run: () => window.sk.shell.showItemInFolder(s.path) });
+  if (!inBrowser()) list.push({ icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: !s.on_disk || !handable(s.path), run: () => window.sk.shell.showItemInFolder(s.path) });
   list.push({
     icon: "copy",
     label: t("复制路径"),
