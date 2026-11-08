@@ -308,6 +308,25 @@ pub fn user_file() -> PathBuf {
     crate::paths::config_dir().join("class_folders.json")
 }
 
+/// The choices of a `class_folders.json` text; None when it is not one (not JSON, no `folders`
+/// list). An entry without a text `path` and `class` is left out on its own: one bad entry
+/// costs that entry, not the others.
+fn parse_folders(text: &str) -> Option<Vec<(String, String)>> {
+    let v = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    let items = v.get("folders")?.as_array()?;
+    Some(
+        items
+            .iter()
+            .filter_map(|f| {
+                Some((
+                    f.get("path")?.as_str()?.to_owned(),
+                    f.get("class")?.as_str()?.to_owned(),
+                ))
+            })
+            .collect(),
+    )
+}
+
 /// The choices in a `class_folders.json` (none when it is missing or unreadable).
 pub fn load(path: &Path) -> Vec<(String, String)> {
     let text = match std::fs::read_to_string(path) {
@@ -325,21 +344,7 @@ pub fn load(path: &Path) -> Vec<(String, String)> {
             return Vec::new();
         }
     };
-    let parsed = serde_json::from_str::<serde_json::Value>(&text)
-        .ok()
-        .and_then(|v| {
-            v.get("folders")?
-                .as_array()?
-                .iter()
-                .map(|f| {
-                    Some((
-                        f.get("path")?.as_str()?.to_owned(),
-                        f.get("class")?.as_str()?.to_owned(),
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()
-        });
-    parsed.unwrap_or_else(|| {
+    parse_folders(&text).unwrap_or_else(|| {
         tracing::warn!(
             "{}",
             crate::tr!(
@@ -356,8 +361,10 @@ pub fn load_user() {
     replace_folders(load(&user_file()));
 }
 
-/// Writes the choices atomically; none removes the file.
+/// Writes the choices atomically; none removes the file. A file there that cannot be read (so
+/// [`load`] found no choices in it) is moved aside first, never written over or removed.
 pub fn save(path: &Path) -> std::io::Result<()> {
+    crate::userfile::keep_if_unreadable(path, |text| parse_folders(text).is_some())?;
     let items = folders();
     if items.is_empty() {
         match std::fs::remove_file(path) {

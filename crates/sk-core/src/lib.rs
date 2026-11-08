@@ -25,5 +25,6 @@ pub mod scan;
 pub mod settings;
 pub mod summary;
 pub mod update;
+pub mod userfile;
 pub mod view;
 pub mod volume;

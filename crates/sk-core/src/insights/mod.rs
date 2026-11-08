@@ -1706,6 +1706,18 @@ pub fn user_rules_dir() -> PathBuf {
     crate::paths::config_dir().join("insights")
 }
 
+/// A user rule file: `*.toml`, as 0.3.x's `glob("*.toml")` found them, so on Windows in any case
+/// (`RULES.TOML`) and elsewhere exactly.
+fn is_rule_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| {
+        if cfg!(windows) {
+            e.eq_ignore_ascii_case("toml")
+        } else {
+            e == "toml"
+        }
+    })
+}
+
 static ACTIVE: RwLock<Option<Arc<RuleSet>>> = RwLock::new(None);
 
 /// Built-in rules plus every `*.toml` in `extra_dir` (by file name; user rules override
@@ -1722,7 +1734,7 @@ pub fn load_rules(
             Ok(it) => it
                 .flatten()
                 .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|e| e == "toml") && p.is_file())
+                .filter(|p| is_rule_file(p) && p.is_file())
                 .collect(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => {
@@ -1742,6 +1754,7 @@ pub fn load_rules(
                 Vec::new()
             }
         };
+        // by name, as 0.3.x sorted them (`key=lambda f: f.name`: case counts, also on Windows)
         files.sort_by_key(|f| f.file_name().map(|n| n.to_os_string()));
         for f in files {
             let source = f.to_string_lossy().into_owned();
