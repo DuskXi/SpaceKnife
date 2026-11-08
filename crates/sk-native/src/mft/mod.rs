@@ -103,7 +103,15 @@ pub struct ScanOptions<'a> {
     pub cancel: Option<Arc<AtomicBool>>,
     /// Filled with what the scan did: timings, counts, the depth it settled at (benchmarks).
     pub stats: Option<&'a mut ScanStats>,
+    /// Test seam: called on the parse threads with each window's first record number before the
+    /// window is parsed; a panic there stands for a bug in the parser.
+    #[doc(hidden)]
+    pub before_parse: Option<ParseHook>,
 }
+
+/// [`ScanOptions::before_parse`].
+#[doc(hidden)]
+pub type ParseHook = Arc<dyn Fn(u64) + Send + Sync>;
 
 impl Default for ScanOptions<'_> {
     fn default() -> Self {
@@ -114,6 +122,7 @@ impl Default for ScanOptions<'_> {
             progress: None,
             cancel: None,
             stats: None,
+            before_parse: None,
         }
     }
 }
@@ -148,12 +157,30 @@ fn parse_error(e: String) -> stdio::Error {
     stdio::Error::new(stdio::ErrorKind::InvalidData, e)
 }
 
+/// The message of a panic's payload.
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".to_owned())
+}
+
+/// A panic while scanning (a bug): an error of the scan, the process goes on.
+pub(crate) fn panicked(payload: &(dyn std::any::Any + Send)) -> stdio::Error {
+    stdio::Error::other(format!("the $MFT scan failed: {}", panic_message(payload)))
+}
+
 /// The parse's rayon pool: as many threads as the CPUs this process may use. It goes with its
-/// threads when dropped (nothing stays in the process after a scan, docs/memory.md §6).
+/// threads when dropped (nothing stays in the process after a scan, docs/memory.md §6). A job
+/// reports its own panic (`scan::dispatch`); the handler only keeps an unforeseen one from
+/// aborting the process (rayon's default for a panic in a spawned job), the panic hook has
+/// logged it already.
 fn pool() -> stdio::Result<rayon::ThreadPool> {
     rayon::ThreadPoolBuilder::new()
         .num_threads(crate::cpus::usable())
         .thread_name(|i| format!("sk-mft-{i}"))
+        .panic_handler(|_| {})
         .build()
         .map_err(|e| stdio::Error::other(format!("cannot start the $MFT parse threads: {e}")))
 }
@@ -343,6 +370,7 @@ fn stream_scan<E: io::Engine, R: ReadAt>(
         mut progress,
         cancel,
         stats,
+        before_parse,
     } = opts;
     let tune = tuning(window, depth);
     let mut st = ScanStats {
@@ -356,24 +384,28 @@ fn stream_scan<E: io::Engine, R: ReadAt>(
         }
     };
     let cancelled = || cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed));
-    let res = scan::scan(
-        engine,
-        &pool,
-        geo,
-        lay,
-        duty,
-        &tune,
-        fetcher(sync, geo, lay),
-        report,
-        cancelled,
-        &mut st,
-    );
-    let res = res.map(|rows| {
+    // a panic anywhere in the scan (a bug) is the scan's error: the engine waits for its reads
+    // while unwinding, so nothing writes into freed buffers afterwards
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let rows = scan::scan(
+            engine,
+            &pool,
+            geo,
+            lay,
+            duty,
+            &tune,
+            fetcher(sync, geo, lay),
+            report,
+            cancelled,
+            before_parse.as_ref(),
+            &mut st,
+        )?;
         let t = Instant::now();
         let table = pool.install(|| join(rows));
         st.join_s = t.elapsed().as_secs_f64();
-        table
-    });
+        Ok(table)
+    }))
+    .unwrap_or_else(|payload| Err(panicked(payload.as_ref())));
     st.total_s = t0.elapsed().as_secs_f64();
     if let Some(out) = stats {
         *out = st;

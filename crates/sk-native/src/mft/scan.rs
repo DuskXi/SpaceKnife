@@ -162,7 +162,9 @@ struct Op {
     bounce: Option<(Buf, usize)>, // the buffer and the piece it is for
 }
 
-type Parsed = (usize, Part, Buf, Duration);
+/// A parsed window: `(window, its rows or the message of the panic that stopped the parse, its
+/// buffer, parse time)`.
+type Parsed = (usize, Result<Part, String>, Buf, Duration);
 
 /// What `scan` hands back: the columns and the name blob in pieces.
 pub type Rows = super::parse::Joined;
@@ -182,6 +184,7 @@ pub fn scan<E: Engine>(
     fetch: impl Fn(u64) -> Option<Vec<u8>> + Send,
     mut on_window: impl FnMut(u64, u64),
     cancelled: impl Fn() -> bool,
+    before_parse: Option<&super::ParseHook>,
     st: &mut Stats,
 ) -> io::Result<Rows> {
     st.tuning = *tune;
@@ -229,10 +232,15 @@ pub fn scan<E: Engine>(
                            free: &mut Vec<Buf>,
                            tables: &mut Vec<Table>,
                            parsing: &mut usize,
-                           st: &mut Stats| {
+                           st: &mut Stats|
+     -> Result<usize, io::Error> {
         *parsing -= 1;
         free.push(buf);
         st.parse_cpu_s += cpu.as_secs_f64();
+        // a parse that panicked (a bug): the scan's error, the other windows still land
+        let part = part.map_err(|why| {
+            io::Error::other(format!("the $MFT scan failed: parsing window {w}: {why}"))
+        })?;
         let len = window.min(total - w * window);
         done += len as u64;
         parts[w] = Some(part);
@@ -245,7 +253,7 @@ pub fn scan<E: Engine>(
         }
         st.push_s += t.elapsed().as_secs_f64();
         on_window(done, total as u64);
-        pushed
+        Ok(pushed)
     };
     let mut pushed_now = 0usize;
 
@@ -256,8 +264,11 @@ pub fn scan<E: Engine>(
         while failure.is_none()
             && let Ok(msg) = rx.try_recv()
         {
-            pushed_now = take_parsed(msg, &mut free, &mut tables, &mut parsing, st);
-            if cancelled() {
+            match take_parsed(msg, &mut free, &mut tables, &mut parsing, st) {
+                Ok(n) => pushed_now = n,
+                Err(e) => failure = Some(e),
+            }
+            if failure.is_none() && cancelled() {
                 failure = Some(super::interrupted());
             }
         }
@@ -378,7 +389,16 @@ pub fn scan<E: Engine>(
                 break;
             }
             if win.pending == 0 {
-                dispatch(pool, w, win, rs, lay, &tx, tables.pop().unwrap_or_default());
+                dispatch(
+                    pool,
+                    w,
+                    win,
+                    rs,
+                    lay,
+                    &tx,
+                    tables.pop().unwrap_or_default(),
+                    before_parse,
+                );
                 parsing += 1;
                 st.max_parsing = st.max_parsing.max(parsing);
             } else {
@@ -439,6 +459,7 @@ pub fn scan<E: Engine>(
                     lay,
                     &tx,
                     tables.pop().unwrap_or_default(),
+                    before_parse,
                 );
                 parsing += 1;
                 st.max_parsing = st.max_parsing.max(parsing);
@@ -449,7 +470,10 @@ pub fn scan<E: Engine>(
             let wait = until.saturating_duration_since(Instant::now());
             if parsing > 0 {
                 if let Ok(msg) = rx.recv_timeout(wait) {
-                    pushed_now = take_parsed(msg, &mut free, &mut tables, &mut parsing, st);
+                    match take_parsed(msg, &mut free, &mut tables, &mut parsing, st) {
+                        Ok(n) => pushed_now = n,
+                        Err(e) => failure = Some(e),
+                    }
                 }
             } else if cancelled() {
                 failure = Some(super::interrupted());
@@ -465,7 +489,10 @@ pub fn scan<E: Engine>(
             if next < nwin {
                 st.starved_s += t.elapsed().as_secs_f64();
             }
-            pushed_now = take_parsed(msg, &mut free, &mut tables, &mut parsing, st);
+            match take_parsed(msg, &mut free, &mut tables, &mut parsing, st) {
+                Ok(n) => pushed_now = n,
+                Err(e) => failure = Some(e),
+            }
         } else if next >= nwin || free.is_empty() && st.buffers >= buffers_max {
             // nothing in flight, parsing or paused, yet windows are missing: cannot happen
             failure = Some(io::Error::other("the $MFT scan stalled"));
@@ -511,7 +538,10 @@ fn burst_full(windows: usize, depth: usize, busy: Duration, since: Option<Instan
     windows >= depth && busy + since.map_or(Duration::ZERO, |s| s.elapsed()) >= BURST
 }
 
-/// A window whose pieces are all in: clear what no piece wrote, then parse it on the pool.
+/// A window whose pieces are all in: clear what no piece wrote, then parse it on the pool. A panic
+/// in the parse (a bug) comes back as that window's result, with its buffer: rayon would abort the
+/// process for a panic in a spawned job.
+#[allow(clippy::too_many_arguments)]
 fn dispatch(
     pool: &rayon::ThreadPool,
     w: usize,
@@ -520,13 +550,21 @@ fn dispatch(
     lay: &Layout,
     tx: &mpsc::Sender<Parsed>,
     table: Table,
+    before_parse: Option<&super::ParseHook>,
 ) {
     zero_tail(lay, win.start, win.buf.slice_mut(win.len), &win.pieces);
     let tx = tx.clone();
     let first = win.start / rs as u64;
+    let hook = before_parse.cloned();
     pool.spawn(move || {
         let t = Instant::now();
-        let part = parse_window(win.buf.slice(win.len), first, rs, table);
+        let part = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(h) = &hook {
+                h(first);
+            }
+            parse_window(win.buf.slice(win.len), first, rs, table)
+        }))
+        .map_err(|payload| super::panic_message(payload.as_ref()));
         let _ = tx.send((w, part, win.buf, t.elapsed())); // the scan may have failed and gone
     });
 }

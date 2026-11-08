@@ -51,6 +51,10 @@ def scan_mft(volume: str, duty: float = 1.0, progress=None, stats=None) -> tuple
     # 主路径（src/mft/scan.rs、io.rs）：$MFT 按 data runs 切成 8 MiB 的窗口，同时有几个窗口在读；
     # Windows 上是一个重叠 IO 的无缓冲卷句柄加完成端口，直接读进对齐的窗口缓冲区（不经弹跳缓冲区）。
     # 读完的窗口立即交给 rayon 解析（一个窗口一个任务），解析完按记录号顺序并入输出列。
+    # 解析里的 panic（程序错误）变成这次扫描的错误（"the $MFT scan failed: …"），进程照常运行：
+    # rayon 对派出去的任务里的 panic 默认直接中止整个进程，现在每个窗口的任务自己接住它，
+    # 扫描线程上的 panic 也在 stream_scan 里接住（引擎在展开时等在途的读完）。测试钩子
+    # ScanOptions::before_parse（doc(hidden)）在解析每个窗口前调用。
     # 同时在读的窗口数（深度）在扫描中自己找：从 2 开始，每个阶段至少 150 ms 忙碌时间、16 个窗口，
     # 翻倍能让吞吐多一成以上就翻倍，否则退回上一档不再变，最多 128 MiB 在途（scan::Depth）。
     # duty ∈ (0, 1]：读按突发进行，每次突发至少占盘 50 ms，之后等在途读完、歇 忙碌时间×(1−duty)/duty，

@@ -623,6 +623,51 @@ fn scan_mft_image_can_be_cancelled() {
     assert_eq!(calls, 2);
 }
 
+#[test]
+fn a_panic_in_the_parse_is_the_scans_error() {
+    // rayon aborts the whole process for a panic in a spawned job: a parser bug would take the
+    // window (and the backend in it) down. It must come back as the scan's error, and the next
+    // scan must work
+    let tmp = tempfile::tempdir().unwrap();
+    let (img, _) = build(tmp.path(), &CASES[1]);
+    let good = scan_mft_image(&img, ScanOptions::default()).unwrap().0;
+    for at in [0u64, 3, 6] {
+        let hook: mft::ParseHook = Arc::new(move |first| {
+            if first == at {
+                panic!("injected parser bug at record {first}");
+            }
+        });
+        let e = scan_mft_image(
+            &img,
+            ScanOptions {
+                window: 3 * RS,
+                before_parse: Some(hook),
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("injected parser bug"), "{at}: {e}");
+    }
+    // a panic in the scan's own thread (here: the progress callback) too
+    let mut boom = |done: u64, _total: u64| {
+        if done > 0 {
+            panic!("injected progress bug");
+        }
+    };
+    let e = scan_mft_image(
+        &img,
+        ScanOptions {
+            window: 3 * RS,
+            progress: Some(&mut boom),
+            ..ScanOptions::default()
+        },
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("injected progress bug"), "{e}");
+    let again = scan_mft_image(&img, ScanOptions::default()).unwrap().0;
+    assert_same_rows(&again, &good);
+}
+
 // --------------------------------------------------------------------------- concurrent streaming
 
 /// A sample image, a synthetic one and six fuzzed copies of the sample.
