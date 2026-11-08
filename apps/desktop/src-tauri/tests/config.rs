@@ -1,5 +1,6 @@
-//! What the Tauri configuration must keep: the program's name 0.3.4's update looks for, and the
-//! page's Content-Security-Policy (the Electron shell's csp.ts sends the same directives).
+//! What the Tauri configuration must keep: the program's name 0.3.4's update looks for, the macOS
+//! folder prompts' reasons and floor 0.3.4 had, and the page's Content-Security-Policy (the
+//! Electron shell's csp.ts sends the same directives).
 
 use serde_json::Value;
 
@@ -27,6 +28,71 @@ fn the_program_keeps_the_name_0_3_4_updates_look_for() {
     assert_eq!(main_binary("tauri.windows.conf.json"), "SpaceKnife");
     assert_eq!(main_binary("tauri.macos.conf.json"), "SpaceKnife");
     assert_eq!(main_binary("tauri.linux.conf.json"), "spaceknife");
+}
+
+/// The `<key>…</key>` / `<string>…</string>` pairs of a flat plist dictionary.
+fn plist_strings(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("<key>") {
+        let after = &rest[at + 5..];
+        let Some(end) = after.find("</key>") else {
+            break;
+        };
+        let key = after[..end].to_owned();
+        let tail = after[end + 6..].trim_start();
+        if let Some(value) = tail.strip_prefix("<string>")
+            && let Some(close) = value.find("</string>")
+        {
+            out.push((key, value[..close].to_owned()));
+        }
+        rest = &after[end..];
+    }
+    out
+}
+
+#[test]
+fn macos_asks_for_folders_with_the_reasons_0_3_4_gave() {
+    // macOS shows these in its Files and Folders prompts; 0.3.4 had them in electron-builder.yml
+    // mac.extendInfo, word for word
+    let want = [
+        (
+            "NSDesktopFolderUsageDescription",
+            "SpaceKnife measures the files on your Desktop to show what takes up space.",
+        ),
+        (
+            "NSDocumentsFolderUsageDescription",
+            "SpaceKnife measures the files in Documents to show what takes up space.",
+        ),
+        (
+            "NSDownloadsFolderUsageDescription",
+            "SpaceKnife measures the files in Downloads to show what takes up space.",
+        ),
+        (
+            "NSRemovableVolumesUsageDescription",
+            "SpaceKnife measures the files on removable drives to show what takes up space.",
+        ),
+        (
+            "NSNetworkVolumesUsageDescription",
+            "SpaceKnife measures the files on network drives to show what takes up space.",
+        ),
+    ];
+    let mac = config("tauri.macos.conf.json");
+    let file = mac["bundle"]["macOS"]["infoPlist"].as_str().unwrap();
+    assert_eq!(file, "Info.plist");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file);
+    let got = plist_strings(&std::fs::read_to_string(path).unwrap());
+    let want: Vec<(String, String)> = want
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
+    assert_eq!(got, want);
+    // the floor stays macOS 14, whatever runners CI has
+    assert_eq!(
+        config("tauri.conf.json")["bundle"]["macOS"]["minimumSystemVersion"],
+        "14.0"
+    );
+    assert!(mac["bundle"]["macOS"].get("minimumSystemVersion").is_none());
 }
 
 #[test]
