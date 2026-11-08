@@ -5,6 +5,10 @@
 //! portable copy's data folder → `sk_core::paths::set_home`, the helper's `--system-locale`).
 //! Tests are their own processes and may: every Rust file under `src/` of the workspace's crates and
 //! of the desktop shell is checked, `tests/` folders, examples and build scripts are not.
+//!
+//! One change is allowed, where no other thread exists yet: the window program's `main` takes
+//! `SPACEKNIFE_READY_FILE` out of its environment before anything else starts (nothing the app
+//! starts may inherit it: sk_core::update::swap READY_FILE_VAR), and the test below holds it there.
 
 use std::path::{Path, PathBuf};
 
@@ -31,6 +35,12 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
         }
     }
 }
+
+/// The one change of the environment in code that ships (file, call): see the module's comment.
+const ALLOWED: &[(&str, &str)] = &[(
+    "apps/desktop/src-tauri/src/main.rs",
+    "std::env::remove_var(sk_core::update::swap::READY_FILE_VAR)",
+)];
 
 /// `(line number, line)` of every call that changes the environment in `src` (comments skipped).
 fn environment_changes(src: &str) -> Vec<(usize, String)> {
@@ -63,9 +73,16 @@ fn shipped_code_never_changes_the_environment() {
     let mut found = Vec::new();
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap();
+        let rel = f.strip_prefix(&root).unwrap_or(f);
+        let allowed = |line: &str| {
+            ALLOWED
+                .iter()
+                .any(|(file, call)| rel == Path::new(file) && line.contains(call))
+        };
         for (n, line) in environment_changes(&text) {
-            let rel = f.strip_prefix(&root).unwrap_or(f);
-            found.push(format!("{}:{n}: {line}", rel.display()));
+            if !allowed(&line) {
+                found.push(format!("{}:{n}: {line}", rel.display()));
+            }
         }
     }
     assert!(
@@ -80,4 +97,35 @@ fn the_check_finds_what_it_looks_for() {
     let src = "fn a() {\n    // std::env::set_var(\"X\", \"1\") would be wrong\n    unsafe { std::env::set_var(\"X\", \"1\") };\n    let _ = 1; // remove_var( in a comment\n    unsafe { env::remove_var(\"X\") }\n}\n";
     let found: Vec<usize> = environment_changes(src).iter().map(|(n, _)| *n).collect();
     assert_eq!(found, [3, 5]);
+}
+
+#[test]
+fn the_window_program_takes_the_ready_file_out_before_anything_starts() {
+    // apps/desktop/src-tauri/src/main.rs: read and removed in main, after the one-shot modes (the
+    // swap helper reads it as it is) and before anything that starts a thread — the environment
+    // for the portable copy, headless mode, the console, the window and its backend
+    let main = std::fs::read_to_string(workspace_root().join(ALLOWED[0].0)).unwrap();
+    let at = |what: &str| {
+        main.lines()
+            .position(|l| l.split("//").next().unwrap_or("").contains(what))
+            .unwrap_or_else(|| panic!("main.rs has no {what}"))
+    };
+    let removed = at(ALLOWED[0].1);
+    assert!(at("fn main()") < at("\"--apply-update\""));
+    assert!(at("\"--apply-update\"") < removed);
+    assert!(at("std::env::var_os(sk_core::update::swap::READY_FILE_VAR)") < removed);
+    assert!(removed < at("backend::keep_ready_file(ready)"));
+    for later in [
+        "prepare_environment()",
+        "cli::run_headless(",
+        "console::join_launchers_terminal()",
+        "spaceknife_desktop::run()",
+    ] {
+        assert!(removed < at(later), "{later} comes first");
+    }
+    assert_eq!(
+        environment_changes(&main).len(),
+        1,
+        "main.rs changes the environment once"
+    );
 }

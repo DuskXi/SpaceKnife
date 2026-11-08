@@ -19,7 +19,7 @@ import { BrowserWindow, Menu, app, clipboard, dialog, ipcMain, nativeTheme, prot
 
 import type { BackendState } from "../../../desktop/app/shared/api";
 import { WINDOW_BG } from "../../../desktop/app/shared/theme";
-import { type Backend, type BackendOptions, backendEnv, cliPath, startBackend } from "./backend";
+import { type Backend, type BackendOptions, backendEnv, cliPath, startBackend, takeReadyFile } from "./backend";
 import { headlessArgs, isStartupCheck, startupCheckAnswer } from "./cli";
 import { contentSecurityPolicy, inlineScriptHashes } from "./csp";
 import { fileIn, mimeOf } from "./files";
@@ -41,6 +41,12 @@ if (isStartupCheck(process.argv.slice(1))) {
   process.stdout.write(startupCheckAnswer(process.versions), end);
   await new Promise<never>(() => {});
 }
+
+// SPACEKNIFE_READY_FILE (end-to-end tests, demos, the swap watching this new version): out of this
+// process's environment before anything starts, so that nothing the app starts inherits it (a
+// backend started again later, an update's helper, a terminal); the first backend writes it
+// (backend.ts takeReadyFile)
+let readyFile = takeReadyFile(process.env);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_HOST = "spaceknife";
@@ -130,8 +136,11 @@ function setBackend(state: BackendState): void {
 async function launchBackend(): Promise<void> {
   const origins = DEV_URL ? [DEV_URL.origin] : [];
   setBackend({ state: "starting" });
+  // the ready file goes to the first backend only (takeReadyFile)
+  const ready = readyFile;
+  readyFile = undefined;
   try {
-    backend = await startBackend(backendOptions(origins, (line) => console.log(`[backend] ${line}`)));
+    backend = await startBackend({ ...backendOptions(origins, (line) => console.log(`[backend] ${line}`)), readyFile: ready });
     backend.proc.once("exit", (code) => setBackend({ state: "exited", code }));
     setBackend({ state: "ready", info: backend.info });
   } catch (err) {

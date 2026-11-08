@@ -186,13 +186,25 @@ pub fn start(app: &AppHandle) {
     });
 }
 
-/// `SPACEKNIFE_READY_FILE` (end-to-end tests, demos): the connection info, the token included,
-/// written to that file (owner-only on Unix), as `spaceknife-cli serve --ready-file` does.
+/// The ready file this process was started with (`SPACEKNIFE_READY_FILE`: end-to-end tests, demos,
+/// the swap watching a new version, sk_core::update::swap::Ready). main takes the variable out of
+/// the environment before anything else runs and hands it here ([`keep_ready_file`]), so that
+/// nothing the app starts inherits it (an update's helper or installer, a terminal, an opened
+/// file); the first backend writes it, and then it is forgotten: the swap removes the file's folder
+/// once the new version has spoken, and that place in a shared temp folder may be anyone's.
+static READY_FILE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// What main read from `SPACEKNIFE_READY_FILE` before taking it out of the environment.
+pub fn keep_ready_file(value: Option<std::ffi::OsString>) {
+    *READY_FILE.lock().unwrap_or_else(|e| e.into_inner()) =
+        value.filter(|v| !v.is_empty()).map(PathBuf::from);
+}
+
+/// The ready file (end-to-end tests, demos, the swap): the connection info, the token included,
+/// written to it once (owner-only on Unix, never through a link), as `spaceknife-cli serve
+/// --ready-file` does.
 fn write_ready_file(info: &BackendInfo) {
-    let Some(path) = std::env::var_os("SPACEKNIFE_READY_FILE")
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from)
-    else {
+    let Some(path) = READY_FILE.lock().unwrap_or_else(|e| e.into_inner()).take() else {
         return;
     };
     let text = serde_json::json!({"event": "ready", "url": info.url, "pid": info.pid, "token": info.token}).to_string();
@@ -251,6 +263,32 @@ mod tests {
             json(&BackendState::Exited { code: None }),
             r#"{"state":"exited","code":null}"#
         );
+    }
+
+    #[test]
+    fn the_ready_file_is_written_once() {
+        // main takes SPACEKNIFE_READY_FILE out of the environment and keeps it here: the first
+        // backend writes it; one started again (an update that could not start) does not, as the
+        // swap that named it may have removed its folder by then
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("ready.json");
+        keep_ready_file(Some(file.clone().into_os_string()));
+        let info = BackendInfo {
+            url: "ws://127.0.0.1:1/v1".into(),
+            token: "t0123456789abcdef".into(),
+            pid: 7,
+        };
+        write_ready_file(&info);
+        let said: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(said["token"], "t0123456789abcdef");
+        assert_eq!(said["pid"], 7);
+        std::fs::remove_file(&file).unwrap();
+        write_ready_file(&info);
+        assert!(!file.exists(), "written again");
+        keep_ready_file(Some("".into()));
+        write_ready_file(&info);
+        assert!(!file.exists());
     }
 
     #[test]

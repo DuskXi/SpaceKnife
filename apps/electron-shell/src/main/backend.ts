@@ -32,6 +32,9 @@ export interface BackendOptions {
   /** for the update checks (update.*): the app's version, how it was installed (update.ts) */
   appVersion?: string;
   installKind?: InstallKind;
+  /** where the backend writes its address and token once it listens (takeReadyFile): the first
+   *  backend of the app only */
+  readyFile?: string;
   onLog?: (line: string) => void;
 }
 
@@ -65,9 +68,20 @@ export function cliPath(
   return builds.find(exists) ?? builds[0]!;
 }
 
+/** SPACEKNIFE_READY_FILE (end-to-end tests, demos, the swap watching a new version, sk_core
+ *  update::swap Ready): taken out of `env` — index.ts does it for process.env before anything else
+ *  runs — so that nothing the app starts inherits it; the first backend writes it (--ready-file),
+ *  later ones don't. The swap removes the file's folder once the new version has spoken, and that
+ *  place in a shared temp folder may be anyone's afterwards. The full path, or undefined. */
+export function takeReadyFile(env: NodeJS.ProcessEnv): string | undefined {
+  const file = env.SPACEKNIFE_READY_FILE;
+  delete env.SPACEKNIFE_READY_FILE;
+  return file ? resolve(file) : undefined;
+}
+
 /** spaceknife-cli's arguments: the backend for a window, logging plainly on stderr; with a ready file
- *  (SPACEKNIFE_READY_FILE: end-to-end tests, demos) its address and token go there too, as the Tauri
- *  shell writes them (src-tauri/src/backend.rs). */
+ *  (takeReadyFile) its address and token go there too, as the Tauri shell writes them
+ *  (src-tauri/src/backend.rs). */
 export function backendArgs(allowOrigins: readonly string[], readyFile?: string): string[] {
   const args = ["serve", "--token-stdin", "--log-format", "plain"];
   for (const origin of allowOrigins) args.push("--allow-origin", origin);
@@ -75,9 +89,11 @@ export function backendArgs(allowOrigins: readonly string[], readyFile?: string)
   return args;
 }
 
-/** The backend's environment: this process's, with how the app runs. */
-export function backendEnv(opts: Omit<BackendOptions, "cli" | "allowOrigins" | "onLog">, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/** The backend's environment: this process's, with how the app runs (never a ready file: that is
+ *  an argument, for the first backend only). */
+export function backendEnv(opts: Omit<BackendOptions, "cli" | "allowOrigins" | "onLog" | "readyFile">, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, SPACEKNIFE_SHELL: SHELL };
+  takeReadyFile(env);
   if (opts.home) env.SPACEKNIFE_HOME = resolve(opts.home);
   // 「界面语言 · 跟随系统」 (M7.5): the OS UI language as Electron sees it
   if (opts.locale) env.SPACEKNIFE_SYSTEM_LOCALE = opts.locale;
@@ -89,7 +105,7 @@ export function backendEnv(opts: Omit<BackendOptions, "cli" | "allowOrigins" | "
 export function startBackend(opts: BackendOptions): Promise<Backend> {
   if (!existsSync(opts.cli)) return Promise.reject(new Error(mt("backendMissing", { path: opts.cli })));
   const token = randomBytes(24).toString("base64url");
-  const proc = spawn(opts.cli, backendArgs(opts.allowOrigins, process.env.SPACEKNIFE_READY_FILE), {
+  const proc = spawn(opts.cli, backendArgs(opts.allowOrigins, opts.readyFile), {
     cwd: dirname(opts.cli),
     env: backendEnv(opts, process.env),
     stdio: ["pipe", "pipe", "pipe"],

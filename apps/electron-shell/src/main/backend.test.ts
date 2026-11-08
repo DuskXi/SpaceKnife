@@ -2,7 +2,22 @@ import { posix, resolve, win32 } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { backendArgs, backendEnv, cliPath } from "./backend";
+import { backendArgs, backendEnv, cliPath, takeReadyFile } from "./backend";
+
+describe("the ready file (SPACEKNIFE_READY_FILE)", () => {
+  it("is taken out of the environment once, as a full path", () => {
+    const env: NodeJS.ProcessEnv = { PATH: "/usr/bin", SPACEKNIFE_READY_FILE: "ready.json" };
+    expect(takeReadyFile(env)).toBe(resolve("ready.json"));
+    expect(env).toEqual({ PATH: "/usr/bin" });
+    expect(takeReadyFile(env)).toBeUndefined();
+    expect(takeReadyFile({ SPACEKNIFE_READY_FILE: "" })).toBeUndefined();
+  });
+
+  it("never reaches the backend's environment (it gets --ready-file, once)", () => {
+    const env = backendEnv({}, { PATH: "/usr/bin", SPACEKNIFE_READY_FILE: "/tmp/spaceknife-ready-0/ready.json" });
+    expect(env).toEqual({ PATH: "/usr/bin", SPACEKNIFE_SHELL: "electron" });
+  });
+});
 
 describe("the backend the Electron shell starts", () => {
   it("is spaceknife-cli serve with the token on stdin, as 0.3.4's backend was", () => {

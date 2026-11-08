@@ -28,6 +28,16 @@ fn main() {
         }
         _ => {}
     }
+    // SPACEKNIFE_READY_FILE (end-to-end tests, demos, the swap watching this new version): out of
+    // this process's environment, so that nothing the app starts inherits it (an update's helper
+    // or installer, a terminal, an opened file); the backend writes that file once
+    // (backend.rs keep_ready_file). The swap helper above reads it as it is, and starts nothing
+    // but SpaceKnife, which it names its own file.
+    let ready = std::env::var_os(sk_core::update::swap::READY_FILE_VAR);
+    // SAFETY: one thread so far — the window, GTK/WebKitGTK and the backend start in run() below,
+    // and nothing before this line starts a thread — so nothing reads the environment meanwhile.
+    unsafe { std::env::remove_var(sk_core::update::swap::READY_FILE_VAR) };
+    spaceknife_desktop::backend::keep_ready_file(ready);
     spaceknife_desktop::prepare_environment();
     // 0.3.4's `SpaceKnife --headless` / `--listen <address>` (anywhere among the arguments): headless
     // mode in this terminal, no window (cli.rs)
