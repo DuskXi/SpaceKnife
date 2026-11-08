@@ -276,7 +276,7 @@ class Places:
         # the same prefix and length for every backend: a name search may also match the root's
         # own path (the replayer makes `sk-parity-` + 8 characters too)
         del label
-        tmp = Path(tempfile.mkdtemp(prefix="sk-parity-"))
+        tmp = Path(tempfile.mkdtemp(prefix="sk-parity-", dir=fixtures.temp_parent()))
         if sys.platform == "win32":
             tmp = Path(os.path.realpath(tmp))  # the long name, as the backends report it
         home, root = tmp / "home", tmp / "root"

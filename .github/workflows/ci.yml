@@ -111,6 +111,32 @@ jobs:
           cargo run --locked -q -p sk-protocol --bin gen-ts -- --check
           cargo run --locked -q -p sk-protocol --bin gen-ts -- --check apps/desktop/app/protocol/generated.ts
 
+      # The parity replay's Linux goldens (tests/parity/README.md, "Directory order") were recorded
+      # on an ext4, which lists each folder by a hash of the names with its own seed; 0.3.4 keeps
+      # that order for entries of equal size, so the replay compares exactly only where folders are
+      # listed alike. The runner's ext4 has another seed: the replay runs in an ext4 made with the
+      # recording's (golden/linux/listing.json), where it must find the fixture folders listed as
+      # recorded (SPACEKNIFE_PARITY_TMP).
+      - name: An ext4 that lists folders as the Linux goldens' did
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          fs=tests/parity/golden/linux/listing.json
+          seed=$(jq -r .filesystem.hash_seed "$fs")
+          img="$RUNNER_TEMP/parity-ext4.img"
+          truncate -s 2G "$img"
+          mkfs.ext4 -q -F -b "$(jq -r .filesystem.block_size "$fs")" -E "hash_seed=$seed" "$img"
+          tune2fs -E "hash_alg=$(jq -r .filesystem.hash "$fs")" "$img" > /dev/null
+          head=$(dumpe2fs -h "$img" 2>/dev/null)
+          grep -E '^(Directory Hash Seed|Default directory hash|Filesystem flags):' <<< "$head"
+          grep -Eq "^Directory Hash Seed: +$seed\$" <<< "$head"
+          grep -Eq "^Default directory hash: +$(jq -r .filesystem.hash "$fs")\$" <<< "$head"
+          grep -Eq "^Filesystem flags: +$(jq -r .filesystem.flags "$fs")" <<< "$head"
+          sudo mkdir -p /mnt/sk-parity
+          sudo mount -o loop "$img" /mnt/sk-parity
+          sudo chown "$(id -u):$(id -g)" /mnt/sk-parity
+          echo "SPACEKNIFE_PARITY_TMP=/mnt/sk-parity" >> "$GITHUB_ENV"
+
       - name: Tests
         run: cargo test --workspace --locked
 

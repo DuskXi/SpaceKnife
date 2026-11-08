@@ -56,7 +56,7 @@ differences of the scenario that are product bugs (see below).
 | `known_diffs.json` | differences accepted in every scenario |
 | `fixtures/trees.json` | fixture trees; `fixtures/feed.json` the release list served as `SPACEKNIFE_UPDATE_FEED` |
 | `scenarios/*.json` | the scenarios (language-neutral) |
-| `golden/<platform>/*.json` | the reference's normalized transcripts; `upgrade.home/` the data folder 0.3.4 wrote |
+| `golden/<platform>/*.json` | the reference's normalized transcripts; `upgrade.home/` the data folder 0.3.4 wrote; `listing.json` how the recording's file system listed the fixture folders (below, "Directory order") |
 
 `scenarios/invalid_params.json` and `scenarios/filter_oracle.json` are generated
 (`parity.py gen-invalid` from `crates/sk-protocol/generated/protocol.schema.json`,
@@ -136,6 +136,42 @@ kernel), not the one a replay runs on (a CI runner is a Windows Server).
 
 Binary frames are decoded to `{stream, layout, seq, final, count, columns: {name: {dtype, values}},
 names}` (the `names` blob cut by `name_len`).
+
+## Directory order
+
+0.3.4 sorts by size and keeps the order the file system lists a folder in for entries of equal
+size (stable sorts over the scan's order: `tree.children`, `tree.summary` top files, palette
+results, the layouts and their binary frames). Most fixture files are smaller than a block, so
+hundreds of them tie at 4 KiB, and which of them fills a page or a frame's row is that order.
+0.3.4 does not define it, the file system does:
+
+- NTFS lists by name (case folded), the same on every NTFS volume;
+- ext4 lists by a hash of the names with a seed of the file system's own (`dumpe2fs -h`: Directory
+  Hash Seed): the same names come in another order on another ext4 (a CI runner);
+- tmpfs, XFS, Btrfs list otherwise again, and allocate otherwise too (a folder has no block of its
+  own on tmpfs), so they cannot replay the ext4 goldens at all.
+
+So the goldens hold for a file system that lists folders as the recording's did, and
+`golden/<platform>/listing.json` records how that was: each fixture tree's folders with their
+entries in the recording's order (`parity.py listing`; `record` writes it), and the file system
+(for ext4: its hash and seed). Normalizing the order instead would mean taking tied entries'
+identities out of pages, palette results and every frame (keys, names, branch colours, selected
+rows), which hides real differences; fixtures without ties would need hundreds of files of
+distinct block counts, and new goldens.
+
+The replayer and `parity.py check` build the fixtures, list them and compare with `listing.json`:
+
+| `SPACEKNIFE_PARITY_TMP` | folders listed as recorded | listed otherwise |
+|---|---|---|
+| unset (the system's temp folder) | compared exactly | compared; differences are not counted, with the reason (`SKIP`) |
+| a folder (the runs' folders go there) | compared exactly | a failure: the folder does not reproduce the recording |
+
+CI's Linux job makes an ext4 with the recording's hash seed (`mkfs.ext4 -E hash_seed=…`,
+`.github/workflows/ci.yml`), mounts it and sets `SPACEKNIFE_PARITY_TMP` to it; Windows needs
+nothing (NTFS). On the machine the Linux goldens were recorded on (WSL's ext4) the system's temp
+folder already lists them as recorded. ext4's order is its directory hash (`debugfs` `dx_hash -h
+half_md4 -s <seed>` of each name gives the recorded order), so any ext4 made with that seed lists
+the same names alike.
 
 ## Known differences
 
