@@ -9,6 +9,11 @@
 //! - `hang`: no answer for a minute
 //! - `noisy`: the `ok` answer, then 1 MiB more on stdout and on stderr
 //! - `bind-now`: the `ok` answer with the LD_BIND_NOW it was given (`unset` when none)
+//! - `held`: the `ok` answer, exit 0 at once, leaving a process of its own that holds the output
+//!   it inherited for 5 s (as Chromium's zygote and crash handler do after the Electron shell's
+//!   program has ended)
+//!
+//! `--hold <seconds>`: that process (sleeps, holding its standard output and error).
 
 use std::io::Write;
 
@@ -18,6 +23,14 @@ fn main() {
         .and_then(|p| std::fs::read_to_string(p.with_file_name("fake-app-mode.txt")).ok())
         .map(|m| m.trim().to_owned())
         .unwrap_or_else(|| "ok".to_owned());
+    if std::env::args().nth(1).as_deref() == Some("--hold") {
+        let secs = std::env::args()
+            .nth(2)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(5);
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+        return;
+    }
     if std::env::args().nth(1).as_deref() != Some("--startup-check") {
         eprintln!(
             "fake_app: not a startup check: {:?}",
@@ -52,6 +65,14 @@ fn main() {
         "bind-now" => {
             let bind = std::env::var("LD_BIND_NOW").unwrap_or_else(|_| "unset".to_owned());
             println!(r#"{{"ok": true, "bind_now": "{bind}"}}"#);
+        }
+        "held" => {
+            println!(r#"{{"ok": true, "webview": "fake 1.0"}}"#);
+            let _ = std::io::stdout().flush();
+            // stdio inherited: the pipes of whoever asked stay open while it runs
+            if let Ok(me) = std::env::current_exe() {
+                let _ = std::process::Command::new(me).args(["--hold", "5"]).spawn();
+            }
         }
         other => {
             eprintln!("fake_app: no mode {other}");
