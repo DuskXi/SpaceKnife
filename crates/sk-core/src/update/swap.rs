@@ -439,11 +439,15 @@ pub fn clear(folder: &Path, keep: &[String], log: &Log) {
 // ---------------------------------------------------------------- starting the app
 
 /// The environment for the app: without what a bundling bootloader set for itself (`_PYI_*`,
-/// `_MEIPASS*`; its own library folder `base` on `LD_LIBRARY_PATH`, restored from `…_ORIG`).
+/// `_MEIPASS*`; its own library folder `base` on `LD_LIBRARY_PATH`, restored from `…_ORIG`), and
+/// without a ready file ([`READY_FILE_VAR`]): that is only ever the new version's, named for it
+/// alone when the swap starts it ([`run`]); an app started otherwise would write its token to a
+/// path that may be anyone's once the swap removed its folder.
 pub fn launch_env(env: &BTreeMap<String, String>, base: Option<&str>) -> BTreeMap<String, String> {
     let mut out: BTreeMap<String, String> = env
         .iter()
         .filter(|(k, _)| !k.starts_with("_PYI_") && !k.starts_with("_MEIPASS"))
+        .filter(|(k, _)| !is_ready_file_var(k))
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
     for var in ["LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"] {
@@ -837,8 +841,19 @@ static ERROR_MODES: ErrorModes = ErrorModes {
 /// looking at the new files.
 pub const READY_TIMEOUT: Duration = Duration::from_secs(90);
 /// The variable naming the file the app writes its connection info to once its backend listens:
-/// the Tauri app (backend.rs), the Electron shell (as `spaceknife-cli serve --ready-file`).
+/// the Tauri app (backend.rs), the Electron shell (as `spaceknife-cli serve --ready-file`). Both
+/// shells take it out of their environment as they start and write that file once: nothing they
+/// start inherits it.
 pub const READY_FILE_VAR: &str = "SPACEKNIFE_READY_FILE";
+
+/// Whether the environment variable `name` is [`READY_FILE_VAR`] (Windows: in any case).
+fn is_ready_file_var(name: &str) -> bool {
+    if cfg!(windows) {
+        name.eq_ignore_ascii_case(READY_FILE_VAR)
+    } else {
+        name == READY_FILE_VAR
+    }
+}
 
 /// The new version as started by the swap: watched until it is ready.
 pub trait Started {
@@ -863,10 +878,13 @@ impl Started for std::process::Child {
     }
 }
 
-/// Where the new version says it is ready: its ready file ([`READY_FILE_VAR`]). Either one the
-/// app's environment names already (a test's, a demo's: not ours, it stays; ready once it holds
-/// something else than before the start), or a new one in a folder of its own that only this user
-/// can read (the file holds the backend's token), removed once the new version has spoken.
+/// Where the new version says it is ready: its ready file ([`READY_FILE_VAR`]). Either one this
+/// helper's own environment names (a test's, a demo's — whoever started the helper with it: not
+/// ours, it stays; ready once it holds something else than before the start), or a new one in a
+/// folder of its own: made new here (never one that was there), with a name nobody can guess
+/// (128 random bits), that only this user can open (0700 on Unix; Windows: in this user's own
+/// temp folder); removed once the new version has spoken. The new version writes it once, as it
+/// starts, and passes the variable on to nothing.
 #[derive(Debug)]
 pub struct Ready {
     pub file: PathBuf,
@@ -877,13 +895,16 @@ pub struct Ready {
 }
 
 impl Ready {
-    /// The ready file for an app started with `env`.
+    /// The ready file for this helper's environment `env`.
     pub fn for_env(env: &BTreeMap<String, String>) -> io::Result<Ready> {
-        if let Some(given) = env.get(READY_FILE_VAR).filter(|v| !v.is_empty()) {
+        if let Some((_, given)) = env
+            .iter()
+            .find(|(k, v)| is_ready_file_var(k) && !v.is_empty())
+        {
             return Ok(Ready::given(Path::new(given)));
         }
         let tag = crate::helper::auth::new_token();
-        let dir = std::env::temp_dir().join(format!("spaceknife-ready-{}", &tag[..16]));
+        let dir = std::env::temp_dir().join(format!("spaceknife-ready-{}", &tag[..32]));
         #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
@@ -946,7 +967,9 @@ pub struct Ops<'a> {
 
 /// Steps 2-6; 0 when the new version is in place and runs.
 pub fn run(plan: &Plan, log: &Log) -> i32 {
-    let env = app_env(&std::env::vars().collect(), plan);
+    let mine: BTreeMap<String, String> = std::env::vars().collect();
+    // without a ready file (launch_env): only the new version is told one, by start_new
+    let env = app_env(&mine, plan);
     let start = |exe: &Path, args: &[&str]| launch_with(exe, args, &env);
     let start_new = |exe: &Path, args: &[&str], ready: &Path| -> io::Result<Box<dyn Started>> {
         let mut env = env.clone();
@@ -956,7 +979,7 @@ pub fn run(plan: &Plan, log: &Log) -> i32 {
         );
         Ok(Box::new(spawn_detached(exe, args, &env)?))
     };
-    let ready = match Ready::for_env(&env) {
+    let ready = match Ready::for_env(&mine) {
         Ok(r) => Some(r),
         Err(e) => {
             log.say(&format!("the new version will not be watched: {e}"));
@@ -1718,6 +1741,33 @@ mod tests {
     }
 
     #[test]
+    fn no_app_the_swap_starts_inherits_a_ready_file() {
+        // the ready file is the new version's alone (start_new names it): the old version started
+        // again, or anything started with this environment, never writes to it — once the swap
+        // removed its folder, that path in a shared temp folder may be anyone's
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let mut names = vec![READY_FILE_VAR.to_owned()];
+        if cfg!(windows) {
+            names.push("Spaceknife_Ready_File".to_owned()); // Windows names it in any case
+        }
+        for name in names {
+            let env: BTreeMap<String, String> = [
+                ("PATH".to_owned(), "/usr/bin".to_owned()),
+                (
+                    name.clone(),
+                    "/tmp/spaceknife-ready-0/ready.json".to_owned(),
+                ),
+            ]
+            .into();
+            let want: BTreeMap<String, String> =
+                [("PATH".to_owned(), "/usr/bin".to_owned())].into();
+            assert_eq!(launch_env(&env, None), want, "{name}");
+            assert_eq!(app_env(&env, &plan), want, "{name}");
+        }
+    }
+
+    #[test]
     fn the_new_version_finds_its_data_folder_by_itself() {
         // the app that wrote the plan pointed SPACEKNIFE_HOME at the copy's data folder for its
         // own processes (0.3.4's Electron main, the Tauri app's prepare_environment); started
@@ -2028,10 +2078,20 @@ mod tests {
         // the env names one: that one is watched
         let env = BTreeMap::from([(READY_FILE_VAR.to_owned(), file.to_string_lossy().into())]);
         assert_eq!(Ready::for_env(&env).unwrap().file, file);
-        // none named: a folder of our own, only this user's, removed afterwards
+        // none named: a folder of our own, only this user's, removed afterwards; a new one each
+        // time, its name 128 random bits
         let own = Ready::for_env(&BTreeMap::new()).unwrap();
         let dir = own.file.parent().unwrap().to_owned();
         assert!(dir.is_dir() && !own.file.exists() && !own.said());
+        let name = dir.file_name().unwrap().to_str().unwrap();
+        let tag = name.strip_prefix("spaceknife-ready-").unwrap();
+        assert!(
+            tag.len() == 32 && tag.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{name}"
+        );
+        let other = Ready::for_env(&BTreeMap::new()).unwrap();
+        assert_ne!(other.file, own.file);
+        other.done();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
