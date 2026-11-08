@@ -70,7 +70,9 @@ int_codes! {
         /// The settings were changed by another window: retry with the new version.
         SettingsConflict = -32013,
         /// An item of the basket the user confirmed left it or changed since (another session
-        /// added to it): nothing ran, ask again with what it holds now (basket-confirm.v1).
+        /// added to it): nothing ran, ask again with what it holds now (basket-confirm.v1). The
+        /// error's `data.state` is that basket (BasketState): the answer can reach the client
+        /// before the basket.changed event of the change.
         BasketChanged = -32014,
         /// Same value LSP uses for a request cancelled by the client.
         RequestCancelled = -32800,

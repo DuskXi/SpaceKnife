@@ -470,6 +470,69 @@ async fn nothing_runs_when_a_confirmed_item_changed() {
     assert!(root.join("keep.tmp").exists());
 }
 
+/// BASKET_CHANGED carries the basket as it is now (`data.state`): the answer can reach the client
+/// before the basket.changed event of the change that caused it (answers go out first), and the
+/// confirmation asked again from the client's own copy would name the items as they were.
+/// Confirmed as that state has them, it runs.
+#[tokio::test]
+async fn basket_changed_says_what_the_basket_holds_now() {
+    let (srv, c) = setup().await;
+    let other = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    make_tree(
+        &root,
+        &[("sub/a.tmp", 100), ("gone.tmp", 100), ("keep.tmp", 1)],
+    );
+    let scan_id = scanned(&c, &root).await;
+    c.ok("basket.clear", json!({})).await;
+    let a = node_of(&c, &scan_id, &root.join("sub").join("a.tmp")).await;
+    let gone = node_of(&c, &scan_id, &root.join("gone.tmp")).await;
+    let state = c
+        .ok(
+            "basket.add",
+            json!({"scan_id": scan_id, "nodes": [a, gone]}),
+        )
+        .await["state"]
+        .clone();
+    let confirmed = confirm_of(&state);
+    // meanwhile another session takes one item out and adds the folder holding the other
+    let gone_id = state["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["name"] == "gone.tmp")
+        .unwrap()["id"]
+        .clone();
+    other.ok("basket.remove", json!({"ids": [gone_id]})).await;
+    let sub = node_of(&other, &scan_id, &root.join("sub")).await;
+    other
+        .ok("basket.add", json!({"scan_id": scan_id, "nodes": [sub]}))
+        .await;
+    let now = c.ok("basket.list", json!({})).await;
+    let e = c
+        .err(
+            "basket.execute",
+            json!({"mode": "delete", "confirm": confirmed}),
+        )
+        .await;
+    assert_eq!(e.code, -32014, "{e:?}");
+    let told = e.data.as_ref().expect("the basket as it is now")["state"].clone();
+    assert_eq!(told, now, "{e:?}");
+    assert_eq!(told["items"].as_array().unwrap().len(), 1);
+    assert_eq!(told["items"][0]["name"], "sub");
+    // confirmed as told, it runs
+    let task = c
+        .ok(
+            "basket.execute",
+            json!({"mode": "delete", "confirm": confirm_of(&told)}),
+        )
+        .await;
+    phase(&c, task["task_id"].as_str().unwrap(), &["done"]).await;
+    assert!(!root.join("sub").exists());
+    assert!(root.join("gone.tmp").exists() && root.join("keep.tmp").exists());
+}
+
 /// Renumber the scan's tree as the file-change monitor does once enough rows are gone: a
 /// compacted copy adopted (every id changes).
 fn renumber(srv: &sk_server::ServerHandle, scan_id: &str) {

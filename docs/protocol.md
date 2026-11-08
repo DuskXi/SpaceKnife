@@ -315,5 +315,5 @@ kind 1 是框加标题栏，子块画在框里。`FrameInfo.geometry` 和 `Frame
 | -32011 | SCAN_BUSY |
 | -32012 | UNKNOWN_VIEW |
 | -32013 | SETTINGS_CONFLICT（设置已被其他窗口修改，带上新版本号重试） |
-| -32014 | BASKET_CHANGED（确认过的删除篮项在确认之后离开了删除篮或变了，什么都没有执行；按现在的内容再确认） |
+| -32014 | BASKET_CHANGED（确认过的删除篮项在确认之后离开了删除篮或变了，什么都没有执行；按现在的内容再确认。`error.data.state` 就是现在的删除篮（BasketState）：这个回答可能比那次变化的 `basket.changed` 事件先到，再确认要按它，不按客户端手里的那份） |
 | -32800 | REQUEST_CANCELLED |

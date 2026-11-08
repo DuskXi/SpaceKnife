@@ -1,6 +1,6 @@
 // The pure parts of the delete basket drawer (shell/BasketDrawer in the Electron renderer).
 
-import type { BasketConfirm, BasketItem, BasketVolume, OpProgressEvent } from "@/protocol/generated";
+import type { BasketConfirm, BasketItem, BasketState, BasketVolume, OpProgressEvent } from "@/protocol/generated";
 import { fmtInt, plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
@@ -52,6 +52,15 @@ export function changedSince(confirmed: Confirmed, now: readonly BasketItem[]): 
     const i = byId.get(c.id);
     return i != null && i.rev !== c.rev;
   });
+}
+
+/** The basket a BASKET_CHANGED answer of basket.execute carries (`data.state`: the backend's
+ *  basket right then), or null when it carries none. The answer can arrive before the
+ *  basket.changed event of the change that caused it, so the confirmation is asked again from
+ *  this one, not from the copy the window had. */
+export function changedBasket(data: unknown): BasketState | null {
+  const state = data && typeof data === "object" ? (data as { state?: unknown }).state : undefined;
+  return state && typeof state === "object" && Array.isArray((state as BasketState).items) ? (state as BasketState) : null;
 }
 
 /** What basket.execute is given for a confirmation: the confirmed items still in the basket, as
