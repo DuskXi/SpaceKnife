@@ -478,6 +478,55 @@ impl Write for RotatingFile {
     }
 }
 
+/// Deletes the log files 0.3.x left in `dir`: loguru rotated `spaceknife.log` to
+/// `spaceknife.<YYYY-MM-DD_HH-MM-SS_ffffff>[.<n>].log` (10 MB, 5 kept); this build rotates to
+/// `spaceknife.log.<n>`, so those would stay for good (up to 50 MB). Only names of exactly that
+/// form go; returns them. Called when the log file is opened (once there are none, it finds
+/// none).
+pub fn remove_old_rotations(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_name().to_str().is_some_and(is_loguru_rotation))
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.path())
+        .filter(|p| std::fs::remove_file(p).is_ok())
+        .collect()
+}
+
+/// `spaceknife.2026-10-26_09-00-00_123456.log`, or with a counter (`….2.log`).
+fn is_loguru_rotation(name: &str) -> bool {
+    let Some(mid) = name
+        .strip_prefix("spaceknife.")
+        .and_then(|r| r.strip_suffix(".log"))
+    else {
+        return false;
+    };
+    let (stamp, counter) = match mid.split_once('.') {
+        Some((s, n)) => (s, Some(n)),
+        None => (mid, None),
+    };
+    let b = stamp.as_bytes();
+    let digits = |r: std::ops::Range<usize>| b[r].iter().all(u8::is_ascii_digit);
+    b.len() == 26
+        && digits(0..4)
+        && b[4] == b'-'
+        && digits(5..7)
+        && b[7] == b'-'
+        && digits(8..10)
+        && b[10] == b'_'
+        && digits(11..13)
+        && b[13] == b'-'
+        && digits(14..16)
+        && b[16] == b'-'
+        && digits(17..19)
+        && b[19] == b'_'
+        && digits(20..26)
+        && counter.is_none_or(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+}
+
 static FILE_SINK: Mutex<Option<RotatingFile>> = Mutex::new(None);
 /// The file's level as a `LevelFilter` ordinal: 0 off, 1 error … 5 trace.
 static FILE_LEVEL: AtomicU8 = AtomicU8::new(0);
@@ -513,6 +562,9 @@ pub fn set_file_logging(path: Option<&Path>, level: LevelFilter) -> io::Result<(
     }
     FILE_LEVEL.store(0, Ordering::Relaxed);
     let Some(path) = path else { return Ok(()) };
+    if let Some(dir) = path.parent() {
+        remove_old_rotations(dir); // 0.3.x's, which nothing would delete any more
+    }
     *sink = Some(RotatingFile::open(path, FILE_MAX_BYTES, FILE_KEEP)?);
     FILE_LEVEL.store(level_code(level), Ordering::Relaxed);
     Ok(())

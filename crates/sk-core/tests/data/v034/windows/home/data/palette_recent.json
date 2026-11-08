@@ -1,0 +1,25 @@
+{
+ "version": 1,
+ "jumps": {
+  "plain-4c376f352f1c": [
+   {
+    "text": "C:\\Users\\lenny\\sk-fixture\\plain\\photos\\2026",
+    "at": 1794105990.5547676
+   },
+   {
+    "text": "C:\\Users\\lenny\\sk-fixture\\plain\\docs",
+    "at": 1794105990.553768
+   }
+  ]
+ },
+ "filters": [
+  {
+   "text": ">1MB | :class:video",
+   "at": 1794105990.559276
+  },
+  {
+   "text": "*.mp4",
+   "at": 1794105990.5572736
+  }
+ ]
+}

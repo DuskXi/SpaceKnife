@@ -18,12 +18,13 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 rayon = { workspace = true }
 zstd = { workspace = true }
+sha1 = { workspace = true }
 
 [target."cfg(unix)".dependencies]
 libc = { workspace = true }
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_System_SystemInformation"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Globalization", "Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

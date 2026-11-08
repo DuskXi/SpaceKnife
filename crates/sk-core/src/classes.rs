@@ -501,6 +501,21 @@ pub fn colors_for_both(raw: Value) -> Value {
     }
 }
 
+/// What Python's `int()` made of a JSON value (0.3.x read `int(raw.get("version", 1))`): an
+/// integer, a float cut toward zero, an integer's text, a bool; None where `int()` failed.
+fn py_int(v: &Value) -> Option<i64> {
+    match v {
+        Value::Number(n) => n.as_i64().or_else(|| {
+            n.as_f64()
+                .filter(|f| f.is_finite())
+                .map(|f| f.trunc() as i64)
+        }),
+        Value::String(s) => s.trim().replace('_', "").parse().ok(),
+        Value::Bool(b) => Some(*b as i64),
+        _ => None,
+    }
+}
+
 fn parse_file(text: &str) -> Result<ClassTable, String> {
     let raw: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     let items = raw
@@ -508,7 +523,10 @@ fn parse_file(text: &str) -> Result<ClassTable, String> {
         .and_then(Value::as_array)
         .ok_or("no 'classes' list")?
         .clone();
-    let version = raw.get("version").and_then(Value::as_i64).unwrap_or(1);
+    let version = match raw.get("version") {
+        None => 1,
+        Some(v) => py_int(v).ok_or("the version is not a number")?,
+    };
     let items: Vec<Value> = if version < 2 {
         items.into_iter().map(colors_for_both).collect()
     } else {
@@ -563,8 +581,11 @@ pub fn load_user() {
     set_active(load(&user_file()));
 }
 
-/// Write atomically; the built-in table removes the file (nothing to remember).
+/// Write atomically; the built-in table removes the file (nothing to remember). A file there that
+/// this build cannot read (so [`load`] gave the built-in table instead) is moved aside first,
+/// never written over or removed ([`crate::userfile::keep_if_unreadable`]).
 pub fn save(table: &ClassTable, path: &Path) -> std::io::Result<()> {
+    crate::userfile::keep_if_unreadable(path, |text| parse_file(text).is_ok())?;
     if !table.custom() {
         return match std::fs::remove_file(path) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),

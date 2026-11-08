@@ -853,6 +853,23 @@ fn sizes_parse() {
 
 // --- user rules, overrides and malformed rules ---------------------------------------------------
 
+/// A user rule file named `*.TOML` is read on Windows, where 0.3.x's `glob("*.toml")` found it
+/// (case does not count there), and not elsewhere (where it did not).
+#[test]
+fn rule_files_by_extension_as_0_3_x_found_them() {
+    let _g = ACTIVE.lock();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("LOUD.TOML"),
+        "[[rule]]\nid = \"pycache\"\nenabled = false\n",
+    )
+    .unwrap();
+    let set = load_rules(Some(dir.path()), Some("linux")).unwrap();
+    assert!(set.problems.is_empty(), "{:?}", set.problems);
+    assert_eq!(set.get("pycache").is_none(), cfg!(windows));
+    insights::reset_active();
+}
+
 #[test]
 fn user_rules_override_and_disable() {
     let _g = ACTIVE.lock();
