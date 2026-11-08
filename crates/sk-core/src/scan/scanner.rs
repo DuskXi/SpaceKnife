@@ -361,6 +361,22 @@ fn secs(t: std::io::Result<std::time::SystemTime>) -> u32 {
         .map_or(0, |d| d.as_secs().min(u32::MAX as u64) as u32)
 }
 
+/// A root's creation time by the rule of its entries' (the native listing): Windows' creation
+/// time, `st_birthtime` on macOS and the BSDs; none on Linux, whose stat has no birth time (std
+/// reads statx's), as in 0.3.4.
+fn created(meta: &std::fs::Metadata) -> u32 {
+    if cfg!(any(
+        windows,
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd"
+    )) {
+        secs(meta.created())
+    } else {
+        0
+    }
+}
+
 #[cfg(unix)]
 fn dev_of(m: &std::fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
@@ -403,7 +419,7 @@ impl Scanner {
                 let vol = volume::volume_for(&path).ok();
                 let times = Times {
                     mtime: secs(meta.modified()),
-                    ctime: secs(meta.created()),
+                    ctime: created(&meta),
                     atime: secs(meta.accessed()),
                 };
                 let node = app.add_root(

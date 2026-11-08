@@ -142,7 +142,6 @@ comparison (`steps/<step index>/…`; `*` within a segment, `**` any segments) w
 | bug | where | what |
 |---|---|---|
 | `io-topic-before-registry` | `system` | an `io` subscription made right after start never delivers `io.load` |
-| `linux-root-ctime` | `scan_tree`, `system` | Linux: the scan root gets a creation time (std's `created()`, statx) while every other entry has none, as in 0.3.4 |
 
 The others are accepted differences (texts, a sort direction nobody calls, the empty `loc` of
 Rust's parameter errors).

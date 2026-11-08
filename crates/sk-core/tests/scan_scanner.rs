@@ -592,6 +592,34 @@ fn undecodable_names_are_scanned() {
 }
 
 #[test]
+fn the_root_has_a_creation_time_where_its_entries_do() {
+    // the root's row is made from std's metadata, its entries' from the native listing: both by
+    // the same rule. Linux's stat has no creation time (0.3.4 read st_birthtime: none there), so a
+    // root with statx's birth time stood out as the only row that had one (tree.node, exports)
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    std::fs::write(root.join("sub").join("f.bin"), b"xyz").unwrap();
+    let s = scanner(&root, ScanOptions::default());
+    run(&s);
+    let r = s.store().read();
+    let top = s.roots()[0].node;
+    let (sub, file) = (
+        find(&r, &root.join("sub")),
+        find(&r, &root.join("sub/f.bin")),
+    );
+    let has = |n: NodeId| r.ctime(n) != 0;
+    assert_eq!(has(sub), has(file), "a folder and a file");
+    assert_eq!(has(top), has(sub), "the root and a folder in it");
+    if cfg!(target_os = "linux") {
+        assert!(!has(top), "no creation time on Linux");
+    }
+    if cfg!(any(windows, target_os = "macos")) {
+        assert!(has(top), "a creation time");
+    }
+}
+
+#[test]
 fn hard_scans_run_under_the_io_governor() {
     // the system task's governor through the scanner's gate (pause, resume, permits)
     let (_t, root, facts) = tree();

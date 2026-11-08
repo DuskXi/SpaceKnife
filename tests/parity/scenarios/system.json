@@ -5,9 +5,7 @@
   "normalize": {"drop_keys": ["bytes"]},
   "known_diffs": [
     {"path": "steps/20/**", "bug": "io-topic-before-registry", "why": "an io subscription made before the disk registry has started (spawn_blocking at server start) has no governors and never delivers io.load; 0.3.4 delivers at once. The interface itself does not subscribe to io (it reads ScanStatus.io)."},
-    {"path": "steps/33/read/0", "why": "export generator: Rust writes the app version (SpaceKnife 0.3.5); 0.3.4 wrote its backend package version (SpaceKnife 0.1.0)"},
-    {"path": "steps/31/read/1", "bug": "linux-root-ctime", "why": "Linux: the exported root row has a creation time, 0.3.4's had none (see scan_tree.json)"},
-    {"path": "steps/33/read/2", "bug": "linux-root-ctime", "why": "the same row in the JSON export"}
+    {"path": "steps/33/read/0", "why": "export generator: Rust writes the app version (SpaceKnife 0.3.5); 0.3.4 wrote its backend package version (SpaceKnife 0.1.0)"}
   ],
   "steps": [
     {"call": "update.status", "params": {}},
