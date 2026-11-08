@@ -1000,15 +1000,73 @@ pub fn update_file_version(name: &str) -> Option<Version> {
 /// the running version or an older one. The file of a newer release stays, and so does any name
 /// this module did not write. Returns the names removed.
 pub fn clean_updates(folder: &Path, current: Option<&str>) -> Vec<String> {
+    clean_updates_with(folder, current, &remove_entry).removed
+}
+
+/// What a cleaning of the updates folder did: the names it removed, and the ones it could not
+/// remove (yet): right after an update the old version's files may still be held by its last
+/// processes as they close, or by a virus scanner looking at the moved files. [`clean_again`]
+/// tries those later.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Cleaned {
+    pub removed: Vec<String>,
+    pub left: Vec<String>,
+}
+
+/// Remove a file, a link or a whole folder.
+pub fn remove_entry(path: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(path)?.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
+/// [`clean_updates`] with its removing done by `remove` (tests).
+pub fn clean_updates_with(
+    folder: &Path,
+    current: Option<&str>,
+    remove: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Cleaned {
+    clean_names(folder, current, None, remove)
+}
+
+/// Try again to remove what an earlier cleaning left, each name only while it is still stale;
+/// nothing else in the folder is touched (a download that started meanwhile stays), and no
+/// partial download.
+pub fn clean_again(folder: &Path, current: Option<&str>, names: &[String]) -> Cleaned {
+    clean_again_with(folder, current, names, &remove_entry)
+}
+
+/// [`clean_again`] with its removing done by `remove` (tests).
+pub fn clean_again_with(
+    folder: &Path,
+    current: Option<&str>,
+    names: &[String],
+    remove: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Cleaned {
+    clean_names(folder, current, Some(names), remove)
+}
+
+fn clean_names(
+    folder: &Path,
+    current: Option<&str>,
+    only: Option<&[String]>,
+    remove: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Cleaned {
     let now = parse_opt(current);
-    let mut removed = Vec::new();
+    let mut out = Cleaned::default();
     let Ok(rd) = std::fs::read_dir(folder) else {
-        return removed;
+        return out;
     };
     let mut entries: Vec<_> = rd.filter_map(Result::ok).collect();
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
         let name = entry.file_name().to_string_lossy().into_owned();
+        // a partial download is not tried again: by then a new download may write the same name
+        if only.is_some_and(|names| !names.contains(&name) || name.ends_with(".part")) {
+            continue;
+        }
         let mut stale = name.ends_with(".part");
         if !stale && let Some(now) = &now {
             stale = update_file_version(&name).is_some_and(|v| v <= *now);
@@ -1017,18 +1075,15 @@ pub fn clean_updates(folder: &Path, current: Option<&str>) -> Vec<String> {
             continue;
         }
         let path = entry.path();
-        let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-        let result = if is_dir {
-            std::fs::remove_dir_all(&path)
-        } else {
-            std::fs::remove_file(&path)
-        };
-        match result {
-            Ok(()) => removed.push(name),
-            Err(e) => tracing::warn!("could not remove {}: {e}", path.display()),
+        match remove(&path) {
+            Ok(()) => out.removed.push(name),
+            Err(e) => {
+                tracing::warn!("could not remove {} (yet): {e}", path.display());
+                out.left.push(name);
+            }
         }
     }
-    removed
+    out
 }
 
 // ---------------------------------------------------------------- persistent state

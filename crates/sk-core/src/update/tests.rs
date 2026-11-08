@@ -977,6 +977,83 @@ fn clean_updates_folder() {
     assert!(clean_updates(&tmp.path().join("missing"), Some("0.3.2")).is_empty());
 }
 
+#[test]
+fn what_is_still_held_after_an_update_is_removed_later() {
+    // a 0.3.4 portable copy updated to 0.3.5: the swap left the Electron app's files in
+    // previous-0.3.4, and the new version's first cleaning ran while 0.3.4's last processes still
+    // held some of them (seen on Windows: ffmpeg.dll), leaving hundreds of MB behind until the next
+    // start; what is left is tried again, and nothing else
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("updates");
+    std::fs::create_dir_all(folder.join("previous-0.3.4").join("locales")).unwrap();
+    std::fs::write(folder.join("previous-0.3.4").join("ffmpeg.dll"), "x").unwrap();
+    std::fs::create_dir_all(
+        folder
+            .join("staging-0.3.5")
+            .join("SpaceKnife-0.3.5-win-x64-portable"),
+    )
+    .unwrap();
+    std::fs::write(folder.join("SpaceKnife-0.3.5-win-x64-portable.zip"), "x").unwrap();
+    std::fs::write(folder.join("update-0.3.5.log"), "updated").unwrap();
+    let held = std::cell::Cell::new(true);
+    let remove = |p: &Path| {
+        if held.get() && p.file_name().is_some_and(|n| n == "previous-0.3.4") {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "in use",
+            ));
+        }
+        remove_entry(p)
+    };
+    let first = clean_updates_with(&folder, Some("0.3.5"), &remove);
+    assert_eq!(
+        first.removed,
+        [
+            "SpaceKnife-0.3.5-win-x64-portable.zip",
+            "staging-0.3.5",
+            "update-0.3.5.log"
+        ]
+    );
+    assert_eq!(first.left, ["previous-0.3.4"]);
+    // meanwhile a newer release's download started, and something else was put there
+    std::fs::write(
+        folder.join("SpaceKnife-0.3.6-win-x64-portable.zip.part"),
+        "x",
+    )
+    .unwrap();
+    std::fs::write(folder.join("update-0.3.4.json"), "x").unwrap();
+    let again = clean_again_with(&folder, Some("0.3.5"), &first.left, &remove);
+    assert_eq!(
+        again,
+        Cleaned {
+            removed: vec![],
+            left: vec!["previous-0.3.4".into()]
+        }
+    );
+    held.set(false);
+    let again = clean_again_with(&folder, Some("0.3.5"), &first.left, &remove);
+    assert_eq!(again.removed, ["previous-0.3.4"]);
+    assert!(again.left.is_empty());
+    let mut left: Vec<String> = std::fs::read_dir(&folder)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            "SpaceKnife-0.3.6-win-x64-portable.zip.part",
+            "update-0.3.4.json"
+        ]
+    );
+    // a partial download is never tried again
+    let names = ["SpaceKnife-0.3.6-win-x64-portable.zip.part".to_owned()];
+    assert_eq!(
+        clean_again(&folder, Some("0.3.5"), &names),
+        Cleaned::default()
+    );
+}
+
 // ---------------------------------------------------------------- state
 
 #[test]

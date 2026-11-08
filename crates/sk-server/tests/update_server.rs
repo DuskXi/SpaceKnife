@@ -705,6 +705,38 @@ async fn the_real_app_schedules_and_stops() {
     stop(plain).await;
 }
 
+/// Right after a portable copy's update the old version's last processes may still hold some of
+/// its files in previous-<old>; the cleaning at start leaves those and tries them again later
+/// (seen updating the real 0.3.4: ffmpeg.dll, hundreds of MB left until the next start).
+#[cfg(windows)]
+#[tokio::test]
+async fn what_the_old_version_still_held_is_cleaned_again() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let _s = SERIAL.lock().await;
+    let (srv, dir) = setup().await;
+    let svc = srv.server.updates.clone();
+    let updates = dir.path().join("updates");
+    let old = updates.join("previous-0.2.9");
+    std::fs::create_dir_all(old.join("locales")).unwrap();
+    std::fs::write(old.join("ffmpeg.dll"), "x").unwrap();
+    std::fs::write(updates.join("update-0.3.0.log"), "updated").unwrap();
+    // open as a closing program has its DLLs open: no deleting it meanwhile
+    const FILE_SHARE_READ: u32 = 1;
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(old.join("ffmpeg.dll"))
+        .unwrap();
+    svc.set_clean_delays(vec![Duration::from_millis(300); 20]);
+    svc.set_first_delay(Duration::from_secs(3600));
+    svc.start();
+    until(10.0, || !updates.join("update-0.3.0.log").exists()).await;
+    assert!(old.join("ffmpeg.dll").exists());
+    drop(held);
+    until(10.0, || !old.exists()).await;
+    stop(srv).await;
+}
+
 #[tokio::test]
 async fn state_survives_a_restart() {
     let _s = SERIAL.lock().await;

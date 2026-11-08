@@ -41,6 +41,16 @@ use crate::rpc::{RpcError, RpcResult};
 
 /// After start, before the first automatic check.
 pub const FIRST_DELAY: Duration = Duration::from_secs(60);
+/// When the cleaning at start could not remove everything (files still held right after an
+/// update), it tries again after each of these.
+pub const CLEAN_AGAIN: [Duration; 6] = [
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+    Duration::from_secs(120),
+    Duration::from_secs(300),
+];
 
 /// The release list: (feed, etag, user agent) → list (blocking).
 pub type Fetch =
@@ -111,6 +121,8 @@ pub struct UpdateCore {
     checksum: RwLock<Checksum>,
     clock: RwLock<Clock>,
     first_delay: Mutex<Duration>,
+    clean_delays: Mutex<Vec<Duration>>,
+    cleaner: Mutex<Option<JoinHandle<()>>>,
     server: OnceLock<Weak<Server>>,
     done: tokio::sync::watch::Sender<u64>,
     wake: Notify,
@@ -166,6 +178,8 @@ impl UpdateCore {
             })),
             clock: RwLock::new(Arc::new(Utc::now)),
             first_delay: Mutex::new(FIRST_DELAY),
+            clean_delays: Mutex::new(CLEAN_AGAIN.to_vec()),
+            cleaner: Mutex::new(None),
             server: OnceLock::new(),
             done,
             wake: Notify::new(),
@@ -191,6 +205,11 @@ impl UpdateCore {
 
     pub fn set_first_delay(&self, d: Duration) {
         *self.first_delay.lock() = d;
+    }
+
+    /// When the cleaning at start tries again what it could not remove ([`CLEAN_AGAIN`]).
+    pub fn set_clean_delays(&self, delays: Vec<Duration>) {
+        *self.clean_delays.lock() = delays;
     }
 
     pub fn set_install_kind(&self, kind: InstallKind) {
@@ -886,16 +905,31 @@ impl UpdateCore {
     async fn schedule(self: Arc<Self>) {
         let dir = self.inner.lock().updates_dir.clone();
         let current = self.current();
+        let (d, c) = (dir.clone(), current.clone());
         match tokio::task::spawn_blocking(move || {
-            let removed = update::clean_updates(&dir, current.as_deref());
-            (dir, removed)
+            update::clean_updates_with(&d, c.as_deref(), &update::remove_entry)
         })
         .await
         {
-            Ok((dir, removed)) if !removed.is_empty() => {
-                tracing::info!("removed from {}: {}", dir.display(), removed.join(", "));
+            Ok(cleaned) => {
+                if !cleaned.removed.is_empty() {
+                    tracing::info!(
+                        "removed from {}: {}",
+                        dir.display(),
+                        cleaned.removed.join(", ")
+                    );
+                }
+                if !cleaned.left.is_empty() {
+                    // right after an update the old version's last processes may still hold some of
+                    // its files: those are tried again a few times (the next start would too)
+                    let me = self.clone();
+                    let task =
+                        tokio::spawn(
+                            async move { me.clean_again(dir, current, cleaned.left).await },
+                        );
+                    *self.cleaner.lock() = Some(task);
+                }
             }
-            Ok(_) => {}
             Err(e) => tracing::error!("could not clean the updates folder: {e}"),
         }
         let first = *self.first_delay.lock();
@@ -918,6 +952,43 @@ impl UpdateCore {
                 None => self.wake.notified().await,
             }
         }
+    }
+
+    /// Try again, after each of [`CLEAN_AGAIN`] (`set_clean_delays`), to remove what the cleaning
+    /// at start could not; only those names (sk_core::update::clean_again).
+    async fn clean_again(
+        self: Arc<Self>,
+        dir: PathBuf,
+        current: Option<String>,
+        mut left: Vec<String>,
+    ) {
+        let delays = self.clean_delays.lock().clone();
+        for delay in delays {
+            tokio::time::sleep(delay).await;
+            let (d, c, names) = (dir.clone(), current.clone(), left.clone());
+            let Ok(cleaned) =
+                tokio::task::spawn_blocking(move || update::clean_again(&d, c.as_deref(), &names))
+                    .await
+            else {
+                return;
+            };
+            if !cleaned.removed.is_empty() {
+                tracing::info!(
+                    "removed from {}: {}",
+                    dir.display(),
+                    cleaned.removed.join(", ")
+                );
+            }
+            left = cleaned.left;
+            if left.is_empty() {
+                return;
+            }
+        }
+        tracing::warn!(
+            "still in {} (the next start tries again): {}",
+            dir.display(),
+            left.join(", ")
+        );
     }
 
     /// Settings listener: switched on or another channel → check now; any of them or the language
@@ -969,6 +1040,9 @@ impl UpdateCore {
             t.abort();
         }
         if let Some(t) = self.download_task.lock().take() {
+            t.abort();
+        }
+        if let Some(t) = self.cleaner.lock().take() {
             t.abort();
         }
     }
