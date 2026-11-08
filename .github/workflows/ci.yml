@@ -108,6 +108,16 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
+      # SpaceKnife.com, the Windows console launcher (its own small workspace, not a member of the
+      # repository's): formatted, lint-free, and its tests (the routing; on Windows, run as a
+      # terminal runs it, with stand-ins next to it)
+      - name: Console launcher (packaging/console-launcher)
+        run: |
+          m=packaging/console-launcher/Cargo.toml
+          if [ "$RUNNER_OS" = Linux ]; then cargo fmt --manifest-path "$m" --check; fi
+          cargo clippy --manifest-path "$m" --all-targets --locked -- -D warnings
+          cargo test --manifest-path "$m" --locked
+
       # The developer tools (tools/*.mjs) read crates/ and design/; Node only, no install. The same on
       # every OS: once.
       - name: Set up Node 24

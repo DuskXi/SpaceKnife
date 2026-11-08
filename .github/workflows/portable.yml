@@ -193,6 +193,12 @@ jobs:
           cli=(target/portable-test/*/spaceknife-cli.exe target/portable-test/*/spaceknife-cli)
           cli=${cli[0]:?spaceknife-cli is missing from the archive}
           node packaging/smoke-headless.mjs "$cli"
+          # Windows: 0.3.4's `SpaceKnife --listen … --headless` in a terminal, through SpaceKnife.com
+          if [ "$RUNNER_OS" = Windows ]; then
+            com=(target/portable-test/*/SpaceKnife.com)
+            com=${com[0]:?SpaceKnife.com is missing from the archive}
+            node packaging/smoke-headless.mjs --app-form "$com"
+          fi
 
       # a release list on 127.0.0.1 offers the next version (this build again); the backend finds,
       # downloads and verifies it, the new version's --apply-update swaps the files, the app comes back

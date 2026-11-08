@@ -60,7 +60,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 
 - 后端就在应用进程里：`src-tauri/src/backend.rs` 调用 `sk_server::start`，在随机的回环端口上提供协议（每次启动一个新 token），界面连上它（[protocol.md](protocol.md) §1）。没有子进程，也没有 stdin 交接 token。
 - 同一个程序的另外两种用途在 `src-tauri/src/main.rs` 里、加载任何东西之前分派：`spaceknife helper …` 是提权的扫描助手（`sk_core::helper`），`spaceknife --apply-update <计划>` 是便携版的「无缝更新」（`sk_core::update::swap`）。
-- 命令行：`spaceknife-cli`（`crates/sk-server/src/bin/spaceknife-cli.rs`，`cli/mod.rs`）装在应用旁边：`scan`、`run`、`snapshot list | show`、`serve`（给界面用的 WebSocket 后端，`--ready-file` 等）、`headless`、`version`；`--headless` / `--listen` 作为 `headless` 的别名仍然接受。
+- 命令行：`spaceknife-cli`（`crates/sk-server/src/bin/spaceknife-cli.rs`，`cli/mod.rs`）装在应用旁边：`scan`、`run`、`snapshot list | show`、`serve`（给界面用的 WebSocket 后端，`--ready-file` 等）、`headless`、`version`；0.3.4 应用自己的写法 `--headless` / `--listen <地址>` 仍然接受，没有命令打头时可以出现在任何位置，其余参数照 0.3.4 跳过（`cli/headless.rs` 的 `is_app_form`）。
 - 安装目录本身是受保护路径（不能在应用里删除或移动它）。
 
 ### 命令行扫描的启动
@@ -78,7 +78,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 - 界面跑在系统的 WebView 里（Windows WebView2、macOS WKWebView、Linux WebKitGTK），不再自带 Chromium。
 - 外壳自己的文件（`theme.json`、WebView 的配置目录）：设了 `SPACEKNIFE_HOME`（便携版、演示、测试）时在 `<SPACEKNIFE_HOME>/desktop`，否则在 Tauri 的应用本地数据目录（按 identifier 命名），和后端的文件分开（`src-tauri/src/window.rs` 的 `ui_dir`）。
 - 拖动窗口的元素带 `data-tauri-drag-region`。
-- Windows 上 release 构建的 `spaceknife.exe` 是 GUI 子系统；终端里用的无头模式是控制台程序 `spaceknife-cli headless`，不再需要 0.3.x 的 `SpaceKnife.com` 启动器。
+- Windows 上 release 构建的 `spaceknife.exe` 是 GUI 子系统；终端里用的无头模式是控制台程序 `spaceknife-cli headless`。0.3.x 的 `SpaceKnife.com`（`packaging/console-launcher`，自成一个小工作区，`scripts/prepare-bundle.mjs` 在 Windows 上以重映射的路径构建，`portable.mjs` 放进便携版）照旧放在程序旁边：命令提示符和 PowerShell 先找 `.com`，所以终端里的 `SpaceKnife --headless …`、`--listen …`、`--help`（这些选项在任何位置）到了它这里，它以原样的参数运行旁边的 `spaceknife-cli.exe` 并等它结束（Y/N 在终端里问，Ctrl+C 交给 `spaceknife-cli`，退出码照传）；别的参数照常打开窗口，立刻返回。<!-- TODO: confirm — Windows 安装包（electron-builder，见合并计划 5.4）也要把 SpaceKnife.com 放在程序旁边（dev 的 electron-builder.yml 里是 win.extraFiles）；Tauri 的 NSIS 包现在没有带它 -->
 
 ## 4. 安装包
 
@@ -91,7 +91,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 
 **便携版**（Windows zip、Linux tar.gz、macOS zip）：
 
-- 一个文件夹：`spaceknife[.exe]`、`spaceknife-cli[.exe]`、`licenses/` 和一个空的 `data` 文件夹（macOS 上是 `SpaceKnife.app` 加旁边的 `data`）。打包后的应用启动时，如果可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`（`src-tauri/src/portable.rs`，`lib.rs` 的 `prepare_environment`）：快照、设置、日志、缓存和 WebView 配置都存在里面，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。
+- 一个文件夹：`spaceknife[.exe]`、`spaceknife-cli[.exe]`（Windows 上还有 `SpaceKnife.com`）、`ui/`、`licenses/` 和一个空的 `data` 文件夹（macOS 上是 `SpaceKnife.app` 加旁边的 `data`）。打包后的应用启动时，如果可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`（`src-tauri/src/portable.rs`，`lib.rs` 的 `prepare_environment`）：快照、设置、日志、缓存和 WebView 配置都存在里面，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。无头模式（`spaceknife-cli headless` 和 0.3.4 的 `--headless`）也这样找 `data`（`cli/headless.rs` 的 `portable_home`，和 0.3.4 的 `SpaceKnife --headless` 一样）；`spaceknife-cli` 的其他命令仍用用户目录，除非设了 `SPACEKNIFE_HOME`。
 - 解压到用户可写的位置（解压到 Program Files 之类的位置会写不进去）。
 - Linux 的 tar.gz 不需要 FUSE。
 - 有 x64 和 arm64 两份（`win-arm64`、`linux-arm64`）。便携版更新时按处理器的架构挑包（`crates/sk-core/src/update/mod.rs` 的 `asset_templates`）：Windows on ARM 上先找 arm64 包，发布里没有时仍给 x64（Windows 能模拟运行）；ARM Linux 只取 arm64 包。arm64 版目前只在 GitHub 的 ARM 运行器上测过，还没在真机上用过。
