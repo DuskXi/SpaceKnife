@@ -789,6 +789,17 @@ async fn a_panic_while_the_helper_starts_leaves_the_hard_scan_going() {
         .await;
     let id = started["scan_id"].as_str().unwrap().to_owned();
     let h = srv.server.scans.get(&id).unwrap();
+    // the listing starts once the watchers are up (as in 0.3.4; queued until then): the switch is
+    // asked for while it runs
+    let mut state = json!(null);
+    for _ in 0..400 {
+        state = c.ok("scan.status", json!({"scan_id": id})).await["state"].clone();
+        if state == "scanning" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(state, "scanning");
     for (attempt, why) in ["injected helper bug", "no helper here"]
         .into_iter()
         .enumerate()
