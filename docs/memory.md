@@ -2,7 +2,7 @@
 
 后端把一次扫描存成按列的节点表加一个名字堆，不为每个文件建对象。本文给出每项（一个文件或文件夹）的内存开销、规模估算、两种存储模式，以及防止内存失控的机制。数字来自 `tools/bench_memory.py`，在一个 845 万项的 C: 盘快照上实测（Windows 11，2026-10-18）。
 
-> **现状（0.3.5 起）**：后端已改写为 Rust，节点表与名字堆在 `crates/sk-store`（`store.rs`、`heap.rs`、`mapped.rs`、`subtree.rs`、`mutate.rs`；列布局和每项 89 B 不变，见 `crates/sk-store/src/lib.rs`），名字索引在 `crates/sk-core/src/filter/names.rs`，计算池在 `crates/sk-server/src/compute.rs`，看门狗在 `crates/sk-server/src/diag.rs`，堆的归还与 glibc 设置在 `crates/sk-core/src/memory.rs`（`release`、`tune_allocator`、`trim`）；窗口是 Tauri + 系统 WebView，不再有 Electron 的各个进程。下文的路径（`server/*.py`、`store/*.py`、`NodeStore`、numpy、tracemalloc、PyInstaller）和测量都是 0.3.x（Python 后端 + Electron）时的；Rust 版的数字还没有重新测过。<!-- TODO: confirm — Rust 后端与 Tauri 窗口的内存实测 -->
+> **现状（0.3.5 起）**：后端已改写为 Rust，节点表与名字堆在 `crates/sk-store`（`store.rs`、`heap.rs`、`mapped.rs`、`subtree.rs`、`mutate.rs`；列布局和每项 89 B 不变，见 `crates/sk-store/src/lib.rs`），名字索引在 `crates/sk-core/src/filter/names.rs`，计算池在 `crates/sk-server/src/compute.rs`，看门狗在 `crates/sk-server/src/diag.rs`，堆的归还与 glibc 设置在 `crates/sk-core/src/memory.rs`（`release`、`tune_allocator`、`trim`）；窗口默认是 Tauri + 系统 WebView，没有 Electron 的各个进程（rpm、AppImage 和沿用 0.3.4 文件名的 Linux 便携版仍是精简的 Electron 外壳，后端是它的子进程 `spaceknife-cli serve`）。下文的路径（`server/*.py`、`store/*.py`、`NodeStore`、numpy、tracemalloc、PyInstaller）和测量都是 0.3.x（Python 后端 + Electron）时的；Rust 版的数字还没有重新测过。<!-- TODO: confirm — Rust 后端与 Tauri 窗口的内存实测 -->
 
 ## 1. 每项开销
 
