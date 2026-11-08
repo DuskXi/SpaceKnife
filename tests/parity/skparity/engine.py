@@ -295,7 +295,20 @@ class Places:
         return s
 
     def remove(self) -> None:
-        shutil.rmtree(self.tmp, onerror=make_writable)  # noqa: PTH - readonly fixture files
+        """The run's folders, read-only fixture files included. A backend that has just ended can
+        still hold a file for a moment on Windows (the reference runs under `uv run`, whose child
+        goes a little after it): tried for a few seconds, then said that it stays."""
+        for attempt in range(20):
+            try:
+                shutil.rmtree(self.tmp, onerror=make_writable)  # noqa: PTH - readonly fixture files
+                return
+            except FileNotFoundError:
+                return
+            except OSError as e:
+                if attempt == 19:
+                    print(f"({self.tmp} stays behind: {e})", file=sys.stderr)
+                    return
+                time.sleep(0.25)
 
 
 @dataclass
@@ -736,6 +749,5 @@ async def run_scenario(
     finally:
         await run.shutdown()
         if not keep:
-            with contextlib.suppress(OSError):
-                places.remove()
+            places.remove()
     return run.transcript, places

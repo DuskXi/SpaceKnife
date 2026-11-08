@@ -168,7 +168,12 @@ async def upgrade_setup(spec: engine.BackendSpec, sc: dict[str, Any], rules: dic
     """Run the scenario's `setup` steps on the writer (0.3.4) and keep its folders. A setup step
     that fails is an error of the scenario, not a difference."""
     setup = {**sc, "steps": sc["setup"]["steps"]}
-    transcript, places = await engine.run_scenario(spec, setup, rules, feed, keep=True)
+    places = engine.Places.make(spec.label)
+    try:
+        transcript, _ = await engine.run_scenario(spec, setup, rules, feed, places=places, keep=True)
+    except BaseException:
+        places.remove()
+        raise
     failed = [r for r in transcript if "error" in r or "step_error" in r]
     if failed:
         places.remove()
@@ -221,17 +226,22 @@ async def cmd_run(args: argparse.Namespace) -> int:
             rules = norm.load_rules(sc.get("normalize"))
             if "setup" in sc:
                 writer = await upgrade_setup(ref, sc, rules, feed)
+                readers: list[engine.Places] = []
                 try:
-                    pr, pc = reader_places(writer, "ref"), reader_places(writer, "cand")
+                    pr = reader_places(writer, "ref")
+                    readers.append(pr)
+                    pc = reader_places(writer, "cand")
+                    readers.append(pc)
                     shutil.rmtree(pr.home)
                     shutil.rmtree(pc.home)
                     shutil.copytree(writer.home, pr.home)
                     shutil.copytree(writer.home, pc.home)
                     exp, _ = await engine.run_scenario(ref, sc, rules, feed, places=pr, keep=True)
                     act, _ = await engine.run_scenario(cand, sc, rules, feed, places=pc, keep=True)
-                    for p in (pr, pc):
-                        shutil.rmtree(p.tmp, onerror=engine.make_writable)
                 finally:
+                    # the readers' root is the writer's: their own folder goes, then the writer's
+                    for p in readers:
+                        p.remove()
                     writer.remove()
             else:
                 exp, _ = await engine.run_scenario(ref, sc, rules, feed)
@@ -263,14 +273,17 @@ async def cmd_record(args: argparse.Namespace) -> int:
             rules = norm.load_rules(sc.get("normalize"))
             if "setup" in sc:
                 writer = await upgrade_setup(ref, sc, rules, feed)
+                readers: list[engine.Places] = []
                 try:
                     save_home_template(writer.home, writer, sc, GOLDEN / f"{name}.home", feed)
                     pr = reader_places(writer, "ref")
+                    readers.append(pr)
                     shutil.rmtree(pr.home)
                     shutil.copytree(writer.home, pr.home)
                     exp, _ = await engine.run_scenario(ref, sc, rules, feed, places=pr, keep=True)
-                    shutil.rmtree(pr.tmp, onerror=engine.make_writable)
                 finally:
+                    for p in readers:
+                        p.remove()
                     writer.remove()
             else:
                 exp, _ = await engine.run_scenario(ref, sc, rules, feed)
@@ -311,13 +324,16 @@ async def cmd_check(args: argparse.Namespace) -> int:
                 with its folders in `parent` (None: the system's temp folder)."""
                 moved = other_order(sc, parent)
                 places = engine.Places.make("cand", parent)
-                if "setup" in sc:
-                    for fname, tree in sc.get("fixtures", {}).items():
-                        engine.fixtures.build(places.root / fname, tree)
-                    apply_home_template(GOLDEN / f"{name}.home", places.home, places, feed)
-                    act, _ = await engine.run_scenario(cand, sc, rules, feed, places=places, replay=True)
-                else:
-                    act, _ = await engine.run_scenario(cand, sc, rules, feed, places=places)
+                try:
+                    if "setup" in sc:
+                        for fname, tree in sc.get("fixtures", {}).items():
+                            engine.fixtures.build(places.root / fname, tree)
+                        apply_home_template(GOLDEN / f"{name}.home", places.home, places, feed)
+                        act, _ = await engine.run_scenario(cand, sc, rules, feed, places=places, replay=True)
+                    else:
+                        act, _ = await engine.run_scenario(cand, sc, rules, feed, places=places)
+                finally:
+                    places.remove()  # run_scenario removed it already, unless something failed first
                 diffs = norm.compare(norm.keyed(exp), norm.keyed(act), rules, "steps")
                 return (*norm.split_known(diffs, known_list(sc)), moved)
 
