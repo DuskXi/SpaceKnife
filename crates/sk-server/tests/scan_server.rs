@@ -600,3 +600,95 @@ async fn a_panic_in_a_scan_fails_that_scan_and_the_server_goes_on() {
     assert!(plan.lock().unwrap().is_empty());
     srv.shutdown();
 }
+
+/// The state of the scan's monitor in a status (null: not watched).
+fn monitor_state(status: &serde_json::Value) -> serde_json::Value {
+    status["monitor"]["state"].clone()
+}
+
+#[tokio::test]
+async fn a_watched_scan_says_so_from_its_final_status_on() {
+    // the status bar reads live monitoring only from the `scan` topic's pushes: the final status
+    // of a scan already names its running monitor, as in 0.3.4 (which started the watchers before
+    // the scan), never null («live monitoring off») because the watchers were still starting
+    let _g = SERIAL.lock().await;
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let dir = sample_tree();
+    let started = c
+        .ok(
+            "scan.start",
+            json!({"roots": [dir.path()], "workers": 0, "auto_snapshot": false}),
+        )
+        .await;
+    let id = started["scan_id"].as_str().unwrap().to_owned();
+    let last = wait_final(&c, &id, false).await;
+    assert_eq!(last["state"], "done", "{last}");
+    assert_eq!(monitor_state(&last), "running", "{last}");
+    let status = c.ok("scan.status", json!({"scan_id": id})).await;
+    assert_eq!(monitor_state(&status), "running", "{status}");
+    c.ok("scan.close", json!({"scan_id": id})).await;
+    srv.shutdown();
+}
+
+#[tokio::test]
+async fn applied_changes_and_the_monitor_switch_push_the_scan_status() {
+    // 0.3.4 pushed scan.progress whenever the monitor applied changes (the status bar's counts and
+    // its monitor state come from these pushes only); switching live monitoring off and on again
+    // pushes too, so the status bar never keeps a state the scan left
+    let _g = SERIAL.lock().await;
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let dir = sample_tree();
+    let started = c
+        .ok(
+            "scan.start",
+            json!({"roots": [dir.path()], "workers": 0, "auto_snapshot": false}),
+        )
+        .await;
+    let id = started["scan_id"].as_str().unwrap().to_owned();
+    let done = wait_final(&c, &id, false).await;
+    let files = done["files"].as_i64().unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    c.drain_events().await;
+    std::fs::write(dir.path().join("live.bin"), vec![0u8; 7000]).unwrap();
+    let want = id.clone();
+    let ev = c
+        .event_where("scan.progress", 20.0, move |p| {
+            p["status"]["scan_id"] == want.as_str()
+                && p["status"]["files"].as_i64() == Some(files + 1)
+        })
+        .await;
+    assert_eq!(monitor_state(&ev["status"]), "running", "{ev}");
+    assert!(
+        ev["status"]["monitor"]["changes"].as_i64().unwrap() >= 1,
+        "the counts are the monitor's own after the change: {ev}"
+    );
+
+    let set = |on: bool| {
+        let c = &c;
+        async move {
+            let v = c.ok("settings.get", json!({})).await["version"].clone();
+            c.ok(
+                "settings.update",
+                json!({"values": {"scan.monitor": on}, "version": v}),
+            )
+            .await;
+        }
+    };
+    c.drain_events().await;
+    set(false).await;
+    let want = id.clone();
+    c.event_where("scan.progress", 10.0, move |p| {
+        p["status"]["scan_id"] == want.as_str() && p["status"]["monitor"].is_null()
+    })
+    .await;
+    set(true).await;
+    let want = id.clone();
+    c.event_where("scan.progress", 10.0, move |p| {
+        p["status"]["scan_id"] == want.as_str() && p["status"]["monitor"]["state"] == "running"
+    })
+    .await;
+    c.ok("scan.close", json!({"scan_id": id})).await;
+    srv.shutdown();
+}

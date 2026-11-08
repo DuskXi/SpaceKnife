@@ -713,7 +713,11 @@ impl ScanManager {
         let (srv, h) = (server.clone(), handle.clone());
         std::thread::Builder::new()
             .name(format!("scan-{}", handle.id))
-            .spawn(move || run_scan(&srv, &h))
+            .spawn(move || {
+                // the watchers first, as in 0.3.4: nothing listed before them goes unwatched
+                srv.monitors.wait_started(&h.id);
+                run_scan(&srv, &h)
+            })
             .map_err(|e| RpcError::new(ErrorCode::ScanFailed, e.to_string()))?;
         tracing::info!(
             "scan {} started: {}",
