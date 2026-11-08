@@ -73,7 +73,7 @@ pub fn init_logging(level: &str, format: &str) {
         bus: Some(LogBus::global()),
         file,
     }) {
-        eprintln!("log file unavailable: {e}");
+        super::eprint_line(&format!("log file unavailable: {e}"));
     }
 }
 
@@ -169,7 +169,7 @@ pub fn serve(args: ServeArgs) -> i32 {
         match read_token_line(&mut std::io::stdin().lock()) {
             Ok(t) => (t, false),
             Err(e) => {
-                eprintln!("{e}");
+                super::eprint_line(&e);
                 return 1;
             }
         }
@@ -181,7 +181,9 @@ pub fn serve(args: ServeArgs) -> i32 {
         h => match h.trim_matches(['[', ']']).parse() {
             Ok(ip) => ip,
             Err(_) => {
-                eprintln!("Error: Invalid value for '--host': {h} is not an IP address");
+                super::eprint_line(&format!(
+                    "Error: Invalid value for '--host': {h} is not an IP address"
+                ));
                 return 2;
             }
         },
@@ -207,7 +209,7 @@ pub fn serve(args: ServeArgs) -> i32 {
     {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("cannot start the runtime: {e}");
+            super::eprint_line(&format!("cannot start the runtime: {e}"));
             return 1;
         }
     };

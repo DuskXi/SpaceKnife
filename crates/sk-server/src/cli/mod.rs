@@ -7,7 +7,7 @@
 //! spaceknife-cli snapshot list | show <file>                                     saved snapshots
 //! spaceknife-cli serve [--token-stdin] [--port N] …                             the WebSocket backend for a UI
 //! spaceknife-cli headless [--listen <address>] [--yes] [--tls-cert F --tls-key F] [--ui DIR]
-//! spaceknife-cli --headless | --listen <address> …                              the same as `headless …`
+//! spaceknife-cli … --headless … | … --listen <address> …                        0.3.4's app's form of it
 //! spaceknife-cli helper …                                                        the elevated scan helper
 //! spaceknife-cli --apply-update <plan>                                           put an update in place
 //! ```
@@ -59,7 +59,13 @@ pub enum Command {
     /// Run the WebSocket backend. Prints one JSON 'ready' line on stdout once listening.
     Serve(serve::ServeArgs),
     /// Serve the interface over HTTP for a browser, on this computer or another one (no window).
-    Headless(headless::HeadlessArgs),
+    /// `spaceknife-cli headless --help` for its options.
+    #[command(disable_help_flag = true)]
+    Headless {
+        /// --listen <address>, --yes, --tls-cert <file>, --tls-key <file>, --ui <folder>
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<OsString>,
+    },
     /// Print the backend and protocol versions.
     Version,
 }
@@ -109,18 +115,17 @@ pub fn main() -> i32 {
                 .collect();
             return run::cli(&tokens);
         }
-        // `--headless` / `--listen …` as Electron's app took them
-        Some(a) if a == "--headless" || a == "--listen" || a.starts_with("--listen=") => {
-            let mut rewritten = vec![args[0].clone(), "headless".into()];
-            rewritten.extend(
-                args[1..]
-                    .iter()
-                    .filter(|a| a.to_str() != Some("--headless"))
-                    .cloned(),
-            );
-            return dispatch(Cli::parse_from(rewritten));
+        // headless mode reads its own options: 0.3.4's texts, in the user's language
+        Some("headless") => return headless::cli(&args, headless::Form::Subcommand),
+        Some("help") if args.get(2).and_then(|a| a.to_str()) == Some("headless") => {
+            let asked = [args[0].clone(), "headless".into(), "--help".into()];
+            return headless::cli(&asked, headless::Form::Subcommand);
         }
         _ => {}
+    }
+    // `--headless` / `--listen …` as 0.3.4's app took them: anywhere among the arguments
+    if headless::is_app_form(&args[1..]) {
+        return headless::cli(&args, headless::Form::App);
     }
     dispatch(Cli::parse_from(args))
 }
@@ -132,16 +137,47 @@ fn dispatch(cli: Cli) -> i32 {
         Command::Snapshot(SnapshotCommand::List) => scan::snapshot_list(),
         Command::Snapshot(SnapshotCommand::Show(a)) => scan::snapshot_show(&a.file, a.top, a.depth),
         Command::Serve(a) => serve::serve(a),
-        Command::Headless(a) => headless::headless(a),
+        Command::Headless { args } => {
+            let mut argv: Vec<OsString> = vec!["spaceknife-cli".into(), "headless".into()];
+            argv.extend(args);
+            headless::cli(&argv, headless::Form::Subcommand)
+        }
         Command::Version => {
-            println!(
+            print_line(&format!(
                 "spaceknife {} · protocol {} · rust backend",
                 env!("CARGO_PKG_VERSION"),
                 sk_protocol::PROTOCOL_VERSION
-            );
+            ));
             0
         }
     }
+}
+
+// ------------------------------------------------------------------------------------- output
+
+/// A line on stdout. A stdout that is closed or gone (`| head`, a terminal closed) is no error:
+/// the command goes on (`println!` would panic).
+pub fn print_line(text: &str) {
+    use std::io::Write as _;
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{text}");
+    let _ = out.flush();
+}
+
+/// A line on stderr, as [`print_line`].
+pub fn eprint_line(text: &str) {
+    use std::io::Write as _;
+    let mut err = std::io::stderr().lock();
+    let _ = writeln!(err, "{text}");
+    let _ = err.flush();
+}
+
+/// Text on stderr without a line end (a question), as [`print_line`].
+pub fn eprint_part(text: &str) {
+    use std::io::Write as _;
+    let mut err = std::io::stderr().lock();
+    let _ = write!(err, "{text}");
+    let _ = err.flush();
 }
 
 // ------------------------------------------------------------------------------------- shared
