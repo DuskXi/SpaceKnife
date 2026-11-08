@@ -244,7 +244,7 @@ mod imp {
     use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
     use windows_sys::Win32::Foundation::{
@@ -259,12 +259,13 @@ mod imp {
     };
     use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
     use windows_sys::Win32::System::Threading::{
-        CreateEventW, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
+        CreateEventW, ResetEvent, SetEvent, WaitForMultipleObjects,
     };
 
     use super::super::poll::{Emitter, Worker};
     use super::super::{Change, Sink, WatchState, WatchStatus, Watcher, t};
     use super::NotifyDecoder;
+    use crate::helper::win32::{Handle, io_pending, wait_io};
 
     // file name, folder name, attributes, size, last write, creation
     const NOTIFY_FILTER: u32 = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x40;
@@ -277,7 +278,7 @@ mod imp {
     const HOLD_RENAME: Duration = Duration::from_millis(50);
     const CHECK_LOCAL: Duration = Duration::from_secs(1);
     const CHECK_NETWORK: Duration = Duration::from_secs(5);
-    const CANCEL_WAIT_MS: u32 = 2000;
+    const CANCEL_WAIT: Duration = Duration::from_secs(2);
 
     fn wide(p: &Path) -> Vec<u16> {
         long_path(p)
@@ -367,7 +368,9 @@ mod imp {
         emitter: Emitter,
         state: Mutex<(WatchState, String)>,
         armed: AtomicBool,
-        stop_event: AtomicUsize,
+        /// Set by start(); closed only when the last owner (the watcher, its thread) is gone, so
+        /// stop() never signals a handle that has been closed and given to another object.
+        stop_event: OnceLock<Handle>,
         handle: AtomicUsize,
         extended: AtomicBool,
         buffer: AtomicUsize,
@@ -420,7 +423,7 @@ mod imp {
                     emitter: Emitter::new(),
                     state: Mutex::new((WatchState::Starting, String::new())),
                     armed: AtomicBool::new(false),
-                    stop_event: AtomicUsize::new(0),
+                    stop_event: OnceLock::new(),
                     handle: AtomicUsize::new(0),
                     extended: AtomicBool::new(true),
                     buffer: AtomicUsize::new(
@@ -454,7 +457,6 @@ mod imp {
         sh: Arc<Shared>,
         handle: HANDLE,
         io_event: HANDLE,
-        stop_event: HANDLE,
         ov: Box<OVERLAPPED>,
         buf: Vec<u64>, // 8-byte aligned
         size: usize,
@@ -611,7 +613,10 @@ mod imp {
         }
 
         fn run(&mut self) {
-            let handles = [self.io_event, self.stop_event];
+            let Some(stop) = self.sh.stop_event.get() else {
+                return;
+            };
+            let handles = [self.io_event, stop.0];
             let mut next_check = Instant::now() + self.check_every;
             while !self.sh.stopping() {
                 let wait = if self.decoder.held.is_some() {
@@ -653,6 +658,16 @@ mod imp {
 
         /// Reap the finished read, issue the next one, hand the batch over; false: watch ended.
         fn completion(&mut self) -> bool {
+            // SAFETY (io_pending): our OVERLAPPED, alive until the read ends.
+            if self.pending && unsafe { io_pending(&*self.ov) } {
+                // the event was signalled, but the read is still running (a signal that is not its
+                // completion): take it back and wait on, unless the read ended in between
+                // SAFETY: our event.
+                unsafe { ResetEvent(self.io_event) };
+                if unsafe { io_pending(&*self.ov) } {
+                    return !self.sh.stopping();
+                }
+            }
             let mut got = 0u32;
             // SAFETY: our handle and OVERLAPPED.
             let ok = unsafe { GetOverlappedResult(self.handle, &*self.ov, &mut got, 0) };
@@ -758,8 +773,10 @@ mod imp {
             if !self.handle.is_null() && self.pending {
                 // SAFETY: our handle and OVERLAPPED.
                 unsafe { CancelIoEx(self.handle, &*self.ov) };
-                // the buffer and OVERLAPPED must outlive the read: wait for the cancellation
-                if unsafe { WaitForSingleObject(self.io_event, CANCEL_WAIT_MS) } != WAIT_OBJECT_0 {
+                // the buffer and OVERLAPPED must outlive the read: wait until it has ended (its
+                // event being signalled proves nothing)
+                // SAFETY: our OVERLAPPED and its event.
+                if !unsafe { wait_io(&*self.ov, self.io_event, CANCEL_WAIT) } {
                     tracing::warn!(
                         "{}",
                         crate::tr!(
@@ -790,12 +807,9 @@ mod imp {
     impl Drop for Reader {
         fn drop(&mut self) {
             self.close();
-            // SAFETY: closing our events (the stop event is cleared from the shared state first).
-            self.sh.stop_event.store(0, Ordering::SeqCst);
-            unsafe {
-                CloseHandle(self.io_event);
-                CloseHandle(self.stop_event);
-            }
+            // SAFETY: closing our read's event, used by this thread only (the stop event belongs
+            // to the shared state).
+            unsafe { CloseHandle(self.io_event) };
         }
     }
 
@@ -810,29 +824,26 @@ mod imp {
                     "RdcwWatcher.start() may only be called once, before stop()",
                 ));
             }
-            // SAFETY: plain calls; handles are closed by the Reader.
-            let io_event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+            // SAFETY: plain calls; the read's event is closed by the Reader, the stop event with
+            // the shared state.
             let stop_event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
-            if io_event.is_null() || stop_event.is_null() {
-                let e = std::io::Error::last_os_error();
-                unsafe {
-                    if !io_event.is_null() {
-                        CloseHandle(io_event);
-                    }
-                    if !stop_event.is_null() {
-                        CloseHandle(stop_event);
-                    }
-                }
-                return Err(e);
+            if stop_event.is_null() {
+                return Err(std::io::Error::last_os_error());
             }
-            self.shared
-                .stop_event
-                .store(stop_event as usize, Ordering::SeqCst);
+            if self.shared.stop_event.set(Handle(stop_event)).is_err() {
+                return Err(std::io::Error::other(
+                    "RdcwWatcher.start() may only be called once, before stop()",
+                ));
+            }
+            let io_event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+            if io_event.is_null() {
+                return Err(std::io::Error::last_os_error());
+            }
             *self.shared.emitter.sink.lock().unwrap() = Some(sink);
             let sh = self.shared.clone();
             let explicit = self.buffer_size;
             let ext_ok = self.use_extended.load(Ordering::SeqCst);
-            let (io_u, stop_u) = (io_event as usize, stop_event as usize);
+            let io_u = io_event as usize;
             self.worker
                 .spawn(&format!("rdcw {}", self.shared.root.display()), move || {
                     let mut r = Reader {
@@ -840,7 +851,6 @@ mod imp {
                         sh,
                         handle: std::ptr::null_mut(),
                         io_event: io_u as HANDLE,
-                        stop_event: stop_u as HANDLE,
                         // SAFETY: an all-zero OVERLAPPED is valid.
                         ov: Box::new(unsafe { std::mem::zeroed() }),
                         buf: Vec::new(),
@@ -883,10 +893,12 @@ mod imp {
 
         fn stop(&self) {
             self.shared.emitter.stopping.store(true, Ordering::SeqCst);
-            let ev = self.shared.stop_event.load(Ordering::SeqCst);
-            if ev != 0 {
-                // SAFETY: the event lives until the reader drops (which clears the slot first).
-                unsafe { SetEvent(ev as HANDLE) };
+            if let Some(ev) = self.shared.stop_event.get() {
+                #[cfg(test)]
+                hooks::before_stop_signal(&self.shared.root, ev.0 as usize, &self.shared.done);
+                // SAFETY: the event lives as long as the shared state, which `self` holds: the
+                // watcher thread may have ended meanwhile, the handle is still ours.
+                unsafe { SetEvent(ev.0) };
             }
             self.worker.finish(Duration::from_millis(1000));
             let mut st = self.shared.state.lock().unwrap();
@@ -911,6 +923,37 @@ mod imp {
     impl Drop for RdcwWatcher {
         fn drop(&mut self) {
             self.stop();
+        }
+    }
+
+    /// Test seams: run code at a chosen point of a watcher (one shot, matched by its root).
+    #[cfg(test)]
+    pub(crate) mod hooks {
+        use std::path::{Path, PathBuf};
+        use std::sync::Mutex;
+        use std::sync::atomic::AtomicBool;
+
+        type Hook = Box<dyn FnOnce(usize, &AtomicBool) + Send>;
+        static BEFORE_STOP_SIGNAL: Mutex<Vec<(PathBuf, Hook)>> = Mutex::new(Vec::new());
+
+        /// `f(stop event, thread ended)` runs once, inside stop() of the watcher of `root`, just
+        /// before the stop event is signalled.
+        pub fn on_stop_signal(root: &Path, f: impl FnOnce(usize, &AtomicBool) + Send + 'static) {
+            BEFORE_STOP_SIGNAL
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((root.to_path_buf(), Box::new(f)));
+        }
+
+        pub(super) fn before_stop_signal(root: &Path, event: usize, done: &AtomicBool) {
+            let hook = {
+                let mut hooks = BEFORE_STOP_SIGNAL.lock().unwrap_or_else(|e| e.into_inner());
+                let at = hooks.iter().position(|(r, _)| r == root);
+                at.map(|i| hooks.remove(i).1)
+            };
+            if let Some(f) = hook {
+                f(event, done);
+            }
         }
     }
 }
@@ -1066,5 +1109,105 @@ mod tests {
         );
         // a torn buffer ends the batch
         assert!(d.decode(&buf[..10]).is_empty());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stop_never_signals_a_handle_given_to_another_object() {
+        // stop() takes the stop event, the watcher thread ends meanwhile (it sees the stop flag
+        // within a second): the handle stop() then signals must still be the watcher's own, not
+        // one closed and handed to another object (another watcher's event, the helper pipe's I/O
+        // event, whose signal would let it free a buffer the kernel still writes into)
+        use crate::monitor::{WatchState, Watcher};
+        use std::sync::atomic::Ordering;
+        use std::time::{Duration, Instant};
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, CompareObjectHandles, DUPLICATE_SAME_ACCESS, DuplicateHandle,
+            GetHandleInformation, HANDLE, WAIT_OBJECT_0,
+        };
+        use windows_sys::Win32::System::Threading::{
+            CreateEventW, GetCurrentProcess, WaitForSingleObject,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let w = RdcwWatcher::new(&root, None);
+        w.start(std::sync::Arc::new(|_| {})).unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        while w.status().state != WatchState::Running {
+            assert!(Instant::now() < end, "never ran");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let made = std::sync::Arc::new(std::sync::Mutex::new(Vec::<usize>::new()));
+        let mine = made.clone();
+        let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ended_seen = ended.clone();
+        let still_its_own = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let own_seen = still_its_own.clone();
+        imp::hooks::on_stop_signal(&root, move |event, done| {
+            let event = event as HANDLE;
+            // a second handle to the stop event, to tell later whether `event` still names it
+            let mut dup: HANDLE = std::ptr::null_mut();
+            // SAFETY: plain calls on handles of this process; `dup` is closed below.
+            let duplicated = unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    event,
+                    GetCurrentProcess(),
+                    &mut dup,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            } != 0;
+            assert!(duplicated);
+            let end = Instant::now() + Duration::from_secs(10);
+            while !done.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            ended_seen.store(done.load(Ordering::SeqCst), Ordering::SeqCst);
+            let mut flags = 0u32;
+            // SAFETY: plain calls; a closed handle value only makes them fail.
+            let own = unsafe {
+                GetHandleInformation(event, &mut flags) != 0
+                    && CompareObjectHandles(event, dup) != 0
+            };
+            own_seen.store(own, Ordering::SeqCst);
+            unsafe { CloseHandle(dup) };
+            // new objects take the handle values that are free now
+            let mut v = mine.lock().unwrap();
+            for _ in 0..64 {
+                // SAFETY: plain call; closed below.
+                let h = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+                assert!(!h.is_null());
+                v.push(h as usize);
+            }
+        });
+        w.stop();
+        assert!(
+            ended.load(Ordering::SeqCst),
+            "the watcher thread did not end"
+        );
+        assert!(
+            still_its_own.load(Ordering::SeqCst),
+            "the stop event was closed while stop() was about to signal it"
+        );
+        let made = made.lock().unwrap().clone();
+        assert_eq!(made.len(), 64, "the hook did not run");
+        // SAFETY: our events.
+        let signalled: Vec<usize> = made
+            .iter()
+            .copied()
+            .filter(|&h| unsafe { WaitForSingleObject(h as HANDLE, 0) } == WAIT_OBJECT_0)
+            .collect();
+        for h in &made {
+            unsafe { CloseHandle(*h as HANDLE) };
+        }
+        assert!(
+            signalled.is_empty(),
+            "stop() signalled another object's event"
+        );
+        assert!(w.finished());
     }
 }

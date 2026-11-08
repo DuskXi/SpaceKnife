@@ -16,7 +16,7 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_IO_PENDING, ERROR_NO_DATA,
     ERROR_OPERATION_ABORTED, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
     GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
-    WAIT_OBJECT_0, WAIT_TIMEOUT,
+    STATUS_PENDING, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows_sys::Win32::Security::Authorization::{
@@ -48,7 +48,7 @@ use windows_sys::Win32::System::Pipes::{
 };
 use windows_sys::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, GetExitCodeProcess, GetProcessId, INFINITE, OpenProcessToken,
-    SetEvent, TerminateProcess, WaitForMultipleObjects, WaitForSingleObject,
+    ResetEvent, SetEvent, TerminateProcess, WaitForMultipleObjects, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{SHELLEXECUTEINFOW, ShellExecuteExW};
 
@@ -164,6 +164,54 @@ impl Drop for Handle {
     fn drop(&mut self) {
         // SAFETY: we own the handle.
         unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Whether the overlapped operation of `ov` is still running (`HasOverlappedIoCompleted`, negated).
+///
+/// The operation's event alone does not prove that: an event can be signalled by anyone holding
+/// its handle value (a stale one included). Read before trusting a signalled event, and before
+/// releasing the OVERLAPPED or the buffer of an operation. Once it reports false, what the
+/// operation wrote is visible to this thread.
+///
+/// # Safety
+/// `ov` points to a live OVERLAPPED.
+pub(crate) unsafe fn io_pending(ov: *const OVERLAPPED) -> bool {
+    // SAFETY: the caller's live OVERLAPPED; the kernel writes `Internal` when the operation ends,
+    // hence the volatile read.
+    let status = unsafe { std::ptr::read_volatile(std::ptr::addr_of!((*ov).Internal)) };
+    if status == STATUS_PENDING as usize {
+        return true;
+    }
+    std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
+    false
+}
+
+/// Wait up to `timeout` for the overlapped operation of `ov`, whose event is `event`, to end; a
+/// signal that does not come from its completion is taken back and waited past. True once it has
+/// ended.
+///
+/// # Safety
+/// `ov` points to a live OVERLAPPED whose operation signals `event`, a valid event handle.
+pub(crate) unsafe fn wait_io(ov: *const OVERLAPPED, event: HANDLE, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        // SAFETY: the caller's live OVERLAPPED.
+        if !unsafe { io_pending(ov) } {
+            return true;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return false;
+        }
+        // SAFETY: the operation's event and OVERLAPPED, alive while it runs.
+        if unsafe { WaitForSingleObject(event, millis(Some(left))) } == WAIT_OBJECT_0
+            && unsafe { io_pending(ov) }
+        {
+            // signalled, but not by the operation: reset, then look again (it may have ended
+            // between the two reads, setting the event we just reset)
+            unsafe { ResetEvent(event) };
+        }
     }
 }
 
@@ -609,14 +657,32 @@ impl Pipe {
                 }
             }
             let waits = [ev.0, self.cancel];
-            // SAFETY: valid handles.
-            let outcome = unsafe { WaitForMultipleObjects(2, waits.as_ptr(), 0, millis(timeout)) };
+            let deadline = timeout.map(|t| std::time::Instant::now() + t);
+            let outcome = loop {
+                let left = deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+                // SAFETY: valid handles.
+                let r = unsafe { WaitForMultipleObjects(2, waits.as_ptr(), 0, millis(left)) };
+                // SAFETY (io_pending): `ov` lives on this frame until the operation ends.
+                if r == WAIT_OBJECT_0 && unsafe { io_pending(&ov) } {
+                    // signalled, but not by the completion: take the signal back and wait on
+                    // (unless the operation ended in between)
+                    unsafe { ResetEvent(ev.0) };
+                    if unsafe { io_pending(&ov) } {
+                        continue;
+                    }
+                }
+                break r;
+            };
             if outcome != WAIT_OBJECT_0 {
                 unsafe { CancelIoEx(handle, &ov) };
             }
+            // the OVERLAPPED and the buffer outlive the operation: wait until it has really ended
+            // (GetOverlappedResult's own wait trusts the event, which proves nothing)
+            // SAFETY: our OVERLAPPED and its event.
+            while !unsafe { wait_io(&ov, ev.0, Duration::from_secs(3600)) } {}
             let mut count = 0u32;
-            // SAFETY: waits for the operation to finish (bWait = TRUE): the OVERLAPPED is released after.
-            if unsafe { GetOverlappedResult(handle, &ov, &mut count, 1) } != 0 {
+            // SAFETY: the operation has ended.
+            if unsafe { GetOverlappedResult(handle, &ov, &mut count, 0) } != 0 {
                 return Ok(count as usize); // completed (possibly racing the cancel): keep the data
             }
             let err = last_error();

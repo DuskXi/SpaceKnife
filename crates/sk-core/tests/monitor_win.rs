@@ -366,3 +366,92 @@ fn buffer_sizes_and_factory() {
     made.add_dirs(vec![tmp.path().to_path_buf()], Some(vec![0]), 0);
     made.stop(); // never started: fine
 }
+
+#[test]
+fn stopping_watchers_that_end_by_themselves_leaves_other_io_intact() {
+    // stress for the stop / thread-exit race: each watcher's folder is deleted (its thread ends by
+    // itself) while stop() runs. stop() must only ever signal its own event; meanwhile frames go
+    // back and forth over the helper's named pipe, whose I/O waits on events too: every frame
+    // arrives whole and every watcher ends
+    use sk_core::helper::messages::{KIND_BINARY, frame_header};
+    use sk_core::helper::transport::{Listener, connect};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    const THREADS: usize = 4;
+    const ROUNDS: usize = 150;
+    let tmp = tempfile::tempdir().unwrap();
+    let done = Arc::new(AtomicBool::new(false));
+
+    let mut listener = Listener::new().unwrap();
+    let address = listener.address().to_owned();
+    let echo = std::thread::spawn(move || {
+        let chan = connect(&address, Duration::from_secs(10)).unwrap();
+        let t = Some(Duration::from_secs(20));
+        while let Ok((kind, body)) = chan.read_frame(t, t, 1 << 20) {
+            chan.send(&[&frame_header(kind, body.len()), &body], t)
+                .unwrap();
+        }
+    });
+    let mut chan = None;
+    for _ in 0..100 {
+        match listener.accept(Duration::from_millis(100)) {
+            Ok(c) => {
+                chan = Some(c);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
+            Err(e) => panic!("{e}"),
+        }
+    }
+    let chan = chan.expect("the echo end connected");
+    let frames = Arc::new(AtomicUsize::new(0));
+    let pipe = {
+        let (done, frames) = (done.clone(), frames.clone());
+        std::thread::spawn(move || {
+            let t = Some(Duration::from_secs(20));
+            let mut n = 0u32;
+            while !done.load(Ordering::SeqCst) {
+                n += 1;
+                let body: Vec<u8> = (0..4096u32).map(|i| (i ^ n) as u8).collect();
+                chan.send(&[&frame_header(KIND_BINARY, body.len()), &body], t)
+                    .unwrap();
+                let (kind, back) = chan.read_frame(t, t, 1 << 20).unwrap();
+                assert_eq!(kind, KIND_BINARY);
+                assert!(back == body, "frame {n} came back damaged");
+                frames.fetch_add(1, Ordering::SeqCst);
+            }
+            chan.close();
+        })
+    };
+
+    let workers: Vec<_> = (0..THREADS)
+        .map(|t| {
+            let base = tmp.path().join(format!("w{t}"));
+            std::fs::create_dir(&base).unwrap();
+            std::thread::spawn(move || {
+                for i in 0..ROUNDS {
+                    let root = base.join(format!("r{i}"));
+                    std::fs::create_dir(&root).unwrap();
+                    let w = RdcwWatcher::new(&root, Some(4096));
+                    w.start(Arc::new(|_| {})).unwrap();
+                    wait_until(|| w.status().state != WatchState::Starting);
+                    // the thread ends by itself (its folder is gone) while stop() runs
+                    let _ = std::fs::remove_dir(&root);
+                    if i % 2 == 0 {
+                        std::thread::yield_now();
+                    }
+                    w.stop();
+                    wait_until(|| w.finished());
+                    assert_ne!(w.status().state, WatchState::Running);
+                }
+            })
+        })
+        .collect();
+    for w in workers {
+        w.join().unwrap();
+    }
+    done.store(true, Ordering::SeqCst);
+    pipe.join().unwrap();
+    echo.join().unwrap();
+    assert!(frames.load(Ordering::SeqCst) > 0);
+}
