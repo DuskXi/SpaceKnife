@@ -579,7 +579,9 @@ async function packaged(kind) {
   const { server, feed } = await serveFeed(newPath);
   try {
     const ready = join(work, "ready.json");
-    const app = start(bin, [], appEnv(feed, ready));
+    // the rpm is the Electron shell: as root (the container) Chromium wants --no-sandbox
+    const argv = kind === "rpm" && process.getuid?.() === 0 ? ["--no-sandbox"] : [];
+    const app = start(bin, argv, appEnv(feed, ready));
     // the setting was not changed through 0.3.4 here: the package leg checks the package, the
     // in-app legs the setting
     const info = await until(`${NEW_VERSION} to start`, () => {
