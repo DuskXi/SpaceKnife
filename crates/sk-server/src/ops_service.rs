@@ -44,15 +44,22 @@ pub const KEEP_TASKS: usize = 8;
 /// After file changes, the basket is checked again once this quiet.
 pub const REFRESH_QUIET: Duration = Duration::from_secs(1);
 
+/// A test hook run while `basket.execute` registers an operation.
+#[doc(hidden)]
+pub type RegisteringHook = Arc<dyn Fn() + Send + Sync>;
+/// A test hook run as each item of an operation becomes final: (task id, items done).
+#[doc(hidden)]
+pub type ProgressHook = Arc<dyn Fn(&str, usize) + Send + Sync>;
+
 /// Test hooks of one backend's operations ([`OpsService::set_test_hooks`]).
 #[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct TestHooks {
     /// runs while `basket.execute` registers an operation, right after its busy check (tests
     /// widen that moment)
-    pub registering: Option<Arc<dyn Fn() + Send + Sync>>,
-    /// runs as each item of an operation becomes final: (task id, items done)
-    pub progress: Option<Arc<dyn Fn(&str, usize) + Send + Sync>>,
+    pub registering: Option<RegisteringHook>,
+    /// runs as each item of an operation becomes final
+    pub progress: Option<ProgressHook>,
 }
 
 mod text {
@@ -351,38 +358,26 @@ impl OpsService {
             scan_id = host.scan_id.clone();
         }
         let mut refused: Vec<Refused> = Vec::new();
-        let handle = match server.scans.lookup(&scan_id) {
-            Some(h) => h,
-            None if server.compares.view_target(&scan_id).is_some() => {
-                // TODO(compares): map change-tree rows to the live tree (`live_node`); until then a
-                // compare view's blocks are refused
-                for n in &nodes {
-                    let path = server
-                        .compares
-                        .tree_node(&scan_id, *n as NodeId)
-                        .and_then(|r| r.ok())
-                        .map_or_else(|| n.to_string(), |r| r.path);
-                    refused.push(Refused {
-                        path,
-                        reason: tr!(text::NOT_ON_DISK),
-                    });
-                }
-                return self
-                    .added(
-                        server,
-                        sk_core::ops::AddResult {
-                            refused,
-                            ..Default::default()
-                        },
-                    )
-                    .await;
+        if server.scans.lookup(&scan_id).is_none()
+            && server.compares.view_target(&scan_id).is_some()
+        {
+            // a compare view's rows: the same items in the tab's live tree (a group: its folder
+            // and its members, each)
+            let (target, live, more) = Self::live(server, &scan_id, &nodes);
+            refused.extend(more);
+            if let Some(m) = members.take() {
+                let (_, live_members, more) = Self::live(server, &scan_id, &m);
+                refused.extend(more);
+                members = Some(live_members);
             }
-            None => {
-                return Err(RpcError::new(
-                    ErrorCode::UnknownScan,
-                    format!("unknown scan: {scan_id}"),
-                ));
-            }
+            scan_id = target;
+            nodes = live;
+        }
+        let Some(handle) = server.scans.lookup(&scan_id) else {
+            return Err(RpcError::new(
+                ErrorCode::UnknownScan,
+                format!("unknown scan: {scan_id}"),
+            ));
         };
         let mut result = sk_core::ops::AddResult::default();
         if !nodes.is_empty() && members.as_ref().is_none_or(|m| !m.is_empty()) {
@@ -399,6 +394,40 @@ impl OpsService {
         let out = self.added(server, result).await;
         self.check_locks(server);
         out
+    }
+
+    /// Rows of the comparison `compare_id`'s change tree → the same items in its tab's live tree
+    /// (the scan id, the nodes found) and the rows that are not on disk now, refused.
+    fn live(server: &Server, compare_id: &str, nodes: &[i64]) -> (String, Vec<i64>, Vec<Refused>) {
+        let mut target = server
+            .compares
+            .lookup(compare_id)
+            .map(|h| h.scan_id.clone())
+            .unwrap_or_default();
+        let (mut live, mut refused) = (Vec::new(), Vec::new());
+        for &n in nodes {
+            let found = u32::try_from(n)
+                .ok()
+                .and_then(|n| server.compares.live_node(compare_id, n as NodeId));
+            match found {
+                Some((scan, node)) => {
+                    target = scan;
+                    live.push(i64::from(node));
+                }
+                None => {
+                    let path = u32::try_from(n)
+                        .ok()
+                        .and_then(|n| server.compares.tree_node(compare_id, n as NodeId))
+                        .and_then(|r| r.ok())
+                        .map_or_else(|| n.to_string(), |r| r.path);
+                    refused.push(Refused {
+                        path,
+                        reason: tr!(text::NOT_ON_DISK),
+                    });
+                }
+            }
+        }
+        (target, live, refused)
     }
 
     async fn added(

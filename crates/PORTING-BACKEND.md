@@ -58,14 +58,12 @@ sk-server / the Tauri shell; what is still open:
 - **Untested platforms**: the Linux and macOS code paths (sk-native's POSIX lister, `monitor::linux` /
   `monitor::mac`, the freedesktop / macOS trash, glibc `memory::tune_allocator` / `trim`, privacy and
   volume probes) are cfg-gated and written carefully but compiled and tested on Windows only here.
-- **Compare views in the basket**: blocks of a compare view are refused until change-tree rows map to
-  the live tree (`TODO(compares)` in `sk-server/src/ops_service.rs`).
 - **`ops::names`** is still the ops module's own copy of the scan worker's name checks
   (`TODO(scan)` in `ops/names.rs`, `ops/win.rs`).
 - **Names that are not Unicode in the basket**: items keep their real path (`BasketItem::os_path` /
-  `os_members`) and are found and executed by it, but they are compared by their shown (lossy)
-  path: two siblings whose names differ only in unpaired surrogates / invalid bytes count as one
-  item, and the lock check (Restart Manager, by shown path) does not name who holds such a file.
+  `os_members`), are found and executed by it, and two siblings whose shown names are the same are
+  two items (their keys keep such names exactly); the lock check (Restart Manager, by shown path)
+  does not name who holds such a file.
 
 ## Wave 3: sk-server (server task + cli task)
 
