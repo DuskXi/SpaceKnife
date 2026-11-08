@@ -216,17 +216,61 @@ mod tests {
                 ])
                 .output()
                 .unwrap();
-            let text = String::from_utf8_lossy(&out.stdout).into_owned();
-            let line = text
-                .lines()
-                .find(|l| l.trim_start().starts_with(name))
-                .unwrap_or("");
-            line.split_whitespace().last().unwrap_or("").to_owned()
+            reg_value(&String::from_utf8_lossy(&out.stdout), name)
         };
         let major = value("CurrentMajorVersionNumber");
         let major = u32::from_str_radix(major.trim_start_matches("0x"), 16).unwrap();
         let build = value("CurrentBuildNumber").parse().unwrap();
-        (major, build, value("InstallationType") != "Server")
+        (major, build, is_client(&value("InstallationType")))
+    }
+
+    /// The value `name` in what `reg query … /v name` printed (`    name    REG_SZ    value`): all
+    /// of it, blanks included ("Server Core").
+    fn reg_value(text: &str, name: &str) -> String {
+        let Some(rest) = text
+            .lines()
+            .find_map(|l| l.trim_start().strip_prefix(name))
+            .filter(|rest| rest.starts_with(char::is_whitespace))
+        else {
+            return String::new();
+        };
+        let rest = rest.trim_start();
+        // the type (REG_SZ, REG_DWORD …), then the value
+        let value = rest.split_once(char::is_whitespace).map_or("", |(_, v)| v);
+        value.trim().to_owned()
+    }
+
+    /// Whether an `InstallationType` is a workstation's (wProductType VER_NT_WORKSTATION, the
+    /// table Python names Windows 10 / 11 from): "Client"; "Server", "Server Core" and
+    /// "Nano Server" are servers.
+    fn is_client(installation_type: &str) -> bool {
+        !installation_type.contains("Server")
+    }
+
+    #[test]
+    fn the_registry_oracle_reads_every_installation_type() {
+        let reg = |value: &str| {
+            format!(
+                "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\r\n    InstallationType    REG_SZ    {value}\r\n\r\n"
+            )
+        };
+        for (installation, client) in [
+            ("Client", true),
+            ("Server", false),
+            ("Server Core", false),
+            ("Nano Server", false),
+        ] {
+            let text = reg(installation);
+            assert_eq!(reg_value(&text, "InstallationType"), installation);
+            assert_eq!(
+                is_client(&reg_value(&text, "InstallationType")),
+                client,
+                "{installation}"
+            );
+        }
+        let numbers = "    CurrentMajorVersionNumber    REG_DWORD    0xa\r\n    CurrentBuildNumber    REG_SZ    26300\r\n";
+        assert_eq!(reg_value(numbers, "CurrentMajorVersionNumber"), "0xa");
+        assert_eq!(reg_value(numbers, "CurrentBuildNumber"), "26300");
     }
 
     /// `platform.release()` of 0.3.4 (Python 3.12) on this computer, whatever started it (a
