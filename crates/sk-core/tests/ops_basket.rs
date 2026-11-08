@@ -425,6 +425,12 @@ fn targets_expand_groups() {
             (fid.clone(), path_of("docs/b.txt"), KB4),
         ]
     );
+    // a folder knows the longest path below it as scanned (Windows: the trash checks it)
+    let did = add(&b, &store, "s", &[node(&store, "links")]).added[0].clone();
+    let links = b.targets(Some(std::slice::from_ref(&did))).remove(0);
+    assert_eq!(links.longest, cfg!(windows).then_some("\\x.dat".len()));
+    assert!(targets.iter().all(|t| t.longest.is_none() || t.item == fid));
+    b.remove(std::slice::from_ref(&did));
     let only: Vec<String> = b
         .targets(Some(&[fid]))
         .into_iter()

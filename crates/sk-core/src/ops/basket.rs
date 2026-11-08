@@ -150,6 +150,9 @@ pub struct Target {
     pub root: String,
     /// the key the basket covers it by: what [`Basket::apply_results`] matches results to
     pub key: String,
+    /// a folder (Windows): the longest path below it as last scanned, in UTF-16 units after
+    /// its own (None: not known, e.g. a group's member)
+    pub longest: Option<usize>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -169,6 +172,8 @@ struct Measure {
     link_alloc: Vec<i64>,
     nlink: Vec<i64>,
     member_sizes: Vec<i64>,
+    /// one item (Windows): the longest path below it, in UTF-16 units after its own
+    longest: Option<usize>,
 }
 
 impl Measure {
@@ -183,6 +188,7 @@ impl Measure {
             link_alloc: cat(&a.link_alloc, &b.link_alloc),
             nlink: cat(&a.nlink, &b.nlink),
             member_sizes: cat(&a.member_sizes, &b.member_sizes),
+            longest: None,
         }
     }
 }
@@ -415,6 +421,28 @@ fn fingerprint(nodes: &Nodes, ids: &[NodeId]) -> [u8; 16] {
     h.finalize()[..16].try_into().unwrap()
 }
 
+/// The longest path below `top` (its subtree `below`, parents before children: breadth first),
+/// in UTF-16 units after `top`'s own path.
+fn longest_below(nodes: &Nodes, top: NodeId, below: &[NodeId]) -> usize {
+    let mut rel: HashMap<NodeId, usize> = HashMap::from([(top, 0)]);
+    let mut best = 0;
+    for &n in below {
+        let parent = nodes.parent(n);
+        let Some(&at) = (parent >= 0)
+            .then(|| rel.get(&(parent as NodeId)))
+            .flatten()
+        else {
+            continue;
+        };
+        let len = at + 1 + nodes.name(n).encode_utf16().count();
+        if nodes.is_dir(n) {
+            rel.insert(n, len);
+        }
+        best = best.max(len);
+    }
+    best
+}
+
 /// Size, counts and freeable bytes of `ids` (each with its subtree), §2.3. `members`: the
 /// nodes are a group's members, so a member folder counts as a folder itself.
 fn measure(nodes: &Nodes, ids: &[NodeId], members: bool) -> Measure {
@@ -423,7 +451,11 @@ fn measure(nodes: &Nodes, ids: &[NodeId], members: bool) -> Measure {
     for &node in ids {
         let dup = nodes.flags(node).intersects(Flags::HARDLINK_DUP);
         if nodes.is_dir(node) {
-            covered.extend(subtree_ids(nodes, node).unwrap_or_default());
+            let below = subtree_ids(nodes, node).unwrap_or_default();
+            if cfg!(windows) && !members && ids.len() == 1 {
+                out.longest = Some(longest_below(nodes, node, &below));
+            }
+            covered.extend(below);
             let (size, alloc) = (nodes.tot_size(node), nodes.tot_alloc(node));
             out.files += nodes.tot_files(node) as i64;
             out.dirs += nodes.tot_dirs(node) as i64 + members as i64;
@@ -431,6 +463,9 @@ fn measure(nodes: &Nodes, ids: &[NodeId], members: bool) -> Measure {
             out.size += size;
             out.base += alloc;
             continue;
+        }
+        if !members && ids.len() == 1 {
+            out.longest = Some(0);
         }
         covered.push(node);
         let size = nodes.size(node);
@@ -589,6 +624,7 @@ impl Basket {
                         size: s,
                         root: e.item.root.clone(),
                         key: k.clone(),
+                        longest: None,
                     });
                 }
             } else {
@@ -599,6 +635,7 @@ impl Basket {
                     size: e.item.size.max(e.measure.base).max(e.item.alloc),
                     root: e.item.root.clone(),
                     key: e.key.clone(),
+                    longest: e.measure.longest,
                 });
             }
         }

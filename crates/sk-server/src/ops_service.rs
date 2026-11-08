@@ -99,6 +99,8 @@ pub struct OpRun {
     /// as the file system names them (results and the maps below: as shown)
     paths: Vec<std::path::PathBuf>,
     sizes: HashMap<String, i64>,
+    /// folder path -> the longest path below it as last scanned (trash: no walk when it fits)
+    longest: HashMap<String, usize>,
     /// item path -> freeable bytes (what a success frees)
     alloc: HashMap<String, i64>,
     /// path -> scan id (refresh the tree afterwards)
@@ -588,6 +590,10 @@ impl OpsService {
             total: targets.len() as i64,
             paths: targets.iter().map(|t| t.os_path.clone()).collect(),
             sizes: targets.iter().map(|t| (t.path.clone(), t.size)).collect(),
+            longest: targets
+                .iter()
+                .filter_map(|t| t.longest.map(|l| (t.path.clone(), l)))
+                .collect(),
             alloc,
             scans,
             roots: targets
@@ -677,6 +683,7 @@ impl OpsService {
                 progress: Some(&mut progress),
                 cancel: Some(&cancel),
                 sizes: (r.mode == OpMode::Trash).then_some(&r.sizes),
+                longest: (r.mode == OpMode::Trash).then_some(&r.longest),
                 roots: Some(&r.roots),
                 ..OpOptions::default()
             };

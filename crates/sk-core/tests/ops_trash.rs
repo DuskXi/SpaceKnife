@@ -441,6 +441,57 @@ mod windows {
         std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
     }
 
+    /// A folder whose scanned size is far below the bin's capacity is not measured again, but its
+    /// paths still have to fit the bin: without the longest path inside as scanned, it is walked
+    /// (the shortcut used to skip that check too, leaving it to the engine guard); with it, that
+    /// decides without a walk.
+    #[test]
+    fn a_trusted_size_still_checks_path_lengths() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let top = dir.path().join("deep");
+        let leaf = deep_tree(&top);
+        let sizes = HashMap::from([(s(&top), 1i64)]); // far below a quarter of any bin
+        let r = move_to_trash(
+            &[s(&top)],
+            OpOptions {
+                sizes: Some(&sizes),
+                ..OpOptions::default()
+            },
+        )
+        .remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(
+            (r.code, r.message.clone()),
+            (OpCode::NoTrash, text("too_long")),
+            "{r:?}"
+        );
+        assert!(Path::new(&format!("{LP}{}", s(&leaf))).exists());
+        std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
+        // the scan's longest path decides without a walk: here it says too long
+        let plain = dir.path().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        std::fs::write(plain.join("f.txt"), b"f").unwrap();
+        let sizes = HashMap::from([(s(&plain), 1i64)]);
+        let longest = HashMap::from([(s(&plain), 400usize)]);
+        let r = move_to_trash(
+            &[s(&plain)],
+            OpOptions {
+                sizes: Some(&sizes),
+                longest: Some(&longest),
+                ..OpOptions::default()
+            },
+        )
+        .remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(
+            (r.code, r.message.clone()),
+            (OpCode::NoTrash, text("too_long")),
+            "{r:?}"
+        );
+        assert!(plain.join("f.txt").exists());
+    }
+
     /// With the checks out of the way, the shell itself may want to destroy a tree that cannot
     /// fit the bin (paths too long): the sink refuses, nothing is lost, the next item still goes.
     /// (Newer Windows builds recycle such trees fine: then it must come back whole.)

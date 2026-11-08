@@ -350,8 +350,12 @@ pub struct OpOptions<'a> {
     pub progress: Option<ProgressFn<'a>>,
     pub cancel: Option<CancelFn<'a>>,
     /// bytes per path (keyed by the same strings) as last scanned, e.g. the basket's targets;
-    /// folders well below the recycle bin's capacity are then not measured again
+    /// folders well below the recycle bin's capacity are then not measured again when
+    /// `longest` tells their paths fit too
     pub sizes: Option<&'a HashMap<String, i64>>,
+    /// per folder (same keys), the longest path below it as last scanned, in UTF-16 units after
+    /// the folder's own path (Windows: whether its paths fit the bin without a walk)
+    pub longest: Option<&'a HashMap<String, usize>>,
     /// skip items held open
     pub check_locks: bool,
     /// the scan root of each path (same keys); a path whose names below it open an entry
@@ -365,6 +369,7 @@ impl Default for OpOptions<'_> {
             progress: None,
             cancel: None,
             sizes: None,
+            longest: None,
             check_locks: true,
             roots: None,
         }
@@ -477,6 +482,7 @@ pub fn trash_status(path: &str, usage: bool) -> TrashStatus {
 pub fn move_to_trash<P: AsRef<Path>>(paths: &[P], opts: OpOptions<'_>) -> Vec<OpResult> {
     let empty_roots = HashMap::new();
     let empty_sizes = HashMap::new();
+    let empty_longest = HashMap::new();
     let cancel = opts.cancel;
     let mut run = Run::new(paths, opts.progress);
     for (i, r) in precheck(
@@ -491,10 +497,21 @@ pub fn move_to_trash<P: AsRef<Path>>(paths: &[P], opts: OpOptions<'_>) -> Vec<Op
         .filter(|&i| run.results[i].is_none())
         .collect();
     #[cfg(windows)]
-    win_trash(&mut run, &todo, opts.sizes.unwrap_or(&empty_sizes), cancel);
+    win_trash(
+        &mut run,
+        &todo,
+        (
+            opts.sizes.unwrap_or(&empty_sizes),
+            opts.longest.unwrap_or(&empty_longest),
+        ),
+        cancel,
+    );
     #[cfg(not(windows))]
     {
-        let _ = opts.sizes.unwrap_or(&empty_sizes);
+        let _ = (
+            opts.sizes.unwrap_or(&empty_sizes),
+            opts.longest.unwrap_or(&empty_longest),
+        );
         for i in todo {
             if cancelled(cancel) {
                 break;
@@ -965,13 +982,30 @@ fn match_unmatched(
     found
 }
 
+/// Whether a folder's paths, `below` units longer than its own at most, would pass MAX_PATH
+/// where they are or once it is renamed to `$R??????` in the bin (what [`measure`] finds by
+/// walking).
+#[cfg(windows)]
+fn too_long_inside(path: &Path, below: usize, bin_folder: &str) -> bool {
+    let max = seams::max_path();
+    let base = units(&path.to_string_lossy());
+    let ext = path
+        .extension()
+        .map(|e| units(&e.to_string_lossy()) + 1)
+        .unwrap_or(0);
+    let in_bin = units(bin_folder) + 1 + 8 + ext;
+    base + below > max || in_bin + below > max
+}
+
+/// `hints`: the sizes and longest paths of the options.
 #[cfg(windows)]
 fn win_trash(
     run: &mut Run<'_>,
     todo: &[usize],
-    sizes: &HashMap<String, i64>,
+    hints: (&HashMap<String, i64>, &HashMap<String, usize>),
     cancel: Option<CancelFn<'_>>,
 ) {
+    let (sizes, longest) = hints;
     use super::fmt_size;
     use super::win;
     let max = seams::max_path();
@@ -1006,12 +1040,17 @@ fn win_trash(
             continue;
         }
         let hint = sizes.get(&path).copied();
+        let below = longest.get(&path).copied();
         let measured = (|| -> io::Result<(u64, bool)> {
             let meta = std::fs::symlink_metadata(&os)?;
             let is_dir = meta.is_dir() && !is_link_like(&meta);
-            match hint {
-                Some(h) if is_dir && (h as f64) <= bin.capacity as f64 * TRUST_SHARE => {
-                    Ok((h.max(0) as u64, false)) // far from the limit; the engine guard covers the rest
+            match (hint, below) {
+                // far from the limit, and its paths fit as scanned: not walked again (the engine
+                // guard covers what changed since)
+                (Some(h), Some(below))
+                    if is_dir && (h as f64) <= bin.capacity as f64 * TRUST_SHARE =>
+                {
+                    Ok((h.max(0) as u64, too_long_inside(&os, below, &bin.folder)))
                 }
                 _ => measure(&os, limit, &bin.folder),
             }
