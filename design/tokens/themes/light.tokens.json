@@ -1,5 +1,5 @@
 {
-  "$description": "A2「石墨 + 沉浸的对比度」的浅色模式（不是已否决的 B「纸本」）：版式、几何和类别色相不变，只换颜色。外框表面保持暗色的次序和步距（sunken < window < chrome < panel < overlay < raised，raised 是白色），线、悬停、文字、强调色和状态色往对比方向走（浅色里变暗）；可视化以底色为一极，绕白底镜像。覆盖 design/tokens 里暗色基础令牌的颜色和投影，路径和 $type 不变；每个不是别名的颜色令牌都写一遍（与暗色同值的也写），新加颜色令牌时要同时给出浅色值（tools/tests/test_gen_design.py 检查）。别名在合并之后解析，所以 visual.center.* 不用写。",
+  "$description": "A2「石墨 + 沉浸的对比度」的浅色模式（不是已否决的 B「纸本」）：版式、几何和类别色相不变，只换颜色。外框表面保持暗色的次序和步距（sunken < window < chrome < panel < overlay < raised，raised 是白色），线、悬停、文字、强调色和状态色往对比方向走（浅色里变暗）；可视化以底色为一极，绕白底镜像。覆盖 design/tokens 里暗色基础令牌的颜色和投影，路径和 $type 不变；每个不是别名的颜色令牌都写一遍（与暗色同值的也写），新加颜色令牌时要同时给出浅色值（tools/tests/gen_design.test.mjs 检查）。别名在合并之后解析，所以 visual.center.* 不用写。",
   "color": {
     "$type": "color",
     "bg": {

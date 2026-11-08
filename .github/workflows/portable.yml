@@ -1,17 +1,17 @@
 name: Portable build
 
-# The portable archives (docs/packaging.md): the unpacked app plus a data/ folder that keeps the
-# app's data next to it, a zip on Windows and a tar.gz on Linux, for x64 and arm64 (each on a runner
-# of its architecture: PyInstaller freezes the interpreter it runs on). Each archive is unpacked again and
-# smoke-tested in portable mode; the archives and their checksums go to the run's artifacts, and the
-# Release workflow publishes them (release.yml). Started by hand (Actions › Portable build › Run workflow),
-# and on dev whenever the packaging changes, so it is checked before it reaches main.
-# With "installers" (by hand, for a release) the same run also builds the Windows installer and the
-# Linux deb / rpm / AppImage from the same commit, with their own checksums (x64 only: the ARM jobs
-# make the portable archives alone).
-# Every run also tests 「无缝更新」 end to end (packaging/update_e2e.py): the portable copy swaps its
-# files, and on Windows the installer upgrades from the newest published release, updates from inside
-# the app and uninstalls cleanly. The Windows job therefore always builds the installer.
+# The portable archives (docs/packaging.md): the program, spaceknife-cli, the interface for headless
+# mode and a data/ folder that keeps the app's data next to it, a zip on Windows and a tar.gz on
+# Linux, for x64 and arm64, each built on a runner of its architecture (`pnpm tauri build
+# --no-bundle`, then apps/desktop `pnpm bundle:portable`). Each archive is unpacked again and
+# smoke-tested in portable mode and in headless mode, and its 「无缝更新」 is tested end to end
+# (packaging/update-e2e.mjs); the archives and their checksums go to the run's artifacts, and the
+# Release workflow publishes them (release.yml). Started by hand (Actions › Portable build › Run
+# workflow), and on dev whenever the packaging changes, so it is checked before it reaches main.
+# With "installers" (by hand, for a release) the same run also builds Tauri's Windows installer
+# (NSIS) and the Linux AppImage / deb / rpm from the same commit (`pnpm bundle`), with their own
+# checksums (x64 only: the ARM jobs make the portable archives alone); the Windows installer is
+# installed, run and uninstalled (packaging/nsis-e2e.mjs) and the AppImage is run.
 # The Release workflow (release.yml) calls it for a release: installers on, the tag's commit, and
 # a build provenance attestation for every file (actions/attest-build-provenance).
 on:
@@ -35,16 +35,16 @@ on:
         type: boolean
         default: false
   push:
-    branches: [dev]
+    branches: [dev, dev-rust]
     paths:
       - .github/workflows/portable.yml
-      - tools/build_package.py
       - packaging/**
-      - apps/electron/electron-builder.yml
-      - apps/electron/src/main/portable.ts
-      - apps/electron/src/main/update.ts
-      - packages/backend/src/spaceknife/update.py
-      - apps/electron/build/installer.nsh
+      - apps/desktop/scripts/**
+      - apps/desktop/src-tauri/tauri*.json
+      - apps/desktop/src-tauri/src/install.rs
+      - apps/desktop/src-tauri/src/portable.rs
+      - apps/desktop/src-tauri/src/update.rs
+      - crates/sk-core/src/update/**
 
 permissions:
   contents: read
@@ -53,30 +53,30 @@ concurrency:
   group: portable-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
 jobs:
   portable:
     name: Portable · ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: win-x64
             runner: windows-latest
-            exe: SpaceKnife.exe
             installer: true # the installers are published for x64 only
           - target: win-arm64
             runner: windows-11-arm
-            exe: SpaceKnife.exe
             installer: false
           - target: linux-x64
-            runner: ubuntu-22.04 # glibc 2.35 build host; the bundle needs at most 2.34 (checked)
-            exe: spaceknife
+            runner: ubuntu-22.04 # glibc 2.35 build host; the programs may need at most 2.34 (checked)
             installer: true
           - target: linux-arm64
             runner: ubuntu-22.04-arm # glibc 2.35 here too
-            exe: spaceknife
             installer: false
     permissions:
       contents: read
@@ -90,22 +90,17 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
-        with:
-          enable-cache: true
-
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - name: Set up Node 22
+      - name: Set up Node 24
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
-          cache-dependency-path: apps/electron/pnpm-lock.yaml
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
 
       # the Windows on ARM runner comes without Rust: rustup for its architecture first
       - name: Set up Rust
@@ -122,146 +117,144 @@ jobs:
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           fi
 
-      - name: Install Python 3.12 and the build tools
-        run: |
-          uv python install 3.12
-          uv sync --locked --group native --group package
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bundle-${{ matrix.target }}
 
-      - name: Install the Electron app's dependencies
-        working-directory: apps/electron
-        run: pnpm install --frozen-lockfile
-
-      - name: Install rpmbuild and zsyncmake (the rpm and zsync packages)
-        if: inputs.installers && matrix.installer && runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y rpm zsync
-
-      # what Electron needs to start, which the x64 runner image has and the ARM one may not
-      - name: Install Electron's libraries
-        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+      # Tauri's build libraries, xvfb for the window without a display, and what the AppImage
+      # bundler (linuxdeploy) runs
+      - name: Install Tauri's libraries
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libnss3 libgbm1 libasound2 libgtk-3-0 libxss1 libatk-bridge2.0-0 libdrm2 libxkbcommon0
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xvfb file
+
+      - name: Install the interface's dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      # the programs only, no installer (beforeBuildCommand: the interface, spaceknife-cli, the licences)
+      - name: Build the programs
+        if: ${{ !(inputs.installers && matrix.installer) }}
+        working-directory: apps/desktop
+        run: pnpm tauri build --config src-tauri/tauri.bundle.json --no-bundle
+
+      - name: Build the programs and the installers
+        if: ${{ inputs.installers && matrix.installer }}
+        working-directory: apps/desktop
+        run: pnpm bundle
 
       - name: Build the portable archive
-        if: ${{ !(matrix.installer && (inputs.installers || runner.os == 'Windows')) }}
-        run: uv run python tools/build_package.py --portable --no-installers
+        working-directory: apps/desktop
+        run: pnpm bundle:portable
 
-      # on Windows x64 always: the update test below installs it
-      - name: Build the portable archive and the installers
-        if: ${{ matrix.installer && (inputs.installers || runner.os == 'Windows') }}
-        run: uv run python tools/build_package.py --portable
+      - name: The programs need at most glibc 2.34
+        if: runner.os == 'Linux'
+        run: |
+          for bin in target/release/spaceknife target/release/spaceknife-cli; do
+            need=$(objdump -T "$bin" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+            echo "$bin: glibc $need"
+            [ "$(printf '%s\n2.34\n' "$need" | sort -V | tail -1)" = 2.34 ] || { echo "::error::$bin needs glibc $need"; exit 1; }
+          done
 
       - name: Unpack it again
         run: |
-          mkdir -p dist/portable-test
+          shopt -s nullglob
+          archive=(target/portable/*-portable.zip target/portable/*-portable.tar.gz)
+          echo "archive=${archive[0]}" >> "$GITHUB_ENV"
+          mkdir -p target/portable-test
           if [ "$RUNNER_OS" = Windows ]; then
-            uv run python -m zipfile -e dist/electron/*-portable.zip dist/portable-test
+            "$SYSTEMROOT/System32/tar.exe" -xf "${archive[0]}" -C target/portable-test
           else
-            tar -xzf dist/electron/*-portable.tar.gz -C dist/portable-test
+            tar -xzf "${archive[0]}" -C target/portable-test
           fi
-          ls dist/portable-test/*
+          ls target/portable-test/*
 
       - name: Smoke test in portable mode
         run: |
-          app=$(ls -d dist/portable-test/*/"${{ matrix.exe }}")
+          # a glob, not `ls` of both names: the missing one would fail the step (pipefail)
+          shopt -s nullglob
+          app=(target/portable-test/*/spaceknife.exe target/portable-test/*/spaceknife)
+          app=${app[0]:?the program is missing from the archive}
           if [ "$RUNNER_OS" = Linux ]; then
-            if ! command -v xvfb-run >/dev/null; then
-              sudo apt-get update && sudo apt-get install -y xvfb
-            fi
-            xvfb-run -a uv run python packaging/smoke_app.py --portable "$app"
+            xvfb-run -a node packaging/smoke-app.mjs --portable "$app"
           else
-            uv run python packaging/smoke_app.py --portable "$app"
+            node packaging/smoke-app.mjs --portable "$app"
           fi
 
-      # no window, the interface over HTTP (--headless); on Linux without a display (no xvfb-run),
-      # on Windows through SpaceKnife.com
+      # no window, the interface over HTTP (spaceknife-cli headless, the ui folder next to it); on
+      # Linux without a display
       - name: Headless mode smoke test
         run: |
-          dir=$(dirname "$(ls -d dist/portable-test/*/"${{ matrix.exe }}")")
-          if [ "$RUNNER_OS" = Windows ]; then app="$dir/SpaceKnife.com"; else app="$dir/spaceknife"; fi
-          uv run python packaging/smoke_headless.py "$app"
+          shopt -s nullglob
+          cli=(target/portable-test/*/spaceknife-cli.exe target/portable-test/*/spaceknife-cli)
+          cli=${cli[0]:?spaceknife-cli is missing from the archive}
+          node packaging/smoke-headless.mjs "$cli"
 
-      # a release list on 127.0.0.1 offers the next version (this build again); the test clicks the
-      # update badge and 「无缝更新」 through the DevTools port, like a user
+      # a release list on 127.0.0.1 offers the next version (this build again); the backend finds,
+      # downloads and verifies it, the new version's --apply-update swaps the files, the app comes back
       - name: Update end to end (portable)
         timeout-minutes: 15
         run: |
-          shopt -s nullglob
-          archive=(dist/electron/*-portable.zip dist/electron/*-portable.tar.gz)
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a uv run python packaging/update_e2e.py portable "${archive[0]}"
+            xvfb-run -a node packaging/update-e2e.mjs "$archive"
           else
-            uv run python packaging/update_e2e.py portable "${archive[0]}"
+            node packaging/update-e2e.mjs "$archive"
           fi
-
-      - name: Download the newest published installer (the upgrade starts from it)
-        if: runner.os == 'Windows' && matrix.installer
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          tag=$(gh release list --repo DuskXi/SpaceKnife --limit 10 --json tagName,isDraft \
-            --jq '[.[] | select(.isDraft | not)][0].tagName')
-          echo "newest release: $tag"
-          gh release download "$tag" --repo DuskXi/SpaceKnife --dir dist/previous \
-            --pattern '*-Setup-x64.exe' --pattern 'SHA256SUMS.txt'
-          ls -l dist/previous
-
-      - name: Update and uninstall end to end (Windows installer)
-        if: runner.os == 'Windows' && matrix.installer
-        timeout-minutes: 25
-        run: |
-          shopt -s nullglob
-          setup=(dist/electron/SpaceKnife-*-Setup-x64.exe)
-          previous=(dist/previous/SpaceKnife-*-Setup-x64.exe)
-          uv run python packaging/update_e2e.py nsis "${setup[0]}" --previous "${previous[0]}"
 
       - name: Checksum
-        working-directory: dist/electron
-        run: sha256sum *-portable.* | tee "SHA256SUMS-portable-${{ matrix.target }}.txt"
+        working-directory: target/portable
+        run: sha256sum "$(basename "$archive")" | tee "SHA256SUMS-portable-${{ matrix.target }}.txt"
 
-      - name: Checksum the installers
+      - name: Collect the installers
         if: inputs.installers && matrix.installer
-        working-directory: dist/electron
         run: |
+          set -euo pipefail
           shopt -s nullglob
-          sha256sum *-Setup-x64.exe *.AppImage *.deb *.rpm | tee "SHA256SUMS-installers-${{ matrix.target }}.txt"
-          if [ "$RUNNER_OS" = Linux ]; then
-            # AppImageUpdate reads the update information the build wrote, and the .zsync next to it
-            info=$(./*.AppImage --appimage-updateinformation)
-            echo "update information: $info"
-            [[ "$info" == gh-releases-zsync\|DuskXi\|SpaceKnife\|latest-all\|* ]]
-            ls -l *.AppImage.zsync
-          fi
+          mkdir -p target/installers
+          b=target/release/bundle
+          cp $b/nsis/*-setup.exe $b/appimage/*.AppImage $b/deb/*.deb $b/rpm/*.rpm target/installers/
+          cd target/installers
+          ls -l
+          sha256sum * | tee "SHA256SUMS-installers-${{ matrix.target }}.txt"
+
+      - name: Install, run and uninstall (Windows installer)
+        if: inputs.installers && matrix.installer && runner.os == 'Windows'
+        timeout-minutes: 20
+        run: node packaging/nsis-e2e.mjs target/installers/*-setup.exe
+
+      - name: Run the AppImage
+        if: inputs.installers && matrix.installer && runner.os == 'Linux'
+        run: xvfb-run -a node packaging/smoke-app.mjs --kind appimage target/installers/*.AppImage
 
       - name: Attest the portable archive
         if: inputs.attest
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
-            dist/electron/*-portable.zip
-            dist/electron/*-portable.tar.gz
+            target/portable/*-portable.zip
+            target/portable/*-portable.tar.gz
 
       - name: Attest the installers
         if: inputs.attest && inputs.installers && matrix.installer
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
-            dist/electron/*-Setup-x64.exe
-            dist/electron/*.AppImage
-            dist/electron/*.deb
-            dist/electron/*.rpm
+            target/installers/*-setup.exe
+            target/installers/*.AppImage
+            target/installers/*.deb
+            target/installers/*.rpm
 
       - uses: actions/upload-artifact@v7
         if: inputs.installers && matrix.installer
         with:
           name: SpaceKnife-installers-${{ matrix.target }}
           path: |
-            dist/electron/*-Setup-x64.exe
-            dist/electron/*.AppImage
-            dist/electron/*.AppImage.zsync
-            dist/electron/*.deb
-            dist/electron/*.rpm
-            dist/electron/SHA256SUMS-installers-*.txt
+            target/installers/*-setup.exe
+            target/installers/*.AppImage
+            target/installers/*.deb
+            target/installers/*.rpm
+            target/installers/SHA256SUMS-installers-*.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -269,8 +262,8 @@ jobs:
         with:
           name: SpaceKnife-portable-${{ matrix.target }}
           path: |
-            dist/electron/*-portable.zip
-            dist/electron/*-portable.tar.gz
-            dist/electron/SHA256SUMS-portable-*.txt
+            target/portable/*-portable.zip
+            target/portable/*-portable.tar.gz
+            target/portable/SHA256SUMS-portable-*.txt
           if-no-files-found: error
           retention-days: 14

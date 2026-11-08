@@ -3,22 +3,22 @@ title: Headless mode
 description: Run SpaceKnife without a window and use it in a browser, on this computer or from another one, with the risks of opening it to the network and how to keep it safe.
 ---
 
-In headless mode SpaceKnife opens no window. The backend scans as usual, and the app serves its interface over HTTP, so you use SpaceKnife in a browser: on a server or NAS without a display, or on a desktop you reach from a laptop or a tablet. Everything you see and do in that browser happens on the computer that runs headless mode.
+In headless mode SpaceKnife opens no window. The command-line program `spaceknife-cli` scans as the app does and serves the app's interface over HTTP, so you use SpaceKnife in a browser: on a server or NAS without a display, or on a desktop you reach from a laptop or a tablet. Everything you see and do in that browser happens on the computer that runs headless mode.
 
 ## Start it
 
-Give the app's executable one of these options:
+Run `spaceknife-cli headless`, with an address to listen on if other devices should reach it:
 
 ```bash
-SpaceKnife --headless                  # this computer only (127.0.0.1, port 8375)
-SpaceKnife --listen 192.168.1.20       # one address of this computer, port 8375
-SpaceKnife --listen 0.0.0.0:9000       # every network interface, port 9000
+spaceknife-cli headless                          # this computer only (127.0.0.1, port 8375)
+spaceknife-cli headless --listen 192.168.1.20    # one address of this computer, port 8375
+spaceknife-cli headless --listen 0.0.0.0:9000    # every network interface, port 9000
 ```
 
 It prints the address to open in a browser, with a token at the end, and keeps running until you press <kbd>Ctrl</kbd>+<kbd>C</kbd>:
 
 ```text
-SpaceKnife headless mode · 0.3.3
+SpaceKnife headless mode · 0.4.0
 Open in a browser:
   http://192.168.1.20:8375/#token=n3Vq…
 Press Ctrl+C to stop.
@@ -26,30 +26,32 @@ Press Ctrl+C to stop.
 
 While it runs, the terminal shows when a browser connects or goes away, and the backend's warnings and errors. The full log goes to the usual log file ([Data locations](../data-locations/)).
 
+`spaceknife-cli` is installed next to the app ([where it is](../command-line/#where-the-program-is)):
+
 | How you installed SpaceKnife | The command |
 |---|---|
-| Windows installer, current user | `%LOCALAPPDATA%\Programs\SpaceKnife\SpaceKnife --headless` (the default folder) |
-| Windows installer, all users | `"C:\Program Files\SpaceKnife\SpaceKnife" --headless` (the default folder) |
-| Windows portable | `SpaceKnife --headless` in its folder |
-| deb / rpm | `spaceknife --headless` |
-| Linux portable | `./spaceknife --headless` in its folder |
-| AppImage | `./SpaceKnife-<version>-x86_64.AppImage --headless` |
-| macOS | `/Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife --headless` |
+| Windows installer | `%LOCALAPPDATA%\SpaceKnife\spaceknife-cli headless` (the default folder) |
+| Windows portable | `.\spaceknife-cli headless` in its folder |
+| deb / rpm | `spaceknife-cli headless` |
+| Linux portable | `./spaceknife-cli headless` in its folder |
+| macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli headless` |
 
-:::note[Windows: leave out .exe]
-`SpaceKnife.exe` is a windowed program: a terminal doesn't wait for it, so it couldn't ask its question or stop with <kbd>Ctrl</kbd>+<kbd>C</kbd>. Next to it is `SpaceKnife.com`, a small console program that starts it and waits. The command processor and PowerShell try `.com` before `.exe`, so write `SpaceKnife` without an extension.
-:::
+It is a console program: the terminal waits for it, and <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. The pages it serves are the built interface in the `ui` folder next to `spaceknife-cli`; `--ui` names another folder.
+
+<!-- TODO: confirm — the portable archives and the Windows installer put `ui` next to spaceknife-cli (apps/desktop/scripts/portable.mjs, src-tauri/tauri.bundle.json resources); the deb / rpm put it in /usr/lib/SpaceKnife/ui and the macOS app in Contents/Resources/ui, which spaceknife-cli doesn't look in yet (headless.rs default_ui_dir): there `--ui` is needed until it does. The AppImage has no way to run spaceknife-cli. -->
 
 ## Options
 
 | Option | What it does |
 |---|---|
-| `--headless` | Headless mode, listening on this computer only: `127.0.0.1:8375` |
-| `--listen <address>` | Listen on this address; starts headless mode by itself |
+| `--listen <address>` | Listen on this address. Without it: this computer only, `127.0.0.1:8375` |
 | `--yes` | Don't ask before opening SpaceKnife to the network. Needed when there is no terminal to answer in |
 | `--tls-cert <file>` | Serve HTTPS with this certificate (PEM), together with `--tls-key` |
 | `--tls-key <file>` | The certificate's private key (PEM) |
+| `--ui <folder>` | The built interface to serve (default: the `ui` folder next to the program) |
 | `--help` | List the options |
+
+`spaceknife-cli --headless` and `spaceknife-cli --listen <address>`, as earlier versions of the app took them, still work and mean `spaceknife-cli headless …`.
 
 The address can be written as:
 
@@ -65,7 +67,7 @@ The address can be written as:
 
 Port `0` lets the system pick a free port; the printed address has it.
 
-Exit codes: `1` when you answered no, the address couldn't be used or the backend stopped; `2` for a wrong option, or no terminal to answer in. Stopped with <kbd>Ctrl</kbd>+<kbd>C</kbd> or by the system, it ends with `0` on Linux and macOS; on Windows <kbd>Ctrl</kbd>+<kbd>C</kbd> ends it at once, and its backend stops by itself.
+Exit codes: `1` when you answered no, the address couldn't be used or the backend didn't start; `2` for a wrong option, no terminal to answer in, a certificate that can't be read, or no built interface in the `ui` folder. Stopped with <kbd>Ctrl</kbd>+<kbd>C</kbd> or by the system, it ends with `0`.
 
 ## Opening it to the network
 
@@ -85,7 +87,7 @@ How it is protected:
 
 - **A token in the link.** Each start makes a new random token. It sits after the `#`, which browsers don't send to the server; the page then takes it out of the address bar and keeps it for that browser tab, so a reload still works and the address you share or bookmark has no token. Every connection to the backend needs it, so after a restart the old links stop working: open the new one.
 - **Only this site's pages.** The browser's WebSocket must come from the page this server served. Another website open in the same browser can't connect, even with the token.
-- **The backend stays private.** It listens on `127.0.0.1` as always; headless mode forwards the browser's connection to it. The page's files themselves are public: they hold nothing about your files.
+- **One address.** The pages and the backend's WebSocket are served together on the address you chose; nothing else listens. The page's files themselves are public: they hold nothing about your files.
 
 :::caution[Plain HTTP]
 Without a certificate the traffic is plain HTTP. Anyone on the same network, or on the way, can read the token and every path and file name. On a network you don't control, use HTTPS or an SSH tunnel.
@@ -94,7 +96,7 @@ Without a certificate the traffic is plain HTTP. Anyone on the same network, or 
 **HTTPS.** Give a certificate and its key in PEM files, for example made with [mkcert](https://github.com/FiloSottile/mkcert) for the computer's name or address:
 
 ```bash
-spaceknife --listen 0.0.0.0 --tls-cert nas.lan.pem --tls-key nas.lan-key.pem
+spaceknife-cli headless --listen 0.0.0.0 --tls-cert nas.lan.pem --tls-key nas.lan-key.pem
 ```
 
 The printed addresses then start with `https://`. A browser warns about a certificate it doesn't trust (self-signed): install your own certificate authority on the device you browse from instead of clicking past the warning.
@@ -102,7 +104,7 @@ The printed addresses then start with `https://`. A browser warns about a certif
 **An SSH tunnel** needs no open port at all. On the server, listen on the server itself:
 
 ```bash
-spaceknife --headless
+spaceknife-cli headless
 ```
 
 On your computer, forward a local port to it, then open the printed address there (`http://localhost:8375/#token=…`):
@@ -130,9 +132,9 @@ When a scan finishes while the tab is in the background, a dot appears in the ta
 
 ## Linux servers without a display
 
-Headless mode needs no X11 or Wayland: `--headless` is also Chromium's switch for running without a display, and `--listen` adds it by itself. The program still needs the libraries it is built against (GTK 3, NSS, GBM, ALSA and a few X11 libraries, but no X server); the deb and rpm packages install them, and on a minimal system with the AppImage or the portable copy install them yourself (for example `libgtk-3-0 libnss3 libgbm1 libasound2` on Ubuntu).
+`spaceknife-cli` is a console program: it needs no X11 or Wayland and none of the window's libraries (GTK, WebKitGTK). On a server, the portable tar.gz is enough: unpack it and run `./spaceknife-cli headless`.
 
-Chromium doesn't run as root without `--no-sandbox`. Run SpaceKnife as the user whose files you want to see, or add `--no-sandbox` when you must run it as root.
+Run it as the user whose files you want to see. It runs as root too, but then everything in the browser acts with root's rights.
 
 As a service, with systemd (`~/.config/systemd/user/spaceknife-headless.service`, then `systemctl --user enable --now spaceknife-headless`):
 
@@ -141,7 +143,7 @@ As a service, with systemd (`~/.config/systemd/user/spaceknife-headless.service`
 Description=SpaceKnife headless mode
 
 [Service]
-ExecStart=/usr/bin/spaceknife --listen 192.168.1.20:8375 --yes
+ExecStart=/usr/bin/spaceknife-cli headless --listen 192.168.1.20:8375 --yes
 Restart=on-failure
 
 [Install]
@@ -152,4 +154,4 @@ The token changes at every start: read the address with `journalctl --user -u sp
 
 ## On macOS
 
-Run the executable inside the app bundle (see the table above). Headless mode shows no Dock icon. What SpaceKnife may read is the same as in the app: grant **Full Disk Access** to SpaceKnife on that Mac to see everything ([Install and upgrade](../install/#full-disk-access)).
+Run `spaceknife-cli` inside the app bundle (see the table above). Headless mode shows no Dock icon. macOS asks for access to protected places on behalf of the program that started it, usually Terminal: to see everything, grant **Full Disk Access** to that program ([Install and upgrade](../install/#full-disk-access)).

@@ -292,12 +292,12 @@ Combine templates with filters. A filter can do the selecting (`m>1y;>100mb`) an
 
 ## From the command line
 
-`spaceknife-backend run` (the program that comes with the app, see [Command line](../command-line/)) runs scan, filter and export steps without opening a window:
+`spaceknife-cli run` (the program that comes with the app, see [Command line](../command-line/)) runs scan, filter and export steps without opening a window:
 
 ```shell
-spaceknife-backend run scan "/home/lenny" filter "*.iso;>1gb" export csv "/home/lenny/isos.csv" autoclose
-spaceknife-backend run scan "C:\Users\lenny" filter ":class:video;>1gb" export "Grouped by folder" "C:\Users\lenny\videos.txt" autoclose
-spaceknife-backend run load "/home/lenny/home.sks" export html "/home/lenny/report.html" export "/home/lenny/outline.sktpl" "/home/lenny/outline.md"
+spaceknife-cli run scan "/home/lenny" filter "*.iso;>1gb" export csv "/home/lenny/isos.csv" autoclose
+spaceknife-cli run scan "C:\Users\lenny" filter ":class:video;>1gb" export "Grouped by folder" "C:\Users\lenny\videos.txt" autoclose
+spaceknife-cli run load "/home/lenny/home.sks" export html "/home/lenny/report.html" export "/home/lenny/outline.sktpl" "/home/lenny/outline.md"
 ```
 
 - `export "<template>" "<file>"` looks the template up as a built-in template name first, then as `csv`, `json` or `html`, then as the path of a template file.

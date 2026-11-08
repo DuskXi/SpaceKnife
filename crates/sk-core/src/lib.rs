@@ -1,0 +1,29 @@
+//! sk-core: the SpaceKnife backend's domain logic (ported from packages/backend/src/spaceknife).
+//! Each module is owned by one porting task; add only your own `pub mod` lines.
+pub mod classes;
+pub mod diff;
+pub mod disks;
+pub mod events;
+pub mod export;
+pub mod filter;
+pub mod fmt;
+pub mod helper;
+pub mod i18n;
+pub mod insights;
+pub mod io;
+pub mod layout;
+pub mod log;
+pub mod media;
+pub mod memory;
+pub mod monitor;
+pub mod ops;
+pub mod palette;
+pub mod pathclass;
+pub mod paths;
+pub mod privacy;
+pub mod scan;
+pub mod settings;
+pub mod summary;
+pub mod update;
+pub mod view;
+pub mod volume;

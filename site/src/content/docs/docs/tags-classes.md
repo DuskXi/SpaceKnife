@@ -77,7 +77,7 @@ With **Remember tags** turned on (Settings › Tags › Saving, on by default), 
 - Where the files are kept is listed in [Data locations](../data-locations/).
 
 :::note[Command line]
-`spaceknife-backend run … filter` does not load saved tags, so tag conditions there match no file. See [Command line](../command-line/).
+`spaceknife-cli run … filter` does not load saved tags, so tag conditions there match no file. See [Command line](../command-line/).
 :::
 
 ## File classes

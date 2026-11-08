@@ -14,55 +14,54 @@
    flame_polar  PartitionEngine ┘     polar.v1                       flamePolar
 ```
 
-- **可视化 id**：后端的一个引擎加一份描述符（`layout/api.py` 的 `Visualization`），在注册表登记。用户切换的是它。
+- **可视化 id**：后端的一个引擎加一份描述符（`crates/sk-core/src/layout/api.rs` 的 `Visualization`），在注册表登记。用户切换的是它。
 - **线上布局**：一份列契约和一个几何参数模型（`FrameInfo.geometry`）。几个可视化可以共用一种布局。
 - **前端组件**：按布局注册，一种布局一个组件，只管把这种布局的帧画出来、做命中测试。
 
 将来只有后端代码的插件，只要输出一种已有的布局，三端前端都不用改。宿主代码（视图、服务端、前端宿主）只经注册表拿到引擎或组件，不直接 import 任何一种可视化；三种内置可视化和插件走同一条 `register()`。
 
-## 2. 后端接口（`spaceknife.layout`）
+## 2. 后端接口（`crates/sk-core/src/layout/`）
 
 `ENGINE_API = 1`，接口有不兼容的变化时加一。
 
-```python
-class Engine(Protocol):
-    def run(self, params: LayoutParams, root: RootSpec, sizes: SizeSource) -> DrawList: ...
-    def levels(self, params: LayoutParams) -> int: ...  # 这个视口能画出的层数（≤ params.detail）
+```rust
+pub trait Engine: Send + Sync {
+    // 布局写进 out（先清空）；Basis 是同一个 store 共享的输入，引擎自己不存每个 store 的状态
+    fn run(&self, nodes: &Nodes, basis: &Basis, params: &LayoutParams, root: &RootSpec,
+           sizes: &dyn SizeSource, out: &mut DrawList);
+    fn levels(&self, params: &LayoutParams) -> u32; // 这个视口能画出的层数（≤ params.detail）
+}
 
-
-EngineFactory = Callable[[Basis], Engine]  # 每个 store 建一次，跨帧复用
-
-
-@dataclass(frozen=True, slots=True)
-class Visualization:
-    id: str  # 小写单词，可用 . _ - 连接，≤ 48 个字符
-    api: int  # 写它时的 ENGINE_API
-    layout: str  # 线上布局，形如 name.vN
-    capability: str  # 会话必须声明的能力；基线 drawlist.v1 为 ""
-    title_id: str  # 名称的消息 id（中文原文），title 属性返回译文
-    icon: str  # 设计图标键（camelCase，如 vizFlamePolar）
-    order: int  # 在切换器里的位置，其次按 id
-    engine: EngineFactory
-    default_color: ColorModeName = "class"
-    compare: bool = True  # 能否用于对比视图
-    free_space: bool = True  # 卷根时是否画可用 / 未知空间
+pub struct Visualization {
+    pub id: String,             // 小写单词，可用 . _ - 连接，≤ 48 个字符
+    pub api: u32,               // 写它时的 ENGINE_API
+    pub layout: &'static str,   // 线上布局，形如 name.vN
+    pub capability: String,     // 会话必须声明的能力；基线 drawlist.v1 为 ""
+    pub title_id: String,       // 名称的消息 id（中文原文），显示时翻译
+    pub icon: String,           // 设计图标键（camelCase，如 vizFlamePolar）
+    pub order: i32,             // 在切换器里的位置，其次按 id
+    pub engine: Arc<dyn Engine>,
+    pub default_color: ColorModeName, // 视图切到它时的配色
+    pub compare: bool,          // 能否用于对比视图
+    pub free_space: bool,       // 卷根时是否画可用 / 未知空间
+}
 ```
 
-- **输入**：`LayoutParams`（CSS 像素的宽高、dpr、细节层级、最小元素尺寸、排序、字号缩放、元素比例等），加 `options`：可视化自己的参数，按名字取（`params.opt("origin", "bottom")`，类型和默认值不同就当没给）。火焰图的方向就走这里，设置项是 `treemap.flame_origin`。
+- **输入**：`LayoutParams`（CSS 像素的宽高、dpr、细节层级、最小元素尺寸、排序、字号缩放、元素比例等），加 `options`：可视化自己的参数，按名字取（`params.opt_str("origin", "bottom")`，类型和默认值不同就当没给）。火焰图的方向就走这里，设置项是 `treemap.flame_origin`。
 - `RootSpec`：缩放根的节点，或聚合放大时的成员；卷根时带可用 / 未知空间的字节数。
-- `SizeSource`：这一帧的面积口径。`of(ids)` 取一批节点的大小，`full()` 给全量数组（O(N)，只有树图用）。普通视图用 `StoreSizes(basis)`；隐藏模式用匹配部分、对比视图用变化量，都是 `ArraySizes`。
+- `SizeSource`：这一帧的面积口径。`size(nodes, id)` 取一个节点的大小，`n()` 是覆盖的节点数。普通视图用 `StoreSizes`；隐藏模式用匹配部分、对比视图用变化量，都是 `ArraySizes`。
 - `Basis`：同一次扫描共享的输入（尺寸缓存、类别、`children(node, n)` 带防撕读）。
 - **输出**：`DrawList`，通用列加 `geometry`（几何列，按布局的列名）、`members`（聚合块的成员）、`layout`、`visual`、`meta`（`FlameGeometry` / `PolarGeometry` / None）和 `levels`。
 
-**注册表**（`layout/registry.py`）：`register(v)` 遇到 id 不合规、id 重复、引擎 API 不同、布局名不合规时抛 `ValueError`；`get(id)`、`all_visuals()`（按 order、id 排序）、`available(caps)`、`is_available(v, caps)`、`unregister(id)`。内置可视化在 `layout/builtins.py` 里 import 一次就登记。
+**注册表**（`layout/registry.rs`）：`register(v)` 遇到 id 不合规、id 重复、引擎 API 不同、布局名不合规时返回 `RegistryError`；`get(id)`、`all_visuals()`（按 order、id 排序）、`available(caps)`、`is_available(v, caps)`、`unregister(id)`。内置可视化由 `registry.rs` 的 `builtins()` 登记。
 
-**视图**（`view/state.py`）：每个视图有 `visual` 和每种可视化各自的配色（`color_mode` 读写当前可视化那一项，没有时取 `Visualization.default_color`）。引擎由共享的 `Engines` 按 id 首次使用时建好；换 store 时整组换掉，正在算的帧不会混用两个 store。`showable(visual, caps)`：已登记、且会话声明了它的能力；没有 `visuals.v1` 的会话只能用树图。
+**视图**（`crates/sk-core/src/view/state.rs`）：每个视图有 `visual` 和每种可视化各自的配色（`color_mode` 读写当前可视化那一项，没有时取 `Visualization.default_color`）。引擎不存每个 store 的状态，所有视图共用一个；每个 store 一份 `Basis`（`layout/basis.rs`），换 store 时换掉，正在算的帧不会混用两个 store。`showable(visual, caps)`：已登记、且会话声明了它的能力；没有 `visuals.v1` 的会话只能用树图。
 
 **服务端**：`view.set{visual}` 遇到未知或当前会话不可用的可视化报 `INVALID_PARAMS`（「这种可视化在当前界面不可用」），什么都不改；配色 `branch` 也只给有 `visuals.v1` 的会话。`view.open` 和新视图的默认值按会话能力降级到树图和「类别」。visual 变了时帧的 reason 为 `visual`。`visual.list` 返回所有已登记的可视化，`available` 和 `reason` 按会话能力填写，`name` 是当前界面语言的译文（前端切换语言后要重新取）。
 
 ## 3. 行契约
 
-所有布局都必须满足，插件也一样；`layout/contract.py` 的 `check_draw(draw, store, root, *, full=True, sizes=None)` 逐条检查，后端的契约测试按注册表参数化，每种已登记的可视化都要通过。
+所有布局都必须满足，插件也一样；`layout/contract.rs` 的 `check_draw(draw, nodes, root, full, sizes)` 逐条检查，后端的契约测试按注册表参数化，每种已登记的可视化都要通过。
 
 1. 父行在前：`parent[i] < i`；父行是上一层已展开的文件夹，`depth` 为父行加 1（顶层为 1）。
 2. 同一帧里 `key` 不重复。
@@ -85,7 +84,7 @@ class Visualization:
 
 通用列（`key node parent kind depth cls label size count flags tag tone branch name_len`，对比视图另有 `delta dstat`）和每个字段的含义见 protocol.md 4.1–4.4。`FrameRoot` 是缩放根本身（它不是一行），字段与同名列相同。`flash[].row = −1` 表示缩放根，只在分区布局里出现。
 
-## 5. 分区引擎（`layout/partition.py`）
+## 5. 分区引擎（`layout/partition.rs`）
 
 火焰图和火焰-极坐标图共用一个引擎，只是投影不同。每行有一个归一化区间 `[u0, u1) ⊂ [0, 1)`（相对缩放根的整宽或整圈）和一个层号（缩放根的子项为 1）。投影（`Projection`）负责：`levels`、`columns`、`unit_px(level)`（这一层 [0, 1) 对应多少像素）、`cell(a, b, level)`（区间落到像素，画不下返回 None）、`expandable(cell, level)`、`label(cell, kind)`、`meta()`。
 
@@ -107,7 +106,7 @@ container(c, ids, extra, u0, u1, level, parent_row, page):
 - 行数严格不超过 `max_rows`：文件夹的子项先合并再发出文件夹行，还没排到的兄弟预留名额；放不下子项的文件夹画成折叠块，它的聚合块成员也一并去掉。
 - 尺寸一律走 `sizes.of(ids)`，类别走 `basis.cls_of(ids)`，子项走 `basis.children(node, sizes.n)`：每帧没有 O(N) 的计算或分配。
 
-## 6. 火焰图投影（`flame.v1`，`layout/flame.py`）
+## 6. 火焰图投影（`flame.v1`，`layout/flame.rs`）
 
 记号：lu = dpr·字号缩放，g = max(1, round(2·dpr))，m = min_element·dpr，W × H 为画布物理像素。常量与令牌 `visual.flame.*` 相同（`rowMin` 20、`rowMax` 48、`gap` 2，单位 CSS px）。
 
@@ -118,7 +117,7 @@ container(c, ids, extra, u0, u1, level, parent_row, page):
 - 标签：`label_box(w/lu, h/lu, big=False)`（没有大号字）。
 - 根条：`geometry.root = (0, y₀, W, row_h − g)`，按 `FrameInfo.root` 画。
 
-## 7. 火焰-极坐标图投影（`polar.v1`，`layout/flame_polar.py`）
+## 7. 火焰-极坐标图投影（`polar.v1`，`layout/flame_polar.rs`）
 
 火焰图的极坐标投影：根在圆心，层号越大越往外。常量与令牌 `visual.flamePolar.*` 相同（`margin` 8、`holeRatio` 0.24、`holeMin` 36、`holeMaxRatio` 0.4、`ringMin` 14、`gap` 2、`segments` 32）。
 
@@ -178,7 +177,7 @@ function sectorDistance(px, py, s /* cx cy t0 t1 r0 r1 */, gap) {
 | 分支 | `visual.branch.{槽位}.{min(depth,4)}`，槽位 0 用 `visual.branch.neutral` | 同左 | 树图：层级色框；分区布局：同左 |
 | 对比视图 | 色阶优先于以上配色（没有变化的为折叠色） | 同左 | 树图：层级色框；分区布局：同左（`filled()` 全为真，色阶也按它们分档） |
 
-- **分支槽位的分配**（`view/branch.py`）：按缩放根下第 1 层的 key 记住槽位，首次出现时分配：取在视野内用得最少、且与左右已分配的邻居都不同的槽位，平局取编号小的。缩放根一变就清空；最多记 4096 项，超出时淘汰最久未画的；节点 id 重映射时迁移，换 store 时清空。第 1 层的聚合块、可用 / 未知空间为 0（中性）。
+- **分支槽位的分配**（`crates/sk-core/src/view/branch.rs`）：按缩放根下第 1 层的 key 记住槽位，首次出现时分配：取在视野内用得最少、且与左右已分配的邻居都不同的槽位，平局取编号小的。缩放根一变就清空；最多记 4096 项，超出时淘汰最久未画的；节点 id 重映射时迁移，换 store 时清空。第 1 层的聚合块、可用 / 未知空间为 0（中性）。
 - **往下传**：`branch[i] = branch[parent[i]]`，深浅档取 min(depth, 4)：第 1 档淡色，第 2 档最饱和，第 3–4 档逐级变暗。`branch` 列总是发送。
 - 分支色板 8 色 × 4 档，每档配白字或深字对比度都 ≥ 4.5:1，避开闪烁黄和强调色；**待设计评审与色盲检查**。
 - **每种可视化各自记住配色**：火焰图和火焰-极坐标图默认「分支」（设置 `appearance.partition_color_mode`），树图默认「类别」（`appearance.default_color_mode`）；切回某种可视化时恢复它上次的配色。
@@ -226,7 +225,7 @@ interface VisualInstance<F> {
 - **帧类型**：外壳代码只看到不含几何的 `VisualFrame`（通用列、`names`、`rowOf(key)`）；`RectFrame` 带 `x y w h`，`PolarFrame` 带 `a0 a1 r0 r1`。`decodeVisualFrame` 按二进制帧头的布局解码，不认识的布局返回 null。
 - **锚点**：`label` 是标签中心；`tag` 是组件自己画标签标记的位置（树图和火焰图为标记左上角，极坐标为标记中心）；`badge` 是角标的中心，宿主画「减少动画」下的静态变化角标时以它为中心、再收进 `bounds`（树图的锚点是块的右下角，角标因此落在右下角）。
 - **注册**（`visual/registry.ts`）：`registerVisual(c)` 遇到 API 版本不同、没有解码器的布局、重复的布局时抛错；`componentFor(layout)`、`registeredLayouts()`、`visualCapabilities()`。内置组件在 `visual/builtins.ts` 登记，连接之前 import。
-- **宿主**（`visual/Host.tsx`）：一个视图一个 WebGL2 上下文和三层画布（GL、文字、呼吸），程序经 `ctx.shared(key, make)` 缓存，上下文丢失后重建并用最后一帧重画，卸载时 `WEBGL_lose_context`。每个显示帧宿主先清屏、设好混合，再依次调用实例的 `draw`：
+- **宿主**（`apps/desktop/app/components/visual/Host.vue`）：一个视图一个 WebGL2 上下文和三层画布（GL、文字、呼吸），程序经 `ctx.shared(key, make)` 缓存，上下文丢失后重建并用最后一帧重画，卸载时 `WEBGL_lose_context`。每个显示帧宿主先清屏、设好混合，再依次调用实例的 `draw`：
   - 放大：旧实例 `draw({zoom: {row, t: 缓出}, alpha: 1 − 淡出})`，新实例 `draw({alpha: 淡入})`；返回时反过来，新实例从被点的行收回。
   - 切换可视化（reason 为 `visual`，或前后帧的 visual / layout 不同）：交叉淡入，时长 `motion.duration.swap` = 200 ms；「减少动画」时直接换。旧实例在动画结束后释放。
   - 每个组件自己定义「把这一行展开到满屏」：树图是矩形仿射；火焰图 sx = root.w/w、sy = 1，平移到根条所在的带，文字只移动锚点；火焰-极坐标图是极坐标仿射 [sθ, tθ, sr, tr] = [1 + (1/Δ − 1)t, −(t0/Δ)t, 1, −k·ring_w·t]（Δ、t0 以圈计，k 为环号），被点的扇区展开到满圈并收进中心圆。
@@ -253,7 +252,7 @@ interface VisualInstance<F> {
 | `flame.v1` | 0.8 ms（56 行） | 8.5 ms（365 行） | 0.8 ms（63 行） | 23.9 ms（781 行） |
 | `polar.v1` | 0.8 ms（60 行） | 13.2 ms（485 行） | 0.9 ms（67 行） | 29.2 ms（908 行） |
 
-  目标 ≤ 60 ms，验收线 < 120 ms（M2）。复测：`uv run python tools/bench_m2.py --visual flame,flame_polar --nodes 1000000 --budget 120`。
+  目标 ≤ 60 ms，验收线 < 120 ms（M2）。（以上是 Python 后端时的实测。）复测：`cargo test --release -p sk-core --test view_bench -- --ignored --nocapture`（约 100 万节点，三种可视化各个分辨率与层级）。
 - 已知的遗留项：扫描推送时 `sizes()` 缓存每次都失效（树图的全量路径）；隐藏模式仍按全长数组构造尺寸；`_scanning_rows` 仍是 O(N)。
 
 ## 13. 插件：现在做 / 以后做

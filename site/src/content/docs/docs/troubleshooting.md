@@ -19,7 +19,7 @@ Start with the section that matches what you see. If nothing here helps, [report
   **Settings › Advanced › Files & diagnostics › Log folder › Open** opens the folder, wherever it is (a portable copy or `SPACEKNIFE_HOME` moves it; see [Data locations and portable mode](../data-locations/)).
 - **More detail**: set **Settings › Advanced › Log › Log file level** to **Debug**, reproduce the problem, then set it back to **Info**.
 - **Copy diagnostics** (**Settings › Advanced › Files & diagnostics**): copies the version of the interface and the backend, the platform, the backend's capabilities, and the paths of the settings file and the log folder.
-- **The command line**: `spaceknife-backend version` prints the versions; `native none` there means the native extension didn't load (see [Command line](../command-line/#version)).
+- **The command line**: `spaceknife-cli version` prints the versions (see [Command line](../command-line/#version)).
 
 ## First launch
 
@@ -47,15 +47,13 @@ xattr -dr com.apple.quarantine /Applications/SpaceKnife.app
 
 ### Linux: the AppImage doesn't start
 
-- The AppImage needs FUSE 2 (`libfuse2` on Ubuntu 22.04). Without it, run it as `./SpaceKnife-<version>-x86_64.AppImage --appimage-extract-and-run`, or use the deb, rpm or portable tar.gz, which don't need FUSE.
-- On distributions that restrict unprivileged user namespaces (the AppArmor rules of Ubuntu 23.10 and later), the AppImage and the portable tar.gz may not start because their Chromium sandbox helper isn't setuid. Start them with `--no-sandbox`. Ubuntu 22.04 and RHEL 9 aren't affected.
+- The AppImage needs FUSE 2 (`libfuse2` on Ubuntu 22.04). Without it, run it as `./SpaceKnife_<version>_amd64.AppImage --appimage-extract-and-run`, or use the deb, rpm or portable tar.gz, which don't need FUSE.
 
 ### "The backend didn't start"
 
-The window is there, but a message covers it, and the status bar says `Backend unavailable`. The message under the title says why: `The backend wasn't ready within 30 seconds.`, `The backend failed to start (exit code N).` or `The backend exited (exit code N).`
+The window is there, but a message covers it, and the status bar says `Backend unavailable`. The message under the title says why, for example `The backend exited (exit code N).`
 
-- Restart SpaceKnife. If it happens again, run the backend by itself in a terminal: `spaceknife-backend version` (where it is: [Command line](../command-line/#where-the-program-is)). An error there is what to report.
-- On Linux and macOS, starting SpaceKnife from a terminal shows the backend's own messages, prefixed with `[backend]`.
+- Restart SpaceKnife. If it happens again, run the command line in a terminal: `spaceknife-cli version` (where it is: [Command line](../command-line/#where-the-program-is)). An error there is what to report, together with the message under the title.
 
 ## Permissions
 
@@ -67,7 +65,7 @@ The MFT quick scan needs administrator rights. SpaceKnife never runs elevated it
 - **It asks again later**: an idle helper quits after 10 minutes, and the next quick scan starts a new one.
 - **You never want the prompt**: switch off **Settings › Scan & performance › Scan method › Ask for administrator rights when needed**, or set **Default scan method** to **Full scan**.
 - **No prompt appears and the scan waits** at `Waiting for administrator approval…`: look for the UAC prompt in the taskbar. **Stop** cancels the scan.
-- With an install for the current user, the helper starts from a folder your account can write to. If that concerns you, install SpaceKnife for all users (in Program Files).
+- The installer installs for the current user, so the helper starts from a folder your account can write to.
 
 ### macOS: Full Disk Access
 

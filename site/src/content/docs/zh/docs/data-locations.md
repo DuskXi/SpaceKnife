@@ -12,9 +12,9 @@ description: SpaceKnife 在各平台把快照、设置、日志和缓存存在�
 | 数据：快照、标签、日志 | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | 配置：设置、文件类别 | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | 缓存 | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
-| 界面配置（窗口的本地存储与缓存） | `%APPDATA%\SpaceKnife\electron` | `~/.config/SpaceKnife/electron` | `~/Library/Application Support/SpaceKnife/electron` |
+| 界面文件（窗口的主题、本地存储与缓存） | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife` | `~/Library/Application Support/io.github.duskxi.spaceknife` |
 
-Linux 上设置了 `XDG_DATA_HOME`、`XDG_CONFIG_HOME`、`XDG_CACHE_HOME` 时，这些目录跟着它们走。
+Linux 上设置了 `XDG_DATA_HOME`、`XDG_CONFIG_HOME`、`XDG_CACHE_HOME` 时，这些目录跟着它们走。界面文件的文件夹以应用的标识 `io.github.duskxi.spaceknife` 命名；系统的网页视图（WebView2、WebKitGTK、WebKit）也可能另外保存自己的缓存。
 
 不用自己去找，「设置 › 高级」里都有：
 
@@ -72,7 +72,7 @@ SpaceKnife 自己的这些文件夹和它的安装目录都是受保护的：不
 | `SPACEKNIFE_HOME/data` | 快照、标签、日志、更新状态 |
 | `SPACEKNIFE_HOME/config` | 设置、文件类别 |
 | `SPACEKNIFE_HOME/cache` | 缓存 |
-| `SPACEKNIFE_HOME/electron` | 界面配置 |
+| `SPACEKNIFE_HOME/desktop` | 界面文件 |
 
 适合另开一套配置（试设置而不碰自己的那套）、把快照放到另一块盘上，或者做演示和测试。请用绝对路径。
 
@@ -80,7 +80,7 @@ Windows，在 PowerShell 里只对这一次启动生效：
 
 ```powershell
 $env:SPACEKNIFE_HOME = "D:\SpaceKnife-data"
-& "<安装目录>\SpaceKnife.exe"
+& "<安装目录>\spaceknife.exe"
 ```
 
 Windows，对之后启动的所有程序生效（要撤销，在 Windows 的环境变量设置里删掉它）：
@@ -98,14 +98,14 @@ SPACEKNIFE_HOME=/home/lenny/spaceknife-data spaceknife
 macOS：
 
 ```bash
-SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife
+SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/spaceknife
 ```
 
-[命令行](../command-line/)也认这个变量：设了 `SPACEKNIFE_HOME` 后，`spaceknife-backend snapshot list` 列出的就是那个文件夹里的快照。
+[命令行](../command-line/)也认这个变量：设了 `SPACEKNIFE_HOME` 后，`spaceknife-cli snapshot list` 列出的就是那个文件夹里的快照。
 
 ## 便携模式
 
-便携包（`SpaceKnife-<版本>-win-<架构>-portable.zip`、`SpaceKnife-<版本>-linux-<架构>-portable.tar.gz` 和 `SpaceKnife-<版本>-mac-<架构>-portable.zip`）在程序旁边带一个空的 `data` 文件夹，里面只有一份简短说明。SpaceKnife 每次启动都会找这个文件夹：可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`。快照、设置、日志、缓存和界面配置都存在里面，不写进你的用户目录。
+便携包（`SpaceKnife-<版本>-win-<架构>-portable.zip`、`SpaceKnife-<版本>-linux-<架构>-portable.tar.gz` 和 `SpaceKnife-<版本>-mac-<架构>-portable.zip`）在程序旁边带一个空的 `data` 文件夹，里面只有一份简短说明。SpaceKnife 每次启动都会找这个文件夹：可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`。快照、设置、日志、缓存和界面文件都存在里面，不写进你的用户目录。
 
 - 手动设置的 `SPACEKNIFE_HOME` 优先于 `data` 文件夹。
 - 删掉或重命名 `data`，这份程序就改用正常的用户目录；放回去又是便携的。
@@ -120,7 +120,7 @@ SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Conten
 
 ```powershell
 $env:SPACEKNIFE_HOME = "C:\Users\lenny\Apps\SpaceKnife-portable\data"
-& "C:\Users\lenny\Apps\SpaceKnife-portable\resources\backend\spaceknife-backend.exe" snapshot list
+& "C:\Users\lenny\Apps\SpaceKnife-portable\spaceknife-cli.exe" snapshot list
 ```
 
 ### 搬移数据
@@ -129,4 +129,5 @@ $env:SPACEKNIFE_HOME = "C:\Users\lenny\Apps\SpaceKnife-portable\data"
 
 ## 删除全部数据
 
-Windows 的卸载程序可以代劳：在它的第二页勾上「同时删除快照、设置和日志」（见[卸载](../install/#卸载)）。否则，想从头开始，或卸载后清理干净：退出 SpaceKnife，删除[第一张表](#存在哪里)里的文件夹（Windows 上是 `%LOCALAPPDATA%\SpaceKnife` 和 `%APPDATA%\SpaceKnife`），或者你用的 `SPACEKNIFE_HOME`、`data` 文件夹。「设置 › 高级 › 全部恢复默认」只重置设置和文件类别。
+<!-- TODO: confirm what the Tauri NSIS uninstaller's "delete the application data" box removes (by default the folders named after the identifier, not %LOCALAPPDATA%\SpaceKnife). -->
+想从头开始，或卸载后清理干净：退出 SpaceKnife，删除[第一张表](#存在哪里)里的文件夹（Windows 上是 `%LOCALAPPDATA%\SpaceKnife` 和 `%LOCALAPPDATA%\io.github.duskxi.spaceknife`），或者你用的 `SPACEKNIFE_HOME`、`data` 文件夹。「设置 › 高级 › 全部恢复默认」只重置设置和文件类别。

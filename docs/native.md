@@ -2,26 +2,40 @@
 
 本文是 M4 各部分（Rust 扩展、提权扫描助手、IO 限速、扫描调度）之间的接口契约，内容与 M4 完成时的实现一致。改动接口时先改本文。
 
+> **现状（0.4.0 起）**：后端已整体改写为 Rust，原来的 PyO3 扩展 `spaceknife_native`（`packages/native`）现在是普通的 Rust 库 `crates/sk-native`（`sk_native`：`hardscan`、`mft`、`cpus`；没有 Python、没有 GIL），由 `crates/sk-core` 直接调用。下文 §2 的 Python 签名（`def scan_slice(...)`、`MftTable` 的 numpy 列、`py.allow_threads`、「纯 Python 回退」）记录的是 M4 时的接口；行为、选项名、环境变量和测量结论在 Rust 版里保持不变，对应的 Rust 接口见 [crates/sk-native/README.md](../crates/sk-native/README.md)。对应关系：
+>
+> | 本文写的（Python 时期） | 现在 |
+> |---|---|
+> | `packages/native/src/mft/`、`src/hardscan/` | `crates/sk-native/src/mft/`、`crates/sk-native/src/hardscan/` |
+> | `spaceknife/scan/mft.py` 的 `table_to_store`、`src/mft/build.rs`（`mft_build`） | `crates/sk-core/src/scan/mft.rs`（`table_to_store`） |
+> | `src/fold.rs`（`SliceFold`）、`NodeStore.ingest_slices` | `crates/sk-store/src/store.rs`（`ingest_slices`） |
+> | `spaceknife/scan/scanner.py`、`worker.py` | `crates/sk-core/src/scan/`（`scanner.rs`、`gate.rs`、`winopts.rs`） |
+> | `spaceknife/helper/` | `crates/sk-core/src/helper/` |
+> | `spaceknife/io/` | `crates/sk-core/src/io/` |
+> | `server/scans.py` | `crates/sk-server/src/scans.rs` |
+> | `tests/test_*.py` | `crates/sk-native/tests/`、`crates/sk-store/tests/`、`crates/sk-core/tests/` |
+>
+> 纯 Python 的遍历器、numpy 建树与归并已随 Python 后端一起去掉，没有回退开关（`SPACEKNIFE_PY_FOLD` 等）。
+
 ## 1. 总体
 
 ```
- 后端（普通权限，asyncio）
-   ScanManager ──► Scanner ──► 扫描策略
-                                 ├─ 硬扫描：有原生扩展时 spaceknife_native.scan_slice（线程池，释放 GIL）
-                                 │          否则 spawn 进程池 × worker.scan_slice（纯 Python）
-                                 └─ MFT 快扫：SharedHelper ──命名管道──► 只读扫描助手（管理员）
-                                                                         └─ scan_mft：边读边解析（Rust；回退 numpy）
+ 后端（普通权限，sk-server / sk-core，在应用进程里）
+   scans ──► Scanner ──► 扫描策略
+                           ├─ 硬扫描：sk_native::hardscan::scan_slice（列目录线程）
+                           └─ MFT 快扫：SharedHelper ──命名管道──► 只读扫描助手（管理员，`<程序> helper …`）
+                                                                   └─ scan_mft：边读边解析（sk_native::mft）
    IoRegistry → IoGovernor（每块物理磁盘一个）：采样 → 控制并发与派发节奏 → 2 Hz 上报（W2 曲线、状态栏）
 ```
 
-- 原生扩展是**可选**的：`uv sync --group native` 才编译（需要 Rust 工具链）。后端通过 `spaceknife.native` 探测，所有原生路径都有纯 Python 回退，结果逐列一致（有测试比对）。
-- 原生代码在耗时部分释放 GIL（`py.allow_threads`），内部用 rayon 或自有线程并行。
+- （M4 时）原生扩展是可选的，所有原生路径都有纯 Python 回退，结果逐列一致。现在 `sk-native` 是工作区里的普通 crate，总是编译进去，没有回退。
+- 内部用 rayon 或自有线程并行。
 - 整个程序不提权；需要管理员权限的只有只读扫描助手，它只做白名单内的只读操作，用一次性令牌鉴权。
-- 构建注意：不要在私有 venv 里用 `maturin develop`（它会把 `_native.pyd/.so` 写进共享的 `packages/native/python/spaceknife_native/`）。要单独的构建就 `uvx maturin build --release -m packages/native/Cargo.toml -o <目录>` 再 `uv pip install --reinstall --no-deps`。
+- 构建与测试：`cargo build`、`cargo test -p sk-native`（工作区根目录）。
 
-## 2. Rust 扩展 `spaceknife_native`（packages/native）
+## 2. Rust 库 `sk_native`（crates/sk-native；M4 时是 PyO3 扩展 `spaceknife_native`）
 
-模块布局：`src/lib.rs` 只做注册；`src/mft/` 与 `src/hardscan/` 各自独立（feature `mft` / `hardscan`，默认都开），`src/fold.rs` 是节点表的归并（2.3，不分 feature）。Python 包 `python/spaceknife_native/`，类型桩在 `_native.pyi`。
+模块布局：`src/lib.rs` 只做导出；`src/mft/` 与 `src/hardscan/` 各自独立（feature `mft` / `hardscan`，默认都开），`src/cpus.rs` 是本进程可用的 CPU 数。节点表的归并（2.3）现在在 `crates/sk-store` 里。下面的 Python 签名是 M4 时的接口（见文首「现状」）。
 
 ### 2.1 MFT（`src/mft/`）
 
@@ -217,7 +231,7 @@ def scan_slice(
   - 整盘 A-B-A（565d4db、这一版、565d4db，每次扫描都存快照）：逐个文件夹按名字比对三棵树，每一项比较扫描写的全部列（kind、flags、size、alloc、mtime、ctime、atime、ino、nlink），只把「两次 565d4db 相同、这一版不同」的算作这一版的差异：W:（ReFS 321.7 万项，32.5 万个文件夹）、I:（WinBtrfs 150.5 万项）、F:（107.5 万项）、K:（191.3 万项）都是 0；C:（883.3 万项，105.9 万个文件夹）2 处，都是期间的文件变动：Wallpaper Engine 一个随机名字的临时文件只在第二次扫描时存在，NZXT CAM 的 `scope_v2.json` 第二次是 12,033 字节、前后两次是 12,032 字节（两次 565d4db 之间本身就有 4,790 项访问时间、126 项修改时间、29 个名字不同）。`bench\compare.py` 对每一对的结论相同（W:、I:、F:、K: 两侧独有的名字都是 0）。Linux（WSL 根分区 66 万项）同样比对：只有 HARDLINK_DUP 落在硬链接的哪个名字上不同（取决于切片落地的先后，上面「硬链接只计一次」；两次 565d4db 之间本身就有 38,662 处），另一处是另一个程序的临时文件。
   - `skip_final` 的核验模式（`_verify_final`）整盘跑了一遍：C: 1,058,647 个文件夹、D: 4,600、F: 147,880、G:（ReFS）48,607、H:（WinBtrfs）4,794、I:（WinBtrfs）134,475、K: 303,277、W:（ReFS）324,650，共 2,026,930 个文件夹，省掉的那次查询发出去都只返回 `STATUS_NO_MORE_FILES`（`final_wrong` 0）。这几次扫描里相对打开全部由 "." 项核对通过（`dot_unmatched` 0），WinBtrfs 上也是。
 
-### 2.3 原生归并（`SliceFold`，`src/fold.rs`）
+### 2.3 原生归并（M4 时是 `SliceFold`，`src/fold.rs`；现在是 `crates/sk-store/src/store.rs` 的 `ingest_slices`）
 
 `NodeStore.ingest_slices(parts)` 把同时落地的几个切片当成一个归并（就是以前 `worker.merge_slices` 再 `ingest_slice` 的结果，但不再拼出合并后的副本）；`ingest_slice` 是只有一个切片的特例，监控的重列也走它。有原生扩展时由 `spaceknife_native.SliceFold` 分三步做，没有时（或设 `SPACEKNIFE_PY_FOLD=1`，回退开关）用原来的 numpy 归并（`NodeStore._ingest_slice_py`），两者逐列相同。
 
@@ -228,22 +242,22 @@ def scan_slice(
 - 实测（2026-10-23，WSL2 根分区 77 万项热缓存，16 个 vCPU，扫描器的调度方式，三臂按轮交替各 6 次，中位数 [最小–最大]）：dev 565d4db 0.34 s [0.31–0.43]，这一版 0.26 s [0.22–0.31]，这一版设 `SPACEKNIFE_PY_FOLD=1` 0.35 s [0.33–0.37]；运行时 WSL 的 1 分钟负载约 3.0（含本测量）。单独重放同一次扫描的 24 个切片（不含列目录）：numpy 92–102 ms，原生 50–56 ms（各 5 次；两者都含列扩容的复制和新页的缺页）。Windows 见 2.2 末尾的表。
 - 测试：`tests/test_store_fold_native.py`——随机树（每轮 1–4 个切片一起归并，随机 GONE、挂载点、硬链接、超大数值、多字节名字，列用扫描器的类型或宽松的类型，名字偏移窄或宽）上原生与 numpy 归并逐列、名字堆、起点、版本号、节点数全部相同（250 个例子），再和整棵树重算的合计比；空切片、全部跳过、空文件夹；坏切片两边报同样的错且什么都不改；30 万项的大切片跨过几个名字块和几次扩列；放开 GIL 期间另一个线程反复读子项区间、父节点和名字，始终是完整的列表。`tests/test_store_ingest_slice.py`（与逐列表的 `ingest_listing` 比）、`tests/test_scanner.py`（几个切片一起归并与逐个归并的树相同）现在走原生归并。
 
-## 3. 只读扫描助手（`spaceknife/helper/`）
+## 3. 只读扫描助手（`crates/sk-core/src/helper/`；M4 时是 `spaceknife/helper/`）
 
-接口：`from spaceknife.helper import HelperClient, SharedHelper, HelperError, HelperUnavailable, HelperDenied, is_elevated`。
+接口：`sk_core::helper` 的 `HelperClient`、`SharedHelper`、`HelperError`（`HelperErrorKind` 区分不可用 / 被拒，相当于以前的 `HelperUnavailable` / `HelperDenied`；M4 时：`from spaceknife.helper import HelperClient, SharedHelper, HelperError, HelperUnavailable, HelperDenied, is_elevated`）。
 
-- 启动：后端生成 32 字节随机令牌和管道名 `\\.\pipe\spaceknife-helper-<随机>`，令牌写进只有当前用户和 `BUILTIN\Administrators` 能读的临时文件（DACL 受保护；POSIX 为 0600），助手读完立即删除。命令行 `python -I -m spaceknife.helper --pipe <名> --token-file <文件> --server-pid <pid> [--idle-timeout 秒]`（不经过 typer/rich，管理员进程里加载的代码尽量少）。
+- 启动：后端生成 32 字节随机令牌和管道名 `\\.\pipe\spaceknife-helper-<随机>`，令牌写进只有当前用户和 `BUILTIN\Administrators` 能读的临时文件（DACL 受保护；POSIX 为 0600），助手读完立即删除。命令行 `<程序> helper --pipe <名> --token-file <文件> --server-pid <pid> [--idle-timeout 秒]`：助手就是同一个可执行文件（应用的 `spaceknife` 或 `spaceknife-cli`）带 `helper` 子命令，在加载任何别的东西之前分派（`helper/launch.rs` 的 `HELPER_SUBCOMMAND`），管理员进程里运行的代码尽量少。（M4 时是 `python -I -m spaceknife.helper …`。）
   - 后端已经是管理员（「已提权」= `BUILTIN\Administrators` 组已启用）时直接以子进程启动，**不弹 UAC**；否则 `ShellExecuteExW(lpVerb="runas", SW_HIDE)` 弹一次 UAC。用户拒绝 → `HelperDenied`（「用户拒绝了管理员授权」），扫描回退硬扫描。
-  - Linux（只用于「本机磁盘」读磁盘自己的记录，用户点按钮之后）：`/usr/bin/pkexec <解释器或冻结后端的绝对路径> …`，新会话启动（`start_new_session`，pkexec 不会退回到后端终端上要密码），由桌面的 polkit 代理弹出密码框；pkexec 通过后 exec 成助手，pid 不变，鉴权照旧。等待连接最长 180 秒（含输入密码）。退出码 126 → `HelperDenied`；127 且 stderr 有 “No authentication agent” → `no_agent`（SSH、无图形桌面），其余 127 → `not_authorized`。找不到 pkexec、AppImage（FUSE 挂载 root 读不到）、路径不是绝对路径 → `not_supported`，不启动 pkexec。助手的 stderr 在线程里读，最后 20 行用来说明原因。没有随安装包附带 polkit 策略文件，密码框显示 polkit 的通用说明（要以超级用户运行哪个程序）。
+  - Linux（只用于「本机磁盘」读磁盘自己的记录，用户点按钮之后）：`/usr/bin/pkexec <程序的绝对路径> helper …`，新会话启动（`start_new_session`，pkexec 不会退回到后端终端上要密码），由桌面的 polkit 代理弹出密码框；pkexec 通过后 exec 成助手，pid 不变，鉴权照旧。等待连接最长 180 秒（含输入密码）。退出码 126 → `HelperDenied`；127 且 stderr 有 “No authentication agent” → `no_agent`（SSH、无图形桌面），其余 127 → `not_authorized`。找不到 pkexec、AppImage（FUSE 挂载 root 读不到）、路径不是绝对路径 → `not_supported`，不启动 pkexec。助手的 stderr 在线程里读，最后 20 行用来说明原因。没有随安装包附带 polkit 策略文件，密码框显示 polkit 的通用说明（要以超级用户运行哪个程序）。
   - 鉴权：助手先校验后端 pid 再发令牌；后端校验令牌和对端 pid（Windows 允许是所启动进程的直接子进程——venv 启动器；句柄一直持有，pid 不会被复用）。
   - 一个后端只有一个助手（`SharedHelper`）：已提权的助手也服务不需要提权的请求；空闲 10 分钟退出，下次快扫再启动（非管理员后端会再弹一次 UAC）。
-- 协议：帧 = 4 字节小端长度 + 内容，内容首字节是类型：`J` JSON（pydantic 严格模型）/ `B` 二进制帧（复用 `spaceknife_protocol.binary`，流名 `mft`，布局 `mft.v1`，名字 blob `names`）。消息：`hello {token, pid, elevated}`、`progress {phase: scan|send, elapsed}`（扫描时每秒一次心跳）、`begin {rows, frames}`、`response {result, extras}`、`error {code, message}`。
-- 白名单操作：`ping`、`volume_info(volume)`、`scan_mft(volume, batch_rows, duty)`（读并解析 $MFT，分批发回各列）、`shutdown`；仅非提权助手开放的测试操作 `scan_mft_image(path, duty)`（读 NTFS 卷镜像）。参数严格校验：卷只能是 `X:` 形式的本地 NTFS 卷。M5 加了 `query_usn(volume)` 与 `read_usn(volume, start_usn, journal_id, max_rows, duty)`（USN 日志，二进制帧流 `usn`、布局 `usn.v1`，见 [monitor.md](monitor.md) §3）。0.3.3 加了 `disk_health(disk)`（只在 Linux 的提权助手里可用）：`disk` 只能是整块盘的内核名（`nvme0n1`、`sda`），助手只打开只读的 `/dev/<disk>` 块设备，只发固定的只读命令——NVMe 管理命令 Get Log Page 02h（`NVME_IOCTL_ADMIN_CMD`），或经 `SG_IO` 的 ATA PASS-THROUGH(16)：IDENTIFY DEVICE、READ LOG EXT 设备统计日志 04h 的第 01h、05h 页——把原始页面以 hex 发回，由后端解析（`disks/passthrough.py`、`disks/health.py`）。设备不应答（USB 桥接不转发、盘没有这份日志）→ `not_supported`，附原因。
+- 协议：帧 = 4 字节小端长度 + 内容，内容首字节是类型：`J` JSON（严格校验的消息，`helper/messages.rs`）/ `B` 二进制帧（复用 `sk_protocol::binary`，流名 `mft`，布局 `mft.v1`，名字 blob `names`）。消息：`hello {token, pid, elevated}`、`progress {phase: scan|send, elapsed}`（扫描时每秒一次心跳）、`begin {rows, frames}`、`response {result, extras}`、`error {code, message}`。
+- 白名单操作：`ping`、`volume_info(volume)`、`scan_mft(volume, batch_rows, duty)`（读并解析 $MFT，分批发回各列）、`shutdown`；仅非提权助手开放的测试操作 `scan_mft_image(path, duty)`（读 NTFS 卷镜像）。参数严格校验：卷只能是 `X:` 形式的本地 NTFS 卷。M5 加了 `query_usn(volume)` 与 `read_usn(volume, start_usn, journal_id, max_rows, duty)`（USN 日志，二进制帧流 `usn`、布局 `usn.v1`，见 [monitor.md](monitor.md) §3）。0.3.3 加了 `disk_health(disk)`（只在 Linux 的提权助手里可用）：`disk` 只能是整块盘的内核名（`nvme0n1`、`sda`），助手只打开只读的 `/dev/<disk>` 块设备，只发固定的只读命令——NVMe 管理命令 Get Log Page 02h（`NVME_IOCTL_ADMIN_CMD`），或经 `SG_IO` 的 ATA PASS-THROUGH(16)：IDENTIFY DEVICE、READ LOG EXT 设备统计日志 04h 的第 01h、05h 页——把原始页面以 hex 发回，由后端解析（`crates/sk-core/src/disks/passthrough.rs`、`health.rs`）。设备不应答（USB 桥接不转发、盘没有这份日志）→ `not_supported`，附原因。
 - 错误码：`needs_admin`、`forbidden`、`invalid_request`、`not_supported`、`not_ntfs`、`io_error`、`unavailable`、`bad_frame`、`internal`、`usn_inactive`（日志未开启）、`usn_gone`（检查点失效）（操作失败，助手仍可用）；连接层 `HelperUnavailable` 的 code：`exited`、`timeout`、`auth`、`protocol`、`closed`、`not_supported`、`denied`、`no_agent`、`not_authorized`（后两个是 pkexec 的）。
 - 测试：自动化测试**绝不**触发 UAC。助手用普通权限运行（这台开发机本身已提权，测试用 Safer NORMALUSER 令牌启动助手），`scan_mft` 在非提权时返回 `needs_admin`；UAC 路径只用替身测试参数构造和取消映射。测试也绝不调用真正的 pkexec（找 pkexec 的路径表被清空）：命令行、退出码与 stderr 的解释用替身测试；Linux 上用一个直接 exec 参数的「pkexec」脚本跑通启动、连接、鉴权和拒绝 / 无代理。`disk_health` 的命令结构在假内核上测试（读结构里的指针、把应答写进缓冲区）；在 WSL 里以 root 对虚拟盘实测过 SG_IO（内核接受结构，返回 ILLEGAL REQUEST）。macOS 不实现提权（`elevate=True` 返回 `not_supported`）。
 - 吞吐：900 万行（约 850 MB）经管道传输与拼装约 0.5 s（1.7 GB/s）；客户端直接拼进按 `begin` 预分配的表。
 
-## 4. IO 动态限速（`spaceknife/io/`）与扫描调度
+## 4. IO 动态限速（`crates/sk-core/src/io/`；M4 时是 `spaceknife/io/`）与扫描调度
 
 ### 4.1 采样与指标
 
@@ -263,7 +277,7 @@ def scan_slice(
 - 系统 I/O 优先级：Windows 进程后台模式（`PROCESS_MODE_BACKGROUND_BEGIN`）；Linux `ioprio_set(IOPRIO_CLASS_IDLE)`；macOS `setiopolicy_np(IOPOL_THROTTLE)`。
 - 上报（2 Hz，`io` 主题 / `io.load` 事件 / `io.status`）：`{disk, level, limit, self, total, concurrency, auto, yielding, history[60]}`，W2 曲线与状态栏同源。
 
-### 4.3 扫描调度（`server/scans.py`）
+### 4.3 扫描调度（`crates/sk-server/src/scans.rs`；M4 时是 `server/scans.py`）
 
 - 扫描方式 `auto`：Windows 上「整个本地 NTFS 卷」且允许提权（设置 `scan.elevate`，或已有管理员权限 / 活着的已提权助手，不需要弹窗）时用 MFT，其他情况硬扫描。`mft` 强制尝试 MFT（失败回退硬扫描并说明原因），`hard` 强制硬扫描。
 - MFT 读取是一次短时的顺序突发，用占空比限速：`duty` = 极速 1.0 · 空闲 0.2 · 其他档位 上限/100（最低 0.05）。读在突发里进行（每次至少占盘 50 ms），突发之间歇够，盘被本次扫描占用的时间比例就是 `duty`（K: 实测 0.7 档 0.70、0.35 档 0.35；旧读法窗口之间有空档，只有 0.54、0.26）。

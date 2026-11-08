@@ -77,7 +77,7 @@ description: "用键盘给文件和文件夹打四种颜色标签、用过滤找
 - 文件存放位置见[数据位置](../data-locations/)。
 
 :::note[命令行]
-`spaceknife-backend run … filter` 不读取已保存的标签，所以那里的标签条件不匹配任何文件。见[命令行](../command-line/)。
+`spaceknife-cli run … filter` 不读取已保存的标签，所以那里的标签条件不匹配任何文件。见[命令行](../command-line/)。
 :::
 
 ## 文件类别

@@ -292,12 +292,12 @@ JSON Lines，每个文件一个对象。对象的花括号用 `{&curlyop}`、`{&
 
 ## 命令行导出
 
-`spaceknife-backend run`（随软件附带的程序，见[命令行](../command-line/)）可以不打开窗口，依次执行扫描、过滤和导出：
+`spaceknife-cli run`（随软件附带的程序，见[命令行](../command-line/)）可以不打开窗口，依次执行扫描、过滤和导出：
 
 ```shell
-spaceknife-backend run scan "/home/lenny" filter "*.iso;>1gb" export csv "/home/lenny/isos.csv" autoclose
-spaceknife-backend run scan "C:\Users\lenny" filter ":class:视频;>1gb" export "Grouped by folder" "C:\Users\lenny\videos.txt" autoclose
-spaceknife-backend run load "/home/lenny/home.sks" export html "/home/lenny/report.html" export "/home/lenny/outline.sktpl" "/home/lenny/outline.md"
+spaceknife-cli run scan "/home/lenny" filter "*.iso;>1gb" export csv "/home/lenny/isos.csv" autoclose
+spaceknife-cli run scan "C:\Users\lenny" filter ":class:视频;>1gb" export "Grouped by folder" "C:\Users\lenny\videos.txt" autoclose
+spaceknife-cli run load "/home/lenny/home.sks" export html "/home/lenny/report.html" export "/home/lenny/outline.sktpl" "/home/lenny/outline.md"
 ```
 
 - `export "<模板>" "<文件>"` 里的模板依次按内置模板名、`csv` / `json` / `html`、模板文件路径查找。

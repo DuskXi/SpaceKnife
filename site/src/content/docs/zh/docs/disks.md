@@ -99,7 +99,7 @@ Linux 只让 root 向磁盘发送读取这份记录的命令，所以 NVMe 盘�
 |---|---|
 | 用户拒绝了管理员授权 | 你关掉了密码框。按钮还在，可以再点。 |
 | 没有可以询问管理员密码的身份验证代理（比如在 SSH 会话里，或没有图形桌面） | 桌面环境通常自带 polkit 身份验证代理；SSH 会话、没有桌面的系统里没有。 |
-| AppImage 版本不能以管理员身份运行助手；请改用 deb 或 rpm 安装包 | AppImage 从只有你自己能读的挂载点运行，root 读不到它。deb 和 rpm 安装包装在 `/opt/SpaceKnife`。 |
+| AppImage 版本不能以管理员身份运行助手；请改用 deb 或 rpm 安装包 | AppImage 从只有你自己能读的挂载点运行，root 读不到它。deb 和 rpm 安装包装在 `/usr/bin`。 |
 | 找不到 pkexec：请求管理员授权需要 polkit | 系统没有装 polkit（`pkexec`）。 |
 
 ### 卷和容量条

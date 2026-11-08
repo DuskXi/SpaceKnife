@@ -1,38 +1,48 @@
 #!/usr/bin/env bash
 # Which CI jobs a change needs. Reads the changed paths (one per line) on stdin and prints
-# python=true|false and electron=true|false, the format of $GITHUB_OUTPUT.
-# A path not listed here runs the Python job: running a spare job is cheaper than skipping a needed one.
+# rust=true|false and desktop=true|false, the format of $GITHUB_OUTPUT.
+# A path not listed here runs the Rust job: running a spare job is cheaper than skipping a needed one.
 set -euo pipefail
 
-python=false
-electron=false
+rust=false
+desktop=false
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   case "$path" in
     # read by both jobs: the workflow itself, the design tokens and icons (generated into design/build,
-    # which the renderer imports), the translation checker, and the TS protocol generated from Python
+    # which the interface imports and the layout tests compare with), the developer tools and their
+    # tests (they read crates/ and design/), and the TypeScript protocol generated from sk-protocol
     .github/workflows/ci.yml | .github/scripts/ci-areas.sh | design/tokens/* | design/icons/* | design/build/* \
-      | tools/i18n_check.py | tools/i18n_scan_ts.mjs | apps/electron/src/renderer/src/protocol/generated.ts)
-      python=true
-      electron=true
+      | tools/* | crates/sk-protocol/* | apps/desktop/app/protocol/generated.ts)
+      rust=true
+      desktop=true
       ;;
-    apps/electron/*)
-      electron=true
+    # the Tauri shell is a crate of the workspace (cargo test / clippy); its interface is the desktop job's
+    apps/desktop/src-tauri/*)
+      rust=true
       ;;
-    docs/insights.md) # test_insights checks the rules library against it
-      python=true
+    apps/desktop/*)
+      desktop=true
       ;;
-    # documentation, the website, artwork and repository meta: nothing in CI builds or tests them
-    docs/* | site/* | design/app-icon/* | design/social/* | design/README.md \
+    # the help pages the interface bundles (@site), and their pictures
+    site/src/content/* | site/src/assets/*)
+      desktop=true
+      ;;
+    docs/insights.md) # sk-core's insights tests check the rules library against it
+      rust=true
+      ;;
+    # documentation, the website, artwork, packaging tests and repository meta: nothing in CI builds or
+    # tests them (the packaging tests run in the Portable and macOS build workflows)
+    docs/* | site/* | design/app-icon/* | design/social/* | design/README.md | packaging/* \
       | README.md | README.zh-CN.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | SECURITY.md | TODO.md | LICENSE \
-      | .github/ISSUE_TEMPLATE/* | .github/pull_request_template.md | .github/workflows/pages.yml \
+      | UNRELEASED.md | .github/ISSUE_TEMPLATE/* | .github/pull_request_template.md | .github/workflows/pages.yml \
       | .github/workflows/macos.yml | .github/workflows/portable.yml | .github/workflows/release.yml \
       | .github/workflows/release-check.yml | release-notes/*) ;;
     *)
-      python=true
+      rust=true
       ;;
   esac
 done
 
-echo "python=$python"
-echo "electron=$electron"
+echo "rust=$rust"
+echo "desktop=$desktop"
