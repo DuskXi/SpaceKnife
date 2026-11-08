@@ -2,9 +2,10 @@ name: Release
 
 # Publishes a release from CI: no file goes through anyone's computer (docs/packaging.md「发布」).
 # A signed tag vX.Y.Z on GitHub (signed locally: CI never holds the key) builds every file from that
-# tag with the Portable, macOS and Electron shell build workflows (the Tauri app's portable archives,
-# deb and disk images; the Electron shell's Windows installer, AppImage and rpm), each attesting
-# where its files were built and testing their update from the real 0.3.4 files; tools/release.mjs
+# tag with the Portable, macOS, Windows installer and Electron shell build workflows (the Tauri
+# app's portable archives, deb, disk images and Windows installer; the Electron shell's AppImage and
+# rpm), each attesting where its files were built and testing their update from the real 0.3.4
+# files; tools/release.mjs
 # then checks every checksum and that exactly the release's files are there (0.3.4's names, which
 # crates/sk-core/src/update asset_templates looks for), merges the installer checksums into
 # SHA256SUMS.txt, and fills the notes in release-notes/X.Y.Z.md (sizes, links to the build runs);
@@ -13,8 +14,8 @@ name: Release
 # created as a draft (published at once only when asked), and a published one is read back the way
 # SpaceKnife reads it (cargo run -p sk-core --example release_check) and the way 0.3.4 reads it.
 # Run by hand (Actions › Release › Run workflow) for a tag already on GitHub; there it can also take
-# the files of earlier Portable (with installers), macOS and Electron shell build runs of the same
-# tree instead of building again, and dry_run stops before the release is created.
+# the files of earlier Portable (with installers), macOS, Windows installer and Electron shell build
+# runs of the same tree instead of building again, and dry_run stops before the release is created.
 on:
   push:
     tags: ["v*"]
@@ -30,6 +31,10 @@ on:
         default: ""
       macos_run:
         description: Take the files of this macOS build run instead of building
+        type: string
+        default: ""
+      windows_run:
+        description: Take the files of this Windows installer build run instead of building
         type: string
         default: ""
       electron_run:
@@ -72,6 +77,7 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
           PORTABLE_RUN: ${{ inputs.portable_run }}
           MACOS_RUN: ${{ inputs.macos_run }}
+          WINDOWS_RUN: ${{ inputs.windows_run }}
           ELECTRON_RUN: ${{ inputs.electron_run }}
         run: |
           set -euo pipefail
@@ -98,10 +104,10 @@ jobs:
           [ -f "release-notes/$version.md" ] || fail "no release-notes/$version.md here ($GITHUB_REF)"
           gh release view "$TAG" >/dev/null 2>&1 && fail "a release $TAG exists already"
           reuse=false
-          if [ -n "$PORTABLE_RUN$MACOS_RUN$ELECTRON_RUN" ]; then
-            [ -n "$PORTABLE_RUN" ] && [ -n "$MACOS_RUN" ] && [ -n "$ELECTRON_RUN" ] || fail "give all three runs to reuse, or none"
+          if [ -n "$PORTABLE_RUN$MACOS_RUN$WINDOWS_RUN$ELECTRON_RUN" ]; then
+            [ -n "$PORTABLE_RUN" ] && [ -n "$MACOS_RUN" ] && [ -n "$WINDOWS_RUN" ] && [ -n "$ELECTRON_RUN" ] || fail "give all four runs to reuse, or none"
             tree=$(git rev-parse "$TAG^{tree}")
-            for pair in "$PORTABLE_RUN:Portable build" "$MACOS_RUN:macOS build" "$ELECTRON_RUN:Electron shell build"; do
+            for pair in "$PORTABLE_RUN:Portable build" "$MACOS_RUN:macOS build" "$WINDOWS_RUN:Windows installer build" "$ELECTRON_RUN:Electron shell build"; do
               id=${pair%%:*}; want=${pair#*:}
               IFS=$'\t' read -r name conclusion sha < <(gh run view "$id" --json workflowName,conclusion,headSha \
                 --jq '[.workflowName, .conclusion, .headSha] | @tsv')
@@ -115,7 +121,7 @@ jobs:
             reuse=true
           fi
           { echo "tag=$TAG"; echo "version=$version"; echo "reuse=$reuse"; } >> "$GITHUB_OUTPUT"
-          echo "### $TAG: version $version, tree as main, files $([ "$reuse" = true ] && echo "from runs $PORTABLE_RUN, $MACOS_RUN and $ELECTRON_RUN" || echo "built now")" >> "$GITHUB_STEP_SUMMARY"
+          echo "### $TAG: version $version, tree as main, files $([ "$reuse" = true ] && echo "from runs $PORTABLE_RUN, $MACOS_RUN, $WINDOWS_RUN and $ELECTRON_RUN" || echo "built now")" >> "$GITHUB_STEP_SUMMARY"
 
   portable:
     name: Portable build
@@ -144,6 +150,19 @@ jobs:
       ref: ${{ needs.check.outputs.tag }}
       attest: true
 
+  windows:
+    name: Windows installer build
+    needs: check
+    if: needs.check.outputs.reuse != 'true'
+    uses: ./.github/workflows/windows-installer.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      ref: ${{ needs.check.outputs.tag }}
+      attest: true
+
   electron:
     name: Electron shell build
     needs: check
@@ -159,11 +178,12 @@ jobs:
 
   publish:
     name: Assemble and publish
-    needs: [check, portable, macos, electron]
+    needs: [check, portable, macos, windows, electron]
     if: >-
       !cancelled() && needs.check.result == 'success' &&
       (needs.check.outputs.reuse == 'true' ||
-        (needs.portable.result == 'success' && needs.macos.result == 'success' && needs.electron.result == 'success'))
+        (needs.portable.result == 'success' && needs.macos.result == 'success' &&
+          needs.windows.result == 'success' && needs.electron.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -193,6 +213,7 @@ jobs:
         run: |
           gh run download "${{ inputs.portable_run }}" --dir artifacts
           gh run download "${{ inputs.macos_run }}" --dir artifacts
+          gh run download "${{ inputs.windows_run }}" --dir artifacts
           gh run download "${{ inputs.electron_run }}" --dir artifacts
 
       - name: Check and assemble
@@ -200,7 +221,7 @@ jobs:
           set -euo pipefail
           base="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs"
           if [ "${{ needs.check.outputs.reuse }}" = true ]; then
-            runs=(--build-run "$base/${{ inputs.portable_run }}" --build-run "$base/${{ inputs.macos_run }}" --build-run "$base/${{ inputs.electron_run }}")
+            runs=(--build-run "$base/${{ inputs.portable_run }}" --build-run "$base/${{ inputs.macos_run }}" --build-run "$base/${{ inputs.windows_run }}" --build-run "$base/${{ inputs.electron_run }}")
           else
             runs=(--build-run "$base/$GITHUB_RUN_ID")
           fi
