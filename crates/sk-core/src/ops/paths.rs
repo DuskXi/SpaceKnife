@@ -868,12 +868,23 @@ fn is_mount_dir(_path: &Path) -> bool {
 /// folders resolved, so a link into `/usr` or `C:\Windows` does not open a way around the list.
 pub fn protected_key(path: &str) -> Option<&'static str> {
     let rules = current_rules();
-    let mut reason = match_rules(path, &rules);
-    if reason.is_none() {
-        let real = path_string(&resolved(Path::new(path)));
-        if rules.key(&real) != rules.key(path) {
-            reason = match_rules(&real, &rules);
-        }
+    let named = |p: &str| -> Option<&'static str> {
+        match_rules(p, &rules).or_else(|| {
+            let real = path_string(&resolved(Path::new(p)));
+            (rules.key(&real) != rules.key(p))
+                .then(|| match_rules(&real, &rules))
+                .flatten()
+        })
+    };
+    let mut reason = named(path);
+    // Windows: a name typed as its 8.3 short form (`C:\PROGRA~1`), the last one too, is the
+    // long one for the rules
+    #[cfg(windows)]
+    if reason.is_none()
+        && let Some(long) = super::win::long_names(path)
+        && rules.key(&long) != rules.key(path)
+    {
+        reason = named(&long);
     }
     if reason.is_none() && is_mount(Path::new(path)) {
         reason = Some("mount");

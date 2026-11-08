@@ -417,3 +417,45 @@ fn protected_reason_mount_points() {
         None
     );
 }
+
+/// The 8.3 short name of an existing path (`GetShortPathNameW`), None when it has none.
+#[cfg(windows)]
+fn short_name(p: &Path) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    // raw: cmd parses its own command line
+    let out = std::process::Command::new("cmd")
+        .raw_arg(format!(
+            "/d /c for %I in (\"{}\") do @echo %~sI",
+            p.display()
+        ))
+        .output()
+        .ok()?;
+    let short = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (short.contains('~') && Path::new(&short).exists()).then_some(short)
+}
+
+/// A protected folder named by its 8.3 short name (a scan root typed as `C:\PROGRA~1`) is still
+/// protected: the exact rules see the long name too.
+#[cfg(windows)]
+#[test]
+fn protected_reason_sees_through_short_names() {
+    let program_files =
+        std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+    let long = Path::new(&program_files);
+    let Some(short) = short_name(long) else {
+        eprintln!("skipped: no 8.3 name for {}", long.display());
+        return;
+    };
+    assert_eq!(protected_key(&program_files), Some("program_root"));
+    assert_eq!(protected_key(&short), Some("program_root"), "{short}");
+    // and the app's own folder by a short name of a long one
+    let home = sk_home();
+    let long_dir = home.join("a folder with a long name");
+    std::fs::create_dir_all(&long_dir).unwrap();
+    if let Some(short) = short_name(&long_dir) {
+        assert_eq!(
+            protected_key(&short),
+            protected_key(&long_dir.to_string_lossy())
+        );
+    }
+}
