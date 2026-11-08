@@ -96,6 +96,16 @@ pub async fn server_with(
         .expect("server starts")
 }
 
+/// A server with [`Tuning::for_tests`] changed by `tune` (no extra routes).
+pub async fn server_tuned(opts: ServeOptions, tune: impl FnOnce(&mut Tuning)) -> ServerHandle {
+    init();
+    let mut tuning = Tuning::for_tests();
+    tune(&mut tuning);
+    sk_server::start_with(opts, tuning)
+        .await
+        .expect("server starts")
+}
+
 /// An error answer.
 #[derive(Debug, Clone)]
 pub struct Remote {
@@ -398,6 +408,41 @@ impl Client {
         let _ = tokio::time::timeout(Duration::from_secs_f64(secs), self.closed.notified()).await;
         *self.close_code.lock().unwrap()
     }
+}
+
+/// A plain HTTP/1.1 request to 127.0.0.1:`port` (`Host` is that unless `headers` name one);
+/// (status, head in lower case, body).
+pub async fn http(port: u16, path: &str, headers: &[(&str, &str)]) -> (u16, String, Vec<u8>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    let mut req = format!("GET {path} HTTP/1.1\r\nConnection: close\r\n");
+    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
+        req.push_str(&format!("Host: 127.0.0.1:{port}\r\n"));
+    }
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    req.push_str("\r\n");
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut buf = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), s.read_to_end(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    let split = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&buf[..split]).into_owned();
+    let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
+    (status, head.to_ascii_lowercase(), buf[split + 4..].to_vec())
+}
+
+/// The value of a header in a lower-cased head from [`http`].
+pub fn header<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    head.lines().find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        (k.trim() == name).then(|| v.trim())
+    })
 }
 
 /// A folder tree on disk for scans: `files` as (relative path, size).

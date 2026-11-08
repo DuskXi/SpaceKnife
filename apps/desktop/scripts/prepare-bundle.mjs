@@ -4,6 +4,8 @@
 // - src-tauri/target-bundle/spaceknife-cli-<target triple>[.exe]: the console binary (crates/sk-server), shipped
 //   next to the app as Tauri's externalBin (which wants the target triple in the name), built with the
 //   build machine's folders remapped (tools/package_checks.mjs remappedEnv);
+// - src-tauri/target-bundle/SpaceKnife.com (Windows): the console launcher (packaging/console-launcher),
+//   remapped the same way;
 // - src-tauri/target-bundle/licenses/: LICENSE.txt (SpaceKnife, MIT), THIRD-PARTY-rust.txt (the crates linked
 //   into spaceknife and spaceknife-cli, from `cargo metadata`) and THIRD-PARTY-ui.txt (the npm
 //   packages of the interface: the production dependencies, a superset of what is bundled, and the
@@ -50,6 +52,23 @@ function buildCli() {
   const targetDir = process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(root, "target");
   const built = join(targetDir, ...(explicitTarget ? [triple] : []), "release", `spaceknife-cli${exe}`);
   const dest = join(out, `spaceknife-cli-${triple}${exe}`);
+  copyFileSync(built, dest);
+  console.log(`[bundle] ${dest}`);
+}
+
+// Windows: SpaceKnife.com, the console entry next to the program (packaging/console-launcher, its
+// own small workspace): `SpaceKnife --headless …` in a terminal runs spaceknife-cli there and waits,
+// as 0.3.4's did; anything else starts the window. scripts/portable.mjs puts it in the archive.
+function buildConsoleLauncher() {
+  const manifest = join(root, "packaging", "console-launcher", "Cargo.toml");
+  const targetDir = join(process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(root, "target"), "console-launcher");
+  const explicitTarget = !!process.env.TAURI_ENV_TARGET_TRIPLE && process.env.TAURI_ENV_TARGET_TRIPLE !== hostTriple();
+  const args = ["build", "--release", "--locked", "--manifest-path", manifest, "--target-dir", targetDir];
+  if (explicitTarget) args.push("--target", triple);
+  console.log(`[bundle] cargo ${args.join(" ")}`);
+  execFileSync("cargo", args, { cwd: root, stdio: "inherit", env: remappedEnv(process.env) });
+  const built = join(targetDir, ...(explicitTarget ? [triple] : []), "release", "spaceknife-console.exe");
+  const dest = join(out, "SpaceKnife.com");
   copyFileSync(built, dest);
   console.log(`[bundle] ${dest}`);
 }
@@ -137,6 +156,9 @@ function licences() {
 }
 
 mkdirSync(out, { recursive: true });
-if (!process.argv.includes("--no-cli")) buildCli();
+if (!process.argv.includes("--no-cli")) {
+  buildCli();
+  if (triple.includes("windows")) buildConsoleLauncher();
+}
 licences();
 if (!existsSync(join(out, `spaceknife-cli-${triple}${exe}`))) console.warn(`[bundle] no spaceknife-cli-${triple}${exe} yet (--no-cli)`);

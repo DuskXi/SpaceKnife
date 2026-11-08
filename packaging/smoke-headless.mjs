@@ -3,9 +3,11 @@
 //
 //   node packaging/smoke-headless.mjs <unpacked portable folder>/spaceknife-cli[.exe]
 //   node packaging/smoke-headless.mjs target/release/spaceknife-cli --ui apps/desktop/.output/public
+//   node packaging/smoke-headless.mjs --app-form <unpacked portable folder>/SpaceKnife.com
 //
 // Starts `spaceknife-cli headless --listen 127.0.0.1:0 [extra args]` with an isolated home and reads
-// the address it prints. Then: the page is served; /sk/info answers only with the token; the
+// the address it prints. With --app-form, 0.3.4's form instead, `<program> --listen 127.0.0.1:0
+// --headless [extra args]` (Windows: through SpaceKnife.com, which runs spaceknife-cli and waits). Then: the page is served; /sk/info answers only with the token; the
 // WebSocket on the same address refuses another site's Origin (403) and, with the page's own,
 // reaches the backend, whose session.hello takes the token. Finally it stops the program the way a
 // terminal does (SIGINT; on Windows, where Node can't send Ctrl+C to another process, the process
@@ -22,14 +24,17 @@ import { WIN, fail, hello, portOpen, sleep, stop, until } from "./lib.mjs";
 
 const URL_LINE = /(https?):\/\/localhost:(\d+)\/#token=([A-Za-z0-9_%-]+)/;
 
-const [cli, ...extra] = process.argv.slice(2);
-if (!cli) fail("usage: node packaging/smoke-headless.mjs <spaceknife-cli> [extra arguments]");
+const argv = process.argv.slice(2);
+const appForm = argv[0] === "--app-form";
+const [cli, ...extra] = appForm ? argv.slice(1) : argv;
+if (!cli) fail("usage: node packaging/smoke-headless.mjs [--app-form] <spaceknife-cli | SpaceKnife.com> [extra arguments]");
 const home = mkdtempSync(join(tmpdir(), "sk-headless-smoke-"));
 const env = { ...process.env, SPACEKNIFE_HOME: home, SPACEKNIFE_LANGUAGE: "en", LANG: "en_US.UTF-8" };
 delete env.DISPLAY;
 delete env.WAYLAND_DISPLAY;
 const output = [];
-const proc = spawn(resolve(cli), ["headless", "--listen", "127.0.0.1:0", ...extra], { env, stdio: ["ignore", "pipe", "pipe"] });
+const args = appForm ? ["--listen", "127.0.0.1:0", "--headless", ...extra] : ["headless", "--listen", "127.0.0.1:0", ...extra];
+const proc = spawn(resolve(cli), args, { env, stdio: ["ignore", "pipe", "pipe"] });
 let exited = null;
 proc.on("exit", (code, signal) => (exited = { code, signal }));
 let found = null;

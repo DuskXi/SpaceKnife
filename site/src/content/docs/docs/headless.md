@@ -24,7 +24,7 @@ Open in a browser:
 Press Ctrl+C to stop.
 ```
 
-While it runs, the terminal shows when a browser connects or goes away, and the backend's warnings and errors. The full log goes to the usual log file ([Data locations](../data-locations/)).
+While it runs, the terminal shows when a browser connects or goes away (`14:02:11 192.168.1.31 connected`), and the backend's warnings and errors. The full log goes to the usual log file ([Data locations](../data-locations/)).
 
 `spaceknife-cli` is installed next to the app ([where it is](../command-line/#where-the-program-is)):
 
@@ -38,7 +38,9 @@ While it runs, the terminal shows when a browser connects or goes away, and the 
 
 It is a console program: the terminal waits for it, and <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. The pages it serves are the built interface in the `ui` folder next to `spaceknife-cli`; `--ui` names another folder.
 
-<!-- TODO: confirm — the portable archives and the Windows installer put `ui` next to spaceknife-cli (apps/desktop/scripts/portable.mjs, src-tauri/tauri.bundle.json resources); the deb / rpm put it in /usr/lib/SpaceKnife/ui and the macOS app in Contents/Resources/ui, which spaceknife-cli doesn't look in yet (headless.rs default_ui_dir): there `--ui` is needed until it does. The AppImage has no way to run spaceknife-cli. -->
+In a portable copy, headless mode keeps its data in the copy's `data` folder, as the app does ([Data locations](../data-locations/)); `SPACEKNIFE_HOME` still wins.
+
+<!-- TODO: confirm — default_ui_dir (crates/sk-server/src/cli/headless.rs) looks for `ui` next to spaceknife-cli, `resources/ui`, `../lib/SpaceKnife/ui` (deb / rpm) and `Contents/Resources/ui` (macOS); not yet checked on a real deb, rpm or macOS install. The AppImage runs spaceknife-cli only once the app's shells hand `--headless` on to it (merge plan §4, the shells' work). -->
 
 ## Options
 
@@ -47,11 +49,13 @@ It is a console program: the terminal waits for it, and <kbd>Ctrl</kbd>+<kbd>C</
 | `--listen <address>` | Listen on this address. Without it: this computer only, `127.0.0.1:8375` |
 | `--yes` | Don't ask before opening SpaceKnife to the network. Needed when there is no terminal to answer in |
 | `--tls-cert <file>` | Serve HTTPS with this certificate (PEM), together with `--tls-key` |
-| `--tls-key <file>` | The certificate's private key (PEM) |
+| `--tls-key <file>` | The certificate's private key (PEM, not encrypted: see **HTTPS** under [Opening it to the network](#opening-it-to-the-network)) |
 | `--ui <folder>` | The built interface to serve (default: the `ui` folder next to the program) |
 | `--help` | List the options |
 
-`spaceknife-cli --headless` and `spaceknife-cli --listen <address>`, as earlier versions of the app took them, still work and mean `spaceknife-cli headless …`.
+The options go in any order, also as `--listen=0.0.0.0`. The help and the messages about wrong options are in the interface language (**Settings › General › Interface language**), as the rest of the command line.
+
+The way SpaceKnife 0.3.x started headless mode still works: `--headless` and `--listen <address>` anywhere among the arguments, for example `spaceknife-cli --yes --listen 0.0.0.0` (what else the 0.3.x command line held, such as Chromium's switches, is skipped). On Windows, `SpaceKnife --headless …` typed in a terminal in the app's folder runs `SpaceKnife.com` there, which starts `spaceknife-cli` with the same arguments and waits for it, as in 0.3.x; started without these options, it opens the window.
 
 The address can be written as:
 
@@ -67,11 +71,11 @@ The address can be written as:
 
 Port `0` lets the system pick a free port; the printed address has it.
 
-Exit codes: `1` when you answered no, the address couldn't be used or the backend didn't start; `2` for a wrong option, no terminal to answer in, a certificate that can't be read, or no built interface in the `ui` folder. Stopped with <kbd>Ctrl</kbd>+<kbd>C</kbd> or by the system, it ends with `0`.
+Exit codes: `1` when you answered no, the address couldn't be used or the backend didn't start; `2` for a wrong option, no terminal to answer in, a certificate or key that can't be used, or no built interface in the `ui` folder. Stopped with <kbd>Ctrl</kbd>+<kbd>C</kbd> or by the system, it ends with `0`, as does `--help`.
 
 ## Opening it to the network
 
-Anyone who can reach the address and has the link can browse the files on this computer with **your account's rights**, move them to the Recycle Bin, and delete them permanently. So before it listens on anything other than this computer (any address but `127.x.x.x`, `::1` or `localhost`), SpaceKnife shows a warning in red and asks:
+Anyone who can reach the address and has the link can use this computer with **your account's rights**: browse its files, move them to the Recycle Bin and delete them permanently, write files anywhere your account can write (exporting a report, saving a snapshot as, exporting the settings: a file written in the right place can make the computer run a program), and bring up a request for administrator rights on this computer. So before it listens on anything other than this computer (any address but `127.x.x.x`, `::1` or `localhost`), SpaceKnife shows a warning in red and asks:
 
 ```text
  ⚠ DANGER: SpaceKnife will be open to the network
@@ -86,8 +90,9 @@ Without a terminal (a service, a scheduled task, input from a file or `/dev/null
 How it is protected:
 
 - **A token in the link.** Each start makes a new random token. It sits after the `#`, which browsers don't send to the server; the page then takes it out of the address bar and keeps it for that browser tab, so a reload still works and the address you share or bookmark has no token. Every connection to the backend needs it, so after a restart the old links stop working: open the new one.
-- **Only this site's pages.** The browser's WebSocket must come from the page this server served. Another website open in the same browser can't connect, even with the token.
+- **Only this site's pages.** The browser's WebSocket must come from the page this server served. Another website open in the same browser can't connect, even with the token, and neither can a program that doesn't say where it comes from. The page runs only its own scripts (a Content-Security-Policy) and can't be shown inside another site.
 - **One address.** The pages and the backend's WebSocket are served together on the address you chose; nothing else listens. The page's files themselves are public: they hold nothing about your files.
+- **Limits.** At most 64 connections at a time (pages and WebSockets together); a request must arrive within 20 seconds and be answered within 30, and a connection idle for 20 seconds is closed, so slow clients can't hold the places.
 
 :::caution[Plain HTTP]
 Without a certificate the traffic is plain HTTP. Anyone on the same network, or on the way, can read the token and every path and file name. On a network you don't control, use HTTPS or an SSH tunnel.
@@ -100,6 +105,20 @@ spaceknife-cli headless --listen 0.0.0.0 --tls-cert nas.lan.pem --tls-key nas.la
 ```
 
 The printed addresses then start with `https://`. A browser warns about a certificate it doesn't trust (self-signed): install your own certificate authority on the device you browse from instead of clicking past the warning.
+
+What the files must be:
+
+- **The certificate**: PEM (`-----BEGIN CERTIFICATE-----`), the computer's own certificate first, then the intermediate ones if any.
+- **The key**: PEM and not encrypted, one of `-----BEGIN PRIVATE KEY-----` (PKCS #8, what mkcert and `openssl genpkey` write), `-----BEGIN RSA PRIVATE KEY-----` (PKCS #1) or `-----BEGIN EC PRIVATE KEY-----` (SEC1).
+
+A key with a password, a binary (DER) file or a `.pfx` / `.p12` can't be read; SpaceKnife says which before it listens. Convert them with OpenSSL first:
+
+```bash
+openssl pkey -in key-with-password.pem -out key.pem              # asks for the password once
+openssl pkcs12 -in nas.pfx -nocerts -nodes -out key.pem          # the key of a .pfx / .p12
+openssl pkcs12 -in nas.pfx -nokeys -out cert.pem                 # its certificates
+openssl x509 -inform der -in cert.cer -out cert.pem              # a DER certificate
+```
 
 **An SSH tunnel** needs no open port at all. On the server, listen on the server itself:
 

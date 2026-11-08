@@ -1,0 +1,28 @@
+[package]
+name = "spaceknife-console"
+version = "0.2.0"
+edition = "2024"
+description = "SpaceKnife.com: the console entry of the Windows app, so a terminal waits for headless mode (spaceknife-cli)"
+license = "MIT"
+publish = false
+
+# No dependencies: a few kernel32 calls. Built on Windows by apps/desktop/scripts/prepare-bundle.mjs
+# and shipped next to the program as SpaceKnife.com (docs/packaging.md). Its own workspace: not a
+# member of the repository's (cargo test --manifest-path packaging/console-launcher/Cargo.toml).
+[workspace]
+
+[[bin]]
+name = "spaceknife-console"
+path = "src/main.rs"
+
+# tests/launcher.rs puts it next to the launcher as spaceknife-cli.exe and SpaceKnife.exe
+[[example]]
+name = "stub"
+path = "examples/stub.rs"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -24,7 +24,7 @@ SpaceKnife 无头模式 · 0.3.5
 按 Ctrl+C 停止。
 ```
 
-运行期间，终端里会显示浏览器的连接和断开，以及后端的警告和错误。完整日志照常写进日志文件（[数据位置](../data-locations/)）。
+运行期间，终端里会显示浏览器的连接和断开（`14:02:11 192.168.1.31 已连接`），以及后端的警告和错误。完整日志照常写进日志文件（[数据位置](../data-locations/)）。
 
 `spaceknife-cli` 装在应用旁边（[在哪里](../command-line/#程序在哪里)）：
 
@@ -38,7 +38,9 @@ SpaceKnife 无头模式 · 0.3.5
 
 它是控制台程序：终端会等它结束，<kbd>Ctrl</kbd>+<kbd>C</kbd> 就能停止。它提供的页面是 `spaceknife-cli` 旁边 `ui` 文件夹里构建好的界面；用 `--ui` 可以指定别的文件夹。
 
-<!-- TODO: confirm — the portable archives and the Windows installer put `ui` next to spaceknife-cli (apps/desktop/scripts/portable.mjs, src-tauri/tauri.bundle.json resources); the deb / rpm put it in /usr/lib/SpaceKnife/ui and the macOS app in Contents/Resources/ui, which spaceknife-cli doesn't look in yet (headless.rs default_ui_dir): there `--ui` is needed until it does. The AppImage has no way to run spaceknife-cli. -->
+在便携版里，无头模式和应用一样把数据存在便携版的 `data` 文件夹里（[数据位置](../data-locations/)）；设了 `SPACEKNIFE_HOME` 时仍以它为准。
+
+<!-- TODO: confirm — default_ui_dir (crates/sk-server/src/cli/headless.rs) looks for `ui` next to spaceknife-cli, `resources/ui`, `../lib/SpaceKnife/ui` (deb / rpm) and `Contents/Resources/ui` (macOS); not yet checked on a real deb, rpm or macOS install. The AppImage runs spaceknife-cli only once the app's shells hand `--headless` on to it (merge plan §4, the shells' work). -->
 
 ## 选项
 
@@ -47,11 +49,13 @@ SpaceKnife 无头模式 · 0.3.5
 | `--listen <地址>` | 监听这个地址。不写时只监听本机：`127.0.0.1:8375` |
 | `--yes` | 在网络上开放前不再询问。没有终端可以回答时必须加 |
 | `--tls-cert <文件>` | 用这个证书（PEM）提供 HTTPS，与 `--tls-key` 一起用 |
-| `--tls-key <文件>` | 证书的私钥（PEM） |
+| `--tls-key <文件>` | 证书的私钥（PEM，不加密：见[在网络上开放](#在网络上开放)里的 **HTTPS**） |
 | `--ui <文件夹>` | 要提供的构建好的界面（默认：程序旁边的 `ui` 文件夹） |
 | `--help` | 列出这些选项 |
 
-以前版本的应用接受的 `spaceknife-cli --headless` 和 `spaceknife-cli --listen <地址>` 仍然可用，等同于 `spaceknife-cli headless …`。
+选项的顺序随意，也可以写成 `--listen=0.0.0.0`。帮助和选项写错时的提示使用界面语言（「设置 › 常规 › 界面语言」），和命令行的其他输出一样。
+
+SpaceKnife 0.3.x 启动无头模式的写法仍然可用：`--headless` 和 `--listen <地址>` 放在参数里的任何位置，例如 `spaceknife-cli --yes --listen 0.0.0.0`（0.3.x 命令行里的其他东西，比如 Chromium 的开关，会被跳过）。Windows 上在应用的文件夹里打开终端，输入 `SpaceKnife --headless …`，运行的是那里的 `SpaceKnife.com`：它用同样的参数启动 `spaceknife-cli` 并等它结束，和 0.3.x 一样；不带这些选项时它打开窗口。
 
 地址可以这样写：
 
@@ -67,11 +71,11 @@ SpaceKnife 无头模式 · 0.3.5
 
 端口写 `0` 由系统挑一个空闲端口，打印出的地址里会带上它。
 
-退出码：回答了「否」、地址用不了、后端没有启动时是 `1`；选项写错、没有终端可以回答、证书读不了，或者 `ui` 文件夹里没有构建好的界面时是 `2`。用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 或被系统停止时是 `0`。
+退出码：回答了「否」、地址用不了、后端没有启动时是 `1`；选项写错、没有终端可以回答、证书或私钥用不了，或者 `ui` 文件夹里没有构建好的界面时是 `2`。用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 或被系统停止时是 `0`，`--help` 也是 `0`。
 
 ## 在网络上开放
 
-能访问这个地址、又拿到链接的人，可以用**你的账户的权限**浏览这台电脑上的文件、移到回收站，或者永久删除。所以只要监听的不只是本机（`127.x.x.x`、`::1`、`localhost` 以外的任何地址），SpaceKnife 都会先用红色显示警告，然后询问：
+能访问这个地址、又拿到链接的人，可以用**你的账户的权限**使用这台电脑：浏览文件、移到回收站或者永久删除，把文件写到你的账户能写的任何地方（导出报告、快照另存为、导出设置；写对了地方，这样一个文件就能让这台电脑运行程序），还能在这台电脑上弹出管理员授权的请求。所以只要监听的不只是本机（`127.x.x.x`、`::1`、`localhost` 以外的任何地址），SpaceKnife 都会先用红色显示警告，然后询问：
 
 ```text
  ⚠ 危险：SpaceKnife 将在网络上开放
@@ -86,8 +90,9 @@ SpaceKnife 无头模式 · 0.3.5
 它怎样保护你：
 
 - **链接里的令牌**：每次启动都生成一个新的随机令牌，放在 `#` 后面，浏览器不会把这部分发给服务器。页面随后把它从地址栏里拿掉，保存在这个浏览器标签页里：刷新照样能连，分享或收藏的地址里也没有令牌。每个连接到后端的会话都要用它，所以重新启动之后旧链接就失效了，请打开新的地址。
-- **只认本站的页面**：浏览器发起的 WebSocket 必须来自这个服务器提供的页面。同一个浏览器里打开的其他网站，就算拿到令牌也连不上。
+- **只认本站的页面**：浏览器发起的 WebSocket 必须来自这个服务器提供的页面。同一个浏览器里打开的其他网站，就算拿到令牌也连不上；不说明自己来自哪里的程序也连不上。页面只运行自己的脚本（内容安全策略），也不能被嵌进别的网站。
 - **只有一个地址**：页面和后端的 WebSocket 一起在你指定的地址上提供，没有别的端口在监听。页面本身的文件是公开的，里面没有任何关于你的文件的信息。
+- **限制**：同时最多 64 个连接（页面和 WebSocket 一起算）；请求要在 20 秒内发完、30 秒内得到回应，空闲 20 秒的连接会被关掉，慢吞吞的客户端占不住名额。
 
 :::caution[明文 HTTP]
 不提供证书时，传输的是明文 HTTP。同一网络上、或者传输途中的任何人，都能看到令牌和所有路径、文件名。在你管不了的网络上，请用 HTTPS 或 SSH 隧道。
@@ -100,6 +105,20 @@ spaceknife-cli headless --listen 0.0.0.0 --tls-cert nas.lan.pem --tls-key nas.la
 ```
 
 这时打印出的地址以 `https://` 开头。浏览器对不信任的证书（自签名）会给出警告：请在用来访问的设备上安装你自己的证书颁发机构，不要直接点过警告。
+
+文件要求：
+
+- **证书**：PEM 格式（`-----BEGIN CERTIFICATE-----`），这台电脑自己的证书在前，有中间证书的话跟在后面。
+- **私钥**：PEM 格式且不加密，是 `-----BEGIN PRIVATE KEY-----`（PKCS #8，mkcert 和 `openssl genpkey` 写的就是它）、`-----BEGIN RSA PRIVATE KEY-----`（PKCS #1）或 `-----BEGIN EC PRIVATE KEY-----`（SEC1）之一。
+
+带密码的私钥、二进制（DER）文件和 `.pfx` / `.p12` 读不了，SpaceKnife 会在监听之前说明是哪一种。先用 OpenSSL 转换：
+
+```bash
+openssl pkey -in key-with-password.pem -out key.pem              # 会问一次密码
+openssl pkcs12 -in nas.pfx -nocerts -nodes -out key.pem          # .pfx / .p12 里的私钥
+openssl pkcs12 -in nas.pfx -nokeys -out cert.pem                 # 里面的证书
+openssl x509 -inform der -in cert.cer -out cert.pem              # DER 格式的证书
+```
 
 **SSH 隧道**完全不需要开放端口。在服务器上只监听本机：
 

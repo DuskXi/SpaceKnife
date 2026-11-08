@@ -127,7 +127,7 @@ pub fn scan_with(args: &ScanArgs, out: &mut Console) -> i32 {
     let limit = match args.disk_limit.as_deref().map(load_limit).transpose() {
         Ok(l) => l,
         Err(msg) => {
-            eprintln!("Error: Invalid value for '--disk-limit': {msg}");
+            super::eprint_line(&format!("Error: Invalid value for '--disk-limit': {msg}"));
             return 2;
         }
     };
@@ -968,14 +968,11 @@ fn save(scanner: &Scanner, path: &Path, method: &ScanMethod) -> bool {
     match snapshot::save(&r, path, &opts) {
         Ok(_) => true,
         Err(e) => {
-            eprintln!(
-                "{}",
-                tr!(
-                    "无法保存快照 {path}：{reason}",
-                    path = path,
-                    reason = e.to_string()
-                )
-            );
+            super::eprint_line(&tr!(
+                "无法保存快照 {path}：{reason}",
+                path = path,
+                reason = e.to_string()
+            ));
             false
         }
     }

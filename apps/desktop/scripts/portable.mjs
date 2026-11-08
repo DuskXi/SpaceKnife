@@ -1,6 +1,6 @@
 // The portable archive of a release (after `pnpm bundle`): one folder with the program, the console
-// binary, the built interface for headless mode (`ui`, spaceknife-cli's default --ui), the licences
-// and an empty "data" folder (what makes it portable: lib.rs prepare_environment,
+// binary (on Windows also SpaceKnife.com, its console launcher), the built interface for headless
+// mode (`ui`, spaceknife-cli's default --ui), the licences and an empty "data" folder (what makes it portable: lib.rs prepare_environment,
 // src-tauri/src/portable.rs), packed as the update checks expect it (crates/sk-core update
 // asset_template, src-tauri/src/update.rs) and as install.rs unpacks it (one folder at the top):
 //
@@ -41,6 +41,8 @@ if (os === "mac") {
 } else {
   copyFileSync(join(release, `spaceknife${exe}`), join(folder, `spaceknife${exe}`));
   copyFileSync(join(release, `spaceknife-cli${exe}`), join(folder, `spaceknife-cli${exe}`));
+  // Windows: `SpaceKnife --headless …` in a terminal (prepare-bundle.mjs builds it)
+  if (os === "win") copyFileSync(join(desktop, "src-tauri", "target-bundle", "SpaceKnife.com"), join(folder, "SpaceKnife.com"));
   cpSync(join(desktop, "src-tauri", "target-bundle", "licenses"), join(folder, "licenses"), { recursive: true });
   // `spaceknife-cli headless` serves the interface from `ui` next to it
   cpSync(join(desktop, ".output", "public"), join(folder, "ui"), { recursive: true, dereference: true });
