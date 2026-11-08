@@ -6,14 +6,23 @@ Pure-Rust scanning core of SpaceKnife (formerly the PyO3 extension `packages/nat
   case-only siblings, relative opens, access times kept) and POSIX (`getdents64` /
   `getattrlistbulk` + `fstatat`, `O_NOFOLLOW`, paths past `PATH_MAX`).
 - `sk_native::mft` — NTFS `$MFT` reader and parallel parser (Windows volumes; image files
-  everywhere).
+  everywhere), and the parallel build of a whole volume's node columns from its table
+  (`build_tree`).
+- `sk_native::fold` — the fold of listings into a node store's new rows: the checks and the
+  per-entry work of the store's `ingest_slice`, `ingest_listing` and relist.
+- `sk_native::columns` — the node store's columns as plain slices (`NodeColumns`, `NameOffsets`)
+  and its `kind` / `flag` values.
 
-Features: `hardscan` and `mft`, both on by default. Nothing here touches the node store: results are
-plain column vectors meant to be appended to it.
+Features: `hardscan` and `mft`, both on by default (`fold`, `columns` and `cpus` are always there).
+Nothing here owns the node store: scan results are plain column vectors meant to be appended to it,
+and the fold and the `$MFT` build write into rows the store lends them (`columns::NodeColumns`);
+the store keeps its memory, its locks and what readers see.
 
 Layering: this crate is the performance layer with its own API and tests; the backend crates
 (sk-core, sk-store, sk-server) use it only through that API, and it depends on no other crate of the
-workspace and on nothing by path (`tests/layering.rs` checks the manifest, in `cargo test`).
+workspace and on nothing by path (`tests/layering.rs` checks the manifest, in `cargo test`, and that
+the backend's scan glue — sk-core's `scan/mft.rs` and `scan/mod.rs`, sk-store's `ingest_slice` —
+leaves the parallel and per-entry work to this crate).
 
 ## `hardscan`
 
@@ -112,11 +121,15 @@ are listed up to a cap, past that they are errors with `messages::CAP`. The othe
 
 - `kind::{FILE, DIR, LINK, OTHER}`, `flag::{ACCESS_DENIED, MOUNT, HARDLINK_DUP, COMPRESSED, SPARSE,
   HIDDEN, SYSTEM, READONLY, REPARSE, CLOUD, ERROR, ARCHIVE, ENCRYPTED, TEMPORARY, NOT_INDEXED,
-  OFFLINE, ADS}` — the store's `Kind` / `Flag` values.
+  OFFLINE, ADS}` — the store's `Kind` / `Flag` values (`sk_native::columns`, which also has the
+  bits only the fold, the `$MFT` build and the store set: `PENDING`, `VIRTUAL`, `GONE`; sk-store's
+  tests check they agree).
 - `LinkSet` — `(dev, ino)` of hard-linked files already counted, across slices:
   `mark(&dev, &ino, &nlink, &kind, &mut flags) -> usize` or `mark_entries(&mut Entries)` sets
   `HARDLINK_DUP` on every repeat (panics if the columns differ in length); `len`, `contains`.
 - `lower_ext(&[u8]) -> Vec<u8>` — Python's `str.lower()` on extension bytes.
+- `Entries::map_ext(&[u16])` — moves the extension ids onto another table (a store's; ids past
+  the map become 0).
 - `open_stats(reset) -> Vec<(&'static str, u64)>` — process-wide open counters (Windows:
   `relative`, `by_path`, `strict_by_id`, `pinned`, `pinned_cap_hit`, `final_skipped`,
   `final_verified`, `final_wrong`, `dot_matched`, `dot_unmatched`, `keep_off`, `alloc_asked`,
@@ -199,8 +212,7 @@ used).
 dropped): `record, parent: Vec<u64>`, `name_off: Vec<u32>`, `name_len: Vec<u16>`, `kind: Vec<u8>`
 (0 file, 1 dir, 2 link), `flags: Vec<u32>`, `size, alloc, ads_size, ads_alloc: Vec<i64>`,
 `mtime, ctime, atime: Vec<i64>` (unix seconds), `nlink: Vec<u16>`, `names: Vec<u8>` (UTF-8 /
-WTF-8), `bad_records: u64`; `rows()`, `name(i)`. The table → node store build is sk-core's
-(`sk_core::scan::mft::table_to_store`).
+WTF-8), `bad_records: u64`; `rows()`, `name(i)`.
 
 `VolumeInfo`: `bytes_per_sector, cluster_size, record_size, mft_lcn, mft_size, mft_valid_size,
 mft_fragments, volume_size`.
@@ -210,12 +222,76 @@ Errors are `io::Error`: `InvalidInput` (bad sizes, duty outside (0, 1], not a vo
 (volume functions off Windows), `Interrupted` (cancelled); a read that fails mid-scan is its OS
 error (every read in flight is waited for first).
 
+### The tree build: `build_tree`
+
+```rust
+use sk_native::mft::{build_tree, PseudoNames, TreeOptions, TreeSink};
+
+let names = PseudoNames { root: b"C:\\", meta: meta.as_bytes(), orphans: orphans.as_bytes() };
+let report = build_tree(table, &names, &TreeOptions { include_ads, count_links_each }, &mut sink)?;
+// report: names (rows), nodes, orphans, cycles (parent cycles broken)
+```
+
+The table (consumed: its columns go as soon as the build is done with them) becomes the node
+columns of the whole volume: node 0, the root (record 5), the metafile folder and the orphans
+folder when they hold something, every other name breadth-first (children in row order, each
+folder's children the next ids). The steps (docs/native.md 2.1) run over all rows in parallel on a
+rayon pool of the build's own (`cpus::usable()` threads named `sk-mft-build-N`, gone when the
+call returns): first rows of records and `HARDLINK_DUP`, parent rows, metafiles and orphans,
+breadth-first levels, parent cycles broken (the smallest row of each; every row past
+`CYCLE_LIMIT`), the extension table (distinct raw extensions sorted, lower-cased, numbered), the
+`\0name` image, the columns, subtree totals level by level.
+
+`TreeSink::columns(nodes, image_len, ext_table)` is asked once, when the shape is known, for
+zero-filled columns of `nodes` rows and an image of `image_len` bytes (the store's
+`StoreBuilder`: sk-core's `table_to_store` is the sink; tests use vectors). Errors:
+`BuildError::Table` (columns of different lengths, name offsets out of range), `TooManyRows`,
+`NameTooLong` (a pseudo folder's name), `Sink` (the sink's own error); a sink that gives other
+shapes is a panic. Constants: `mft::build::{ROOT_RECORD, BADCLUS_RECORD, FIRST_USER_RECORD,
+CYCLE_LIMIT}`.
+
+## `fold`
+
+```rust
+use sk_native::fold::{Folder, RowsOut, SliceFold, Tree, write_rows};
+
+// a slice: listing k lists folders[k], its entries are rows bounds[k]..bounds[k + 1]
+let mut plan = SliceFold::plan(&store_view, &folders, &bounds, &entries)?; // nothing written yet
+// the store grows by plan.rows(), makes room for plan.name_bytes(), lends the new rows
+plan.write(RowsOut { cols, offsets, names, names_at }, &entries);
+for l in plan.listed_nodes() { /* publish: range l.start / l.count of l.node, l.totals up its chain */ }
+let starts = plan.starts(); // first row per listing, None for a skipped one
+```
+
+The per-entry work of folding listings into the node store (docs/native.md 2.3); the store
+(sk-store's `Appender::ingest_slice`) lends the rows and publishes them in its order, under its
+locks. `SliceFold::plan` reads the store through `Tree` (`rows`, `flags`, `is_dir`,
+`child_count`, `depth`) and checks the slice as `ingest_slice` does — the bounds, then listing by
+listing (a node in the store, a folder, not listed yet; an entry of an earlier listing, in range,
+a folder), then folders listed twice — refusing it with `FoldError` (`BadBatch`, `BadSlice(why)`,
+`NotADirectory(id)`, `AlreadyListed(id)`) before anything is written. Listings of folders that left
+the tree (`GONE`) are skipped with everything inside them. `write` fills the lent rows
+(`RowsOut`: `NodeColumns` of `rows()` rows, `NameOffsets`, `name_bytes()` bytes of names at the
+store's offset `names_at`): the entry columns, `PENDING` on folders still to list (never on
+`MOUNT` ones), zero totals and ranges, `\0name` and `name_off`; it sums each listing's entries
+(`Totals`: bytes, allocated, files, folders; further hard links add no bytes) and folds the sums up
+the slice deepest first; folders listed inside the slice get their range and subtree totals.
+`write_rows(out, entries, parent, depth, pending)` writes one folder's entries the same way
+(`ingest_listing`; a relist's new rows with `pending` false). `EntryColumns` borrows the entry
+columns (`is_consistent()`); a write into rows of another shape is a panic.
+
 ## Tests
 
 `cargo test -p sk-native`: unit tests next to the code, `tests/hardscan.rs` (the walker against
 a `std::fs` reference walker, slicing, cancellation, Windows attributes / long paths / lone
 surrogates / ACLs / trailing dots / relative opens / path limit / case-sensitive folders, POSIX
 names / modes / mounts / skip / protect, `LinkSet`), `tests/mft.rs` with `tests/mft_image`
-(a port of `backend/tests/mft_image.py`: synthetic records, volumes and fuzzing). Tests that need
+(a port of `backend/tests/mft_image.py`: synthetic records, volumes and fuzzing),
+`tests/mft_build.rs` (the tree build into vectors: the tree's shape, every row once, metafiles,
+orphans and cycles, extensions, totals, refused tables and sinks, the build's own pool),
+`tests/fold.rs` (random slices against listings folded one at a time, skipped listings, refused
+slices, every lent row filled and nothing past them), `tests/layering.rs`. Tests that need
 case-sensitive folders, symlinks or ACL changes skip themselves (printing why) where the system
-does not allow them.
+does not allow them. The store's side (lending rows, publishing) is tested in sk-store
+(`tests/ingest_slice.rs`), the whole `$MFT` build against a serial reference in sk-core
+(`tests/scan_mft_build.rs`).

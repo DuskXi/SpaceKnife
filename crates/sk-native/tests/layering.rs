@@ -150,6 +150,49 @@ fn sk_native_depends_on_no_other_workspace_crate() {
     );
 }
 
+/// A source file without its `//` comments (doc comments included).
+fn code_of(path: &Path) -> String {
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    text.lines()
+        .map(|l| l.find("//").map_or(l, |i| &l[..i]))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The performance-critical work of the scans is this crate's: the backend's `$MFT` glue
+/// (sk-core `scan/mft.rs`) and slice glue (`scan/mod.rs`) run nothing in parallel and write
+/// nothing through raw pointers (the parallel tree build is [`sk_native::mft::build_tree`]),
+/// and the store folds listings with [`sk_native::fold`] (no row writer of its own).
+#[test]
+fn the_hot_work_of_the_scans_is_in_this_crate() {
+    let root = workspace_root();
+    for rel in [
+        "crates/sk-core/src/scan/mft.rs",
+        "crates/sk-core/src/scan/mod.rs",
+    ] {
+        let code = code_of(&root.join(rel));
+        for word in ["unsafe", "rayon", "par_iter", "ThreadPoolBuilder"] {
+            assert!(
+                !code.contains(word),
+                "{rel} uses {word}: performance-critical code belongs in sk-native"
+            );
+        }
+    }
+    let store = code_of(&root.join("crates/sk-store/src/store.rs"));
+    assert!(
+        store.contains("sk_native::fold")
+            && store.contains("SliceFold::plan")
+            && store.contains("fold::write_rows"),
+        "sk-store folds listings with sk_native::fold"
+    );
+    for gone in ["fn gone_listings", "fn write_rows", "fn sums("] {
+        assert!(
+            !store.contains(gone),
+            "sk-store/src/store.rs has `{gone}`: the fold's row writing belongs in sk-native"
+        );
+    }
+}
+
 #[test]
 fn the_layering_check_finds_every_way_in() {
     let workspace: Table = r#"

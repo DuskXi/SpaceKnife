@@ -26,7 +26,11 @@ fn fold_listings(
 }
 
 fn two_stores() -> (Store, Store) {
-    let stores = (Store::new(), Store::new());
+    two_stores_with(StoreOptions::default())
+}
+
+fn two_stores_with(opts: StoreOptions) -> (Store, Store) {
+    let stores = (Store::with_options(opts.clone()), Store::with_options(opts));
     for s in [&stores.0, &stores.1] {
         let mut a = s.appender();
         a.add_root_dir("C:\\a").unwrap();
@@ -116,10 +120,36 @@ fn clear_mount_pending(store: &Store) {
 
 #[test]
 fn random_slices() {
-    for case in 0..300u64 {
+    random_slices_with(0..300, StoreOptions::default);
+}
+
+/// The same with names in many small heap chunks and `name_off` widening on the way (the rows
+/// sk-native writes are lent over chunk ends and both offset widths).
+#[test]
+fn random_slices_over_small_chunks_and_wide_offsets() {
+    let (wide, chunked) = random_slices_with(300..700, || StoreOptions {
+        first_chunk: 16,
+        max_chunk: 48,
+        off_narrow_limit: 150,
+        ..StoreOptions::default()
+    });
+    assert!(
+        wide > 40 && chunked > 30,
+        "{wide} stores widened, {chunked} in 3+ chunks"
+    );
+}
+
+/// Random rounds of slices against ingest_listing; returns how many stores ended with wide
+/// name offsets and how many with names in three chunks or more.
+fn random_slices_with(
+    cases: std::ops::Range<u64>,
+    opts: impl Fn() -> StoreOptions,
+) -> (usize, usize) {
+    let (mut wide, mut chunked) = (0, 0);
+    for case in cases {
         let mut rng = Rng::new(case);
         let rounds = 1 + rng.below(4);
-        let (vec, refst) = two_stores();
+        let (vec, refst) = two_stores_with(opts());
         let mut pending = vec![1, 2];
         for _ in 0..rounds {
             let (refs, bounds, batch, left) = random_slice(&mut rng, &mut pending);
@@ -135,7 +165,10 @@ fn random_slices() {
         }
         // the incremental totals agree with a full recount as well
         testing::check_invariants(&vec.read()).unwrap();
+        wide += vec.read().wide_offsets() as usize;
+        chunked += (vec.read().name_chunks() >= 3) as usize;
     }
+    (wide, chunked)
 }
 
 #[test]
@@ -234,4 +267,92 @@ fn bad_slices_change_nothing() {
         a.ingest_slice(&[SliceRef::Node(root)], &[0, 1], &one),
         Err(StoreError::AlreadyListed(root))
     );
+}
+
+/// The fold (sk-native) writes the store's values: its kinds and flag bits are the store's.
+#[test]
+fn the_native_fold_writes_the_stores_values() {
+    use sk_native::columns::{flag, kind};
+    assert_eq!(
+        [kind::FILE, kind::DIR, kind::LINK, kind::OTHER],
+        [Kind::File, Kind::Dir, Kind::Link, Kind::Other].map(|k| k as u8)
+    );
+    let pairs = [
+        (flag::ACCESS_DENIED, Flags::ACCESS_DENIED),
+        (flag::MOUNT, Flags::MOUNT),
+        (flag::HARDLINK_DUP, Flags::HARDLINK_DUP),
+        (flag::COMPRESSED, Flags::COMPRESSED),
+        (flag::SPARSE, Flags::SPARSE),
+        (flag::HIDDEN, Flags::HIDDEN),
+        (flag::SYSTEM, Flags::SYSTEM),
+        (flag::READONLY, Flags::READONLY),
+        (flag::REPARSE, Flags::REPARSE),
+        (flag::CLOUD, Flags::CLOUD),
+        (flag::ERROR, Flags::ERROR),
+        (flag::PENDING, Flags::PENDING),
+        (flag::ARCHIVE, Flags::ARCHIVE),
+        (flag::ENCRYPTED, Flags::ENCRYPTED),
+        (flag::TEMPORARY, Flags::TEMPORARY),
+        (flag::NOT_INDEXED, Flags::NOT_INDEXED),
+        (flag::OFFLINE, Flags::OFFLINE),
+        (flag::VIRTUAL, Flags::VIRTUAL),
+        (flag::ADS, Flags::ADS),
+        (flag::GONE, Flags::GONE),
+    ];
+    for (native, store) in pairs {
+        assert_eq!(native, store.0, "{store:?}");
+    }
+}
+
+/// A slice that lists a folder which left the tree and one that did not: the first is skipped
+/// with the listing inside it, the second folds as `ingest_listing` folds it.
+#[test]
+fn a_slice_over_a_folder_that_left_the_tree_folds_the_rest() {
+    let (vec, refst) = two_stores();
+    let mut ids = Vec::new();
+    for s in [&vec, &refst] {
+        let mut a = s.appender();
+        ids = vec![
+            a.ingest_listing(1, &testing::dirs_and_files("k", 1, 2))
+                .unwrap(),
+            a.ingest_listing(2, &testing::dirs_and_files("g", 1, 2))
+                .unwrap(),
+        ];
+    }
+    let (kept, gone) = (ids[0], ids[1]);
+    for s in [&vec, &refst] {
+        let mut w = s.write();
+        let f = w.flags(gone).0;
+        w.set_raw(Col::Flags, gone, f | Flags::GONE.0);
+        w.touch();
+    }
+    let inner = testing::dirs_and_files("i", 0, 3);
+    let outer = testing::dirs_and_files("o", 1, 1);
+    let mut all = EntryBatch::new();
+    for b in [&outer, &inner, &outer, &inner] {
+        append_batch(&mut all, b);
+    }
+    let refs = [
+        SliceRef::Node(gone),
+        SliceRef::Entry {
+            listing: 0,
+            entry: 0,
+        },
+        SliceRef::Node(kept),
+        SliceRef::Entry {
+            listing: 2,
+            entry: 0,
+        },
+    ];
+    let bounds = [0, 2, 5, 7, 10];
+    let starts = vec.appender().ingest_slice(&refs, &bounds, &all).unwrap();
+    let n = refst.len() as NodeId;
+    assert_eq!(starts, vec![None, None, Some(n), Some(n + 2)]);
+    {
+        let mut a = refst.appender();
+        let s = a.ingest_listing(kept, &outer).unwrap();
+        a.ingest_listing(s, &inner).unwrap();
+    }
+    // (no check_invariants: the GONE row above was marked by hand, not moved out of its range)
+    testing::assert_same_store(&vec.read(), &refst.read());
 }

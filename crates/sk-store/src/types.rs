@@ -428,6 +428,24 @@ impl EntryBatch {
         Ok(())
     }
 
+    /// The columns as sk-native's fold reads them.
+    pub fn columns(&self) -> sk_native::fold::EntryColumns<'_> {
+        sk_native::fold::EntryColumns {
+            names: &self.names,
+            name_lens: &self.name_lens,
+            ext: &self.ext,
+            kind: &self.kind,
+            flags: &self.flags,
+            size: &self.size,
+            alloc: &self.alloc,
+            mtime: &self.mtime,
+            ctime: &self.ctime,
+            atime: &self.atime,
+            ino: &self.ino,
+            nlink: &self.nlink,
+        }
+    }
+
     /// Byte offset of every name in `names` (plus the end).
     pub fn name_offsets(&self) -> Vec<usize> {
         let mut out = Vec::with_capacity(self.len() + 1);

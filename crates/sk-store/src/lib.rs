@@ -77,6 +77,9 @@
 //!
 //! * [`store`]: [`Store`], the guards, ingest ([`Appender::ingest_listing`],
 //!   [`Appender::ingest_slice`], [`Appender::add_root`]), [`StoreBuilder`] for whole columns.
+//!   The checks and the per-entry writing of new rows are the performance layer's
+//!   (`sk_native::fold`): the store lends it rows nobody reads yet ([`ColumnSlices`], the heap's
+//!   tail) and publishes them in the order above.
 //! * [`mutate`]: relist, stat updates, compaction (file-change monitor).
 //! * [`subtree`]: subtree walks (whole or chunked) and summaries.
 //! * [`lookup`]: path → node with per-folder name maps.

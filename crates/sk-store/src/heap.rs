@@ -133,4 +133,27 @@ impl HeapWriter {
         self.used += need;
         first
     }
+
+    /// The `need` bytes past `used` of the last chunk ([`HeapWriter::room`] made it large
+    /// enough), for a writer to fill with `\0name` runs; [`HeapWriter::commit`] then takes them.
+    ///
+    /// # Safety
+    /// Nobody may read these bytes (they are unpublished).
+    pub(crate) unsafe fn tail(&mut self, need: usize) -> &mut [u8] {
+        let chunk = self.chunks.last().expect("room() first");
+        assert!(self.used + need <= chunk.cap());
+        // SAFETY: within the chunk (asserted), past every published byte (caller's contract);
+        // `&mut self` keeps any other writer of the heap away meanwhile.
+        unsafe { std::slice::from_raw_parts_mut(chunk.buf.ptr().add(self.used), need) }
+    }
+
+    /// Takes the `need` bytes [`HeapWriter::tail`] lent, filled.
+    pub(crate) fn commit(&mut self, need: usize) {
+        if need == 0 {
+            return;
+        }
+        let cap = self.chunks.last().expect("room() first").cap();
+        assert!(self.used + need <= cap);
+        self.used += need;
+    }
 }

@@ -2,13 +2,15 @@
 
 本文是 M4 各部分（Rust 扩展、提权扫描助手、IO 限速、扫描调度）之间的接口契约，内容与 M4 完成时的实现一致。改动接口时先改本文。
 
-> **现状（0.3.5 起）**：后端已整体改写为 Rust，原来的 PyO3 扩展 `spaceknife_native`（`packages/native`）现在是普通的 Rust 库 `crates/sk-native`（`sk_native`：`hardscan`、`mft`、`cpus`；没有 Python、没有 GIL），由 `crates/sk-core` 直接调用。下文 §2 的 Python 签名（`def scan_slice(...)`、`MftTable` 的 numpy 列、`py.allow_threads`、「纯 Python 回退」）记录的是 M4 时的接口；行为、选项名、环境变量和测量结论在 Rust 版里保持不变，对应的 Rust 接口见 [crates/sk-native/README.md](../crates/sk-native/README.md)。对应关系：
+> **现状（0.3.5 起）**：后端已整体改写为 Rust，原来的 PyO3 扩展 `spaceknife_native`（`packages/native`）现在是普通的 Rust 库 `crates/sk-native`（`sk_native`：`hardscan`、`mft`、`fold`、`columns`、`cpus`；没有 Python、没有 GIL），由 `crates/sk-core` 和 `crates/sk-store` 通过它自己的接口调用，它不依赖工作区里的任何其他 crate（性能层：遍历、`$MFT` 解析与建树、切片归并的逐项工作都在这里；后端的策略——伪目录的名字、store 的内存、锁和发布顺序、ACCESS_DENIED 与待扫列表——留在后端）。下文 §2 的 Python 签名（`def scan_slice(...)`、`MftTable` 的 numpy 列、`py.allow_threads`、「纯 Python 回退」）记录的是 M4 时的接口；行为、选项名、环境变量和测量结论在 Rust 版里保持不变，对应的 Rust 接口见 [crates/sk-native/README.md](../crates/sk-native/README.md)。对应关系：
 >
 > | 本文写的（Python 时期） | 现在 |
 > |---|---|
 > | `packages/native/src/mft/`、`src/hardscan/` | `crates/sk-native/src/mft/`、`crates/sk-native/src/hardscan/` |
-> | `spaceknife/scan/mft.py` 的 `table_to_store`、`src/mft/build.rs`（`mft_build`） | `crates/sk-core/src/scan/mft.rs`（`table_to_store`） |
-> | `src/fold.rs`（`SliceFold`）、`NodeStore.ingest_slices` | `crates/sk-store/src/store.rs`（`ingest_slices`） |
+> | `src/mft/build.rs`（`mft_build`） | `crates/sk-native/src/mft/build.rs`（`build_tree`：建树本身，写进 store 借出的列） |
+> | `spaceknife/scan/mft.py` 的 `table_to_store` | `crates/sk-core/src/scan/mft.rs`（`table_to_store`：伪目录的名字、给建树一个 `StoreBuilder`） |
+> | `src/fold.rs`（`SliceFold`） | `crates/sk-native/src/fold.rs`（`SliceFold`、`write_rows`：核对与写行） |
+> | `NodeStore.ingest_slices` | `crates/sk-store/src/store.rs`（`ingest_slice`：借出新行、按自己的顺序发布） |
 > | `spaceknife/scan/scanner.py`、`worker.py` | `crates/sk-core/src/scan/`（`scanner.rs`、`gate.rs`、`winopts.rs`） |
 > | `spaceknife/helper/` | `crates/sk-core/src/helper/` |
 > | `spaceknife/io/` | `crates/sk-core/src/io/` |
@@ -235,7 +237,9 @@ def scan_slice(
   - 整盘 A-B-A（565d4db、这一版、565d4db，每次扫描都存快照）：逐个文件夹按名字比对三棵树，每一项比较扫描写的全部列（kind、flags、size、alloc、mtime、ctime、atime、ino、nlink），只把「两次 565d4db 相同、这一版不同」的算作这一版的差异：W:（ReFS 321.7 万项，32.5 万个文件夹）、I:（WinBtrfs 150.5 万项）、F:（107.5 万项）、K:（191.3 万项）都是 0；C:（883.3 万项，105.9 万个文件夹）2 处，都是期间的文件变动：Wallpaper Engine 一个随机名字的临时文件只在第二次扫描时存在，NZXT CAM 的 `scope_v2.json` 第二次是 12,033 字节、前后两次是 12,032 字节（两次 565d4db 之间本身就有 4,790 项访问时间、126 项修改时间、29 个名字不同）。`bench\compare.py` 对每一对的结论相同（W:、I:、F:、K: 两侧独有的名字都是 0）。Linux（WSL 根分区 66 万项）同样比对：只有 HARDLINK_DUP 落在硬链接的哪个名字上不同（取决于切片落地的先后，上面「硬链接只计一次」；两次 565d4db 之间本身就有 38,662 处），另一处是另一个程序的临时文件。
   - `skip_final` 的核验模式（`_verify_final`）整盘跑了一遍：C: 1,058,647 个文件夹、D: 4,600、F: 147,880、G:（ReFS）48,607、H:（WinBtrfs）4,794、I:（WinBtrfs）134,475、K: 303,277、W:（ReFS）324,650，共 2,026,930 个文件夹，省掉的那次查询发出去都只返回 `STATUS_NO_MORE_FILES`（`final_wrong` 0）。这几次扫描里相对打开全部由 "." 项核对通过（`dot_unmatched` 0），WinBtrfs 上也是。
 
-### 2.3 原生归并（M4 时是 `SliceFold`，`src/fold.rs`；现在是 `crates/sk-store/src/store.rs` 的 `ingest_slices`）
+### 2.3 原生归并（M4 时是 `SliceFold`，`src/fold.rs`；现在是 `crates/sk-native/src/fold.rs` 的 `SliceFold`，由 `crates/sk-store/src/store.rs` 的 `ingest_slice` 调用）
+
+> **现状**：三步的分工与下文相同，只是「后端」换成了 sk-store：第一步（`SliceFold::plan`，通过 `fold::Tree` 读 store 的行）和第二步（`SliceFold::write`，写进 store 借出的 `RowsOut`：新行的各列、`name_off` 和名字堆里留出的一段）在 sk-native；扩列、留名字空间（`name_room`）、借出新行（`lend_rows`）和第三步发布（去掉 PENDING、版本号、节点数、先起点后数量、合计沿父链上传）在 sk-store。`ingest_listing` 和监控重列的新行用同一个写行函数（`fold::write_rows`）。测试：`crates/sk-native/tests/fold.rs`（随机切片与逐个列表归并的结果逐列相同、跳过的列表、坏切片、借出的行都写满且不越界）、`crates/sk-store/tests/ingest_slice.rs`（与 `ingest_listing` 比，含小名字块和变宽的名字偏移、一部分列表被跳过的切片、两边的 kind/flag 值一致）。
 
 `NodeStore.ingest_slices(parts)` 把同时落地的几个切片当成一个归并（就是以前 `worker.merge_slices` 再 `ingest_slice` 的结果，但不再拼出合并后的副本）；`ingest_slice` 是只有一个切片的特例，监控的重列也走它。有原生扩展时由 `spaceknife_native.SliceFold` 分三步做，没有时（或设 `SPACEKNIFE_PY_FOLD=1`，回退开关）用原来的 numpy 归并（`NodeStore._ingest_slice_py`），两者逐列相同。
 

@@ -28,7 +28,7 @@ private stand-in in your own module with a `// TODO(<owner module>)` note and me
 |---|---|
 | platform | `i18n` (+ `locales/*.json`), `paths`, `fmt`, `privacy`, `log` (log.py + logbus.py: tracing + an in-memory bus for the `log` topic, rotating file log), `memory`, `settings` (settings.py + settings_io.py), `update` (update.py + update_swap.py), `classes`, `events` |
 | system | `disks` (disks/*), `io` (io/*: governor, sampler, priority, registry, disks), `helper` (helper/*: the elevated helper process — its entry point will be a subcommand of the single app binary) |
-| scan | `volume` (scan/volume.py), `media` (scan/media.py), `scan` (scanner.py, worker.py, mft.py → `sk_store::StoreBuilder`), `monitor` (monitor/*), `pathclass` |
+| scan | `volume` (scan/volume.py), `media` (scan/media.py), `scan` (scanner.py, worker.py, mft.py → `sk_native::mft::build_tree` into a `sk_store::StoreBuilder`), `monitor` (monitor/*), `pathclass` |
 | view | `filter` (filter/* incl. the name index of filter/names.py), `layout` (layout/*), `view` (view/*) |
 | analysis | `diff`, `ops` (ops/*: basket, locks, paths, trash), `insights` |
 | output | `export` (export/* incl. builtin `.sktpl` templates), `palette` (palette/* incl. pinyin.json) |
