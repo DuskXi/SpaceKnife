@@ -14,8 +14,9 @@ Two ways to run it:
 | `parity.py check` / `cargo test -p sk-server --test parity_replay` | only the candidate | the candidate against `golden/<platform>/`, recorded from the reference |
 
 The Rust replayer ([crates/sk-server/tests/parity_replay.rs](../../crates/sk-server/tests/parity_replay.rs))
-runs in the normal test suite, so the gate keeps working once Python is gone. A platform without
-goldens (macOS today) replays nothing and says so.
+runs in the normal test suite, so the gate keeps working once Python is gone. Goldens exist for
+`win32` (recorded on Windows 11) and `linux` (Ubuntu 22.04 under WSL); a platform without goldens
+(macOS today) replays nothing and says so. Re-record both after changing a scenario.
 
 ## Running
 
@@ -74,7 +75,7 @@ differences of the scenario that are product bugs (see below).
 | `monitor` | live monitoring over the protocol: created/deleted/renamed files and folders reach the tree, `scan.progress` pushes, `scan.monitor` off and on |
 | `settings_classes` | settings get/update/conflict/invalid/reset/export/import, `settings.changed` to another session in order, file classes and folder classes, `classes.changed`, both after a restart |
 | `palette` | commands, queries, checks, path group, previews, recents across a restart |
-| `basket_ops` | the delete basket across sessions, `basket.changed` in order, a permanent deletion with undo, `ops.progress` |
+| `basket_ops` | the delete basket across sessions (`basket.changed` as the state the other session ends up with: both backends re-send it after background lock checks), a permanent deletion with undo, `ops.progress` |
 | `compare` | auto-saved snapshots, `compare.*`, a compare view's frames |
 | `system` | update checks against the local feed, maintenance, machine/volume/io (shapes), `log` and `io` topics, exports (file contents), `app.shutdown` |
 | `upgrade` | **0.3.4 writes, 0.3.5 reads back** (below) |
@@ -95,7 +96,7 @@ normalization).
 | `{"wait_scan": "$s.scan_id"}` | subscribes to `scan` until a final status (`snapshot: true`: with its snapshot) | the final status, whether `items` only grew |
 | `{"until": {"call", "params", "field", "null" / "equals"}}` | polls a call until a field is (not) null / equals | whether it happened in `timeout` |
 | `{"subscribe": T, "params": P}` | `$/subscribe` | the result |
-| `{"events": E, "count": N}` | waits for N events (`mode`: `all`, `last`, `latest` = newest queued, `shape`, `count`; `stop_at: {field, in}`: up to the first matching one) | the events |
+| `{"events": E, "count": N}` | waits for N events (`mode`: `all`, `last`, `latest` = newest queued, `shape`, `count`; `stop_at: {field, in}`: up to the first matching one; `settle`: wait that long before taking them; `dedupe`: a state event repeated unchanged counts once) | the events |
 | `{"drain": E}` | forgets queued events (`settle`: wait first) | — |
 | `{"handshake": {…}}` | a raw connection: `token`, `protocol`, `params`, `subprotocol`, `origin`, `path`, `send` (`hello`, `binary`, `request`, `garbage`, `nothing`), `timeout` | the answer and the close code |
 | `{"connect": name, "capabilities": […]}` | another session | — |
@@ -143,6 +144,7 @@ comparison (`steps/<step index>/…`; `*` within a segment, `**` any segments) w
 | `import-change-order` | `settings_classes` | `settings.import` lists changes A→Z by key instead of the settings' own order |
 | `io-topic-before-registry` | `system` | an `io` subscription made right after start never delivers `io.load` |
 | `review-4-root-key` | `compare` | snapshot folders are named by an FNV-1a root key, 0.3.4 used SHA-1 (review #4) |
+| `linux-root-ctime` | `scan_tree`, `system` | Linux: the scan root gets a creation time (std's `created()`, statx) while every other entry has none, as in 0.3.4 |
 
 The others are accepted differences (texts, a sort direction nobody calls, the empty `loc` of
 Rust's parameter errors).

@@ -746,7 +746,7 @@
    "result": {
     "snapshots": [
      {
-      "path": "$HOME/data/snapshots/tree-074eb99fd6ff/<stamp>.sks",
+      "path": "$HOME/data/snapshots/tree-f6b4df5521f5/<stamp>.sks",
       "created_at": "<time>",
       "roots": [
        "$ROOT/tree"
@@ -754,7 +754,7 @@
       "node_count": 320,
       "bytes_alloc": 147456,
       "files": 307,
-      "file_bytes": 5865,
+      "file_bytes": 5834,
       "method": "hard"
      }
     ]
@@ -1148,7 +1148,7 @@
     "cache_dir": "$HOME/cache",
     "cache_bytes": 0,
     "snapshots_dir": "$HOME/data/snapshots",
-    "snapshots_bytes": 5865,
+    "snapshots_bytes": 5834,
     "snapshot_count": 1,
     "saved_tags": 1
    }
@@ -1159,7 +1159,7 @@
    "result": {
     "snapshots": [
      {
-      "path": "$HOME/data/snapshots/tree-074eb99fd6ff/<stamp>.sks",
+      "path": "$HOME/data/snapshots/tree-f6b4df5521f5/<stamp>.sks",
       "created_at": "<time>",
       "roots": [
        "$ROOT/tree"
@@ -1167,7 +1167,7 @@
       "node_count": 320,
       "bytes_alloc": 147456,
       "files": 307,
-      "file_bytes": 5865,
+      "file_bytes": 5834,
       "method": "hard"
      }
     ],

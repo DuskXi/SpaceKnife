@@ -45,10 +45,8 @@
      "volumes": [
       {
        "mount_point": "C:\\",
-       "total": 4095289061376,
        "freeable": 12288,
-       "trash": true,
-       "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+       "trash": true
       }
      ],
      "freeable": 12288
@@ -86,10 +84,8 @@
       "volumes": [
        {
         "mount_point": "C:\\",
-        "total": 4095289061376,
         "freeable": 12288,
-        "trash": true,
-        "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+        "trash": true
        }
       ],
       "freeable": 12288
@@ -139,10 +135,8 @@
      "volumes": [
       {
        "mount_point": "C:\\",
-       "total": 4095289061376,
        "freeable": 69632,
-       "trash": true,
-       "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+       "trash": true
       }
      ],
      "freeable": 69632
@@ -196,10 +190,8 @@
       "volumes": [
        {
         "mount_point": "C:\\",
-        "total": 4095289061376,
         "freeable": 69632,
-        "trash": true,
-        "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+        "trash": true
        }
       ],
       "freeable": 69632
@@ -249,10 +241,8 @@
      "volumes": [
       {
        "mount_point": "C:\\",
-       "total": 4095289061376,
        "freeable": 69632,
-       "trash": true,
-       "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+       "trash": true
       }
      ],
      "freeable": 69632
@@ -305,10 +295,8 @@
      "volumes": [
       {
        "mount_point": "C:\\",
-       "total": 4095289061376,
        "freeable": 69632,
-       "trash": true,
-       "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+       "trash": true
       }
      ],
      "freeable": 69632
@@ -373,10 +361,8 @@
     "volumes": [
      {
       "mount_point": "C:\\",
-      "total": 4095289061376,
       "freeable": 69632,
-      "trash": true,
-      "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+      "trash": true
      }
     ],
     "freeable": 69632
@@ -407,10 +393,8 @@
     "volumes": [
      {
       "mount_point": "C:\\",
-      "total": 4095289061376,
       "freeable": 65536,
-      "trash": true,
-      "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+      "trash": true
      }
     ],
     "freeable": 65536
@@ -438,34 +422,16 @@
         "status": "ready",
         "note": "",
         "tag": null
-       },
-       {
-        "id": "<basket#3>",
-        "scan_id": "<scan#1>",
-        "path": "$ROOT/tree/top.bin",
-        "name": "top.bin",
-        "kind": "file",
-        "members": 0,
-        "alloc": 4096,
-        "size": 1000,
-        "files": 1,
-        "dirs": 0,
-        "volume": "string",
-        "status": "ready",
-        "note": "",
-        "tag": null
        }
       ],
       "volumes": [
        {
         "mount_point": "C:\\",
-        "total": 4095289061376,
-        "freeable": 69632,
-        "trash": true,
-        "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+        "freeable": 65536,
+        "trash": true
        }
       ],
-      "freeable": 69632
+      "freeable": 65536
      }
     }
    ]
@@ -495,10 +461,8 @@
     "volumes": [
      {
       "mount_point": "C:\\",
-      "total": 4095289061376,
       "freeable": 65536,
-      "trash": true,
-      "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+      "trash": true
      }
     ],
     "freeable": 65536
@@ -519,50 +483,9 @@
    "got": [
     {
      "state": {
-      "items": [
-       {
-        "id": "<basket#2>",
-        "scan_id": "<scan#1>",
-        "path": "$ROOT/tree/a",
-        "name": "a",
-        "kind": "dir",
-        "members": 0,
-        "alloc": 65536,
-        "size": 60000,
-        "files": 2,
-        "dirs": 0,
-        "volume": "string",
-        "status": "ready",
-        "note": "",
-        "tag": null
-       },
-       {
-        "id": "<basket#3>",
-        "scan_id": "<scan#1>",
-        "path": "$ROOT/tree/top.bin",
-        "name": "top.bin",
-        "kind": "file",
-        "members": 0,
-        "alloc": 4096,
-        "size": 1000,
-        "files": 1,
-        "dirs": 0,
-        "volume": "string",
-        "status": "ready",
-        "note": "",
-        "tag": null
-       }
-      ],
-      "volumes": [
-       {
-        "mount_point": "C:\\",
-        "total": 4095289061376,
-        "freeable": 69632,
-        "trash": true,
-        "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
-       }
-      ],
-      "freeable": 69632
+      "items": [],
+      "volumes": [],
+      "freeable": 0
      }
     }
    ]
@@ -682,10 +605,8 @@
     "volumes": [
      {
       "mount_point": "C:\\",
-      "total": 4095289061376,
       "freeable": 204800,
-      "trash": true,
-      "trash_note": "The trash is on the same volume: the space is only freed once the trash is emptied; the trash now holds 0 B"
+      "trash": true
      }
     ],
     "freeable": 204800

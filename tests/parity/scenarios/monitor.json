@@ -4,8 +4,8 @@
   "fixtures": {"small": "small"},
   "normalize": {"time_keys": ["mtime"]},
   "known_diffs": [
-    {"path": "steps/1/wait_scan/monitor", "bug": "scan-topic-silent-monitor", "why": "Rust: the final status of a scan has monitor=null (the monitor is still starting); 0.3.4 reports it running. With the next bug the status bar then says live monitoring is off."},
-    {"path": "steps/3/got/0/status/monitor", "bug": "scan-topic-silent-monitor", "why": "the same status, pushed when subscribing"},
+    {"path": "steps/1/wait_scan/monitor/**", "bug": "scan-topic-silent-monitor", "why": "Rust: the final status of a scan has monitor=null (the monitor is still starting); 0.3.4 reports it running. With the next bug the status bar then says live monitoring is off."},
+    {"path": "steps/3/got/0/status/monitor/**", "bug": "scan-topic-silent-monitor", "why": "the same status, pushed when subscribing"},
     {"path": "steps/21/**", "bug": "scan-topic-silent-monitor", "why": "Rust never pushes scan.progress when the monitor applies changes (sk-server/src/monitors.rs ServerHooks::applied only flashes views); 0.3.4 does, and the interface reads the monitor state and counts only from these pushes (apps/desktop/app/state/actions.ts onScanStatus)."}
   ],
   "steps": [

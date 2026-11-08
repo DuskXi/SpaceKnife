@@ -19,7 +19,7 @@
     {"call": "palette.check", "params": {"id": "basket.execute", "context": {"tab": "scan", "scan_id": "$s.scan_id", "view_id": "$v.state.view_id"}}},
     {"call": "palette.check", "params": {"id": "no.such.command", "context": {"tab": "start"}}},
     {"call": "palette.paths", "params": {"scan_id": "$s.scan_id"}},
-    {"call": "palette.paths", "params": {"scan_id": "$s.scan_id", "text": "f15", "limit": 5}},
+    {"call": "palette.paths", "params": {"scan_id": "$s.scan_id", "text": "15.lo", "limit": 5}},
     {"call": "palette.paths", "params": {"scan_id": "$s.scan_id", "text": "$ROOT/tree/a/"}},
     {"call": "palette.paths", "params": {"scan_id": "$s.scan_id", "text": "照片"}},
     {"call": "palette.preview", "params": {"scan_id": "$s.scan_id", "text": "*.log"}},

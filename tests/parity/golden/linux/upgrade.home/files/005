@@ -1,0 +1,46 @@
+{
+ "version": 1,
+ "feed": "{json:$FEED}",
+ "checked_at": "2026-11-08T03:43:39.925993Z",
+ "failed_at": null,
+ "etag": "\"parity-1\"",
+ "releases": [
+  {
+   "version": "0.4.0-beta.2",
+   "tag": "v0.4.0-beta.2",
+   "name": "SpaceKnife 0.4.0 beta 2",
+   "prerelease": true,
+   "published_at": "2026-11-03T10:00:00Z",
+   "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+   "notes": "Parity feed: a newer minor pre-release (channel preview only).",
+   "assets": []
+  },
+  {
+   "version": "0.3.6",
+   "tag": "v0.3.6",
+   "name": "SpaceKnife 0.3.6",
+   "prerelease": false,
+   "published_at": "2026-11-01T10:00:00Z",
+   "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.3.6",
+   "notes": "Parity feed: a newer patch release.",
+   "assets": []
+  },
+  {
+   "version": "0.3.4",
+   "tag": "v0.3.4",
+   "name": "SpaceKnife 0.3.4",
+   "prerelease": true,
+   "published_at": "2026-10-26T10:00:00Z",
+   "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.3.4",
+   "notes": "The running version.",
+   "assets": []
+  }
+ ],
+ "kept": 30,
+ "dismissed": [
+  "0.3.6"
+ ],
+ "muted": [
+  "0.4"
+ ]
+}

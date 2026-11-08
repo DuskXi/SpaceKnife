@@ -1,0 +1,9 @@
+{
+ "version": 1,
+ "folders": [
+  {
+   "path": "{json:$ROOT}/tree/a",
+   "class": "image"
+  }
+ ]
+}

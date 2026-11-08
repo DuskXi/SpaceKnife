@@ -1142,82 +1142,90 @@
    "i": 16,
    "call": "palette.paths",
    "result": {
-    "text": "f15",
+    "text": "15.lo",
     "items": [
      {
-      "node": "@$ROOT/tree/many/f150.log",
-      "name": "f150.log",
+      "node": "@$ROOT/tree/many/f015.log",
+      "name": "f015.log",
       "parent": "$ROOT/tree/many",
       "is_dir": false,
       "alloc": 0,
       "hits": [
        {
-        "start": 0,
-        "end": 3
+        "start": 2,
+        "end": 7
        }
       ],
-      "tier": 1,
-      "complete": "$ROOT/tree/many/f150.log"
+      "tier": 2,
+      "complete": "$ROOT/tree/many/f015.log"
      },
      {
-      "node": "@$ROOT/tree/many/f151.log",
-      "name": "f151.log",
+      "node": "@$ROOT/tree/many/f115.log",
+      "name": "f115.log",
       "parent": "$ROOT/tree/many",
       "is_dir": false,
       "alloc": 0,
       "hits": [
        {
-        "start": 0,
-        "end": 3
+        "start": 2,
+        "end": 7
        }
       ],
-      "tier": 1,
-      "complete": "$ROOT/tree/many/f151.log"
+      "tier": 2,
+      "complete": "$ROOT/tree/many/f115.log"
      },
      {
-      "node": "@$ROOT/tree/many/f152.log",
-      "name": "f152.log",
+      "node": "@$ROOT/tree/many/f215.log",
+      "name": "f215.log",
       "parent": "$ROOT/tree/many",
       "is_dir": false,
       "alloc": 0,
       "hits": [
        {
-        "start": 0,
-        "end": 3
+        "start": 2,
+        "end": 7
        }
       ],
-      "tier": 1,
-      "complete": "$ROOT/tree/many/f152.log"
+      "tier": 2,
+      "complete": "$ROOT/tree/many/f215.log"
      },
      {
-      "node": "@$ROOT/tree/many/f153.log",
-      "name": "f153.log",
+      "node": "@$ROOT/tree/many/f105.log",
+      "name": "f105.log",
       "parent": "$ROOT/tree/many",
       "is_dir": false,
       "alloc": 0,
       "hits": [
        {
-        "start": 0,
-        "end": 3
+        "start": 1,
+        "end": 2
+       },
+       {
+        "start": 3,
+        "end": 7
        }
       ],
-      "tier": 1,
-      "complete": "$ROOT/tree/many/f153.log"
+      "tier": 3,
+      "complete": "$ROOT/tree/many/f105.log"
      },
      {
-      "node": "@$ROOT/tree/many/f154.log",
-      "name": "f154.log",
+      "node": "@$ROOT/tree/many/f125.log",
+      "name": "f125.log",
       "parent": "$ROOT/tree/many",
       "is_dir": false,
       "alloc": 0,
       "hits": [
        {
-        "start": 0,
-        "end": 3
+        "start": 1,
+        "end": 2
+       },
+       {
+        "start": 3,
+        "end": 7
        }
       ],
-      "tier": 1,
-      "complete": "$ROOT/tree/many/f154.log"
+      "tier": 3,
+      "complete": "$ROOT/tree/many/f125.log"
      }
     ],
     "total": 21,

@@ -958,8 +958,10 @@ struct Places {
 
 impl Places {
     fn make() -> Places {
+        // the harness's prefix and length (Python's mkdtemp: 8 characters)
         let tmp = tempfile::Builder::new()
-            .prefix("sk-parity-candidate-")
+            .prefix("sk-parity-")
+            .rand_bytes(8)
             .tempdir()
             .unwrap()
             .keep();
@@ -1091,6 +1093,26 @@ impl Backend {
 struct Inbox {
     events: HashMap<String, VecDeque<Value>>,
     frames: HashMap<String, Vec<Vec<u8>>>,
+    /// the last event of each name an `events` step took
+    last_event: HashMap<String, Value>,
+}
+
+/// Drop queued events equal to the one taken last, and repeats of the one before them.
+fn squash(q: &mut VecDeque<Value>, last: Option<&Value>) {
+    while let (Some(front), Some(l)) = (q.front(), last) {
+        if front != l {
+            break;
+        }
+        q.pop_front();
+    }
+    let mut i = 1;
+    while i < q.len() {
+        if q[i] == q[i - 1] {
+            q.remove(i);
+        } else {
+            i += 1;
+        }
+    }
 }
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
@@ -1588,9 +1610,22 @@ impl<'a> Run<'a> {
                 }
                 got = taken;
             } else {
+                let dedupe = step["dedupe"] == true;
                 ok = c
-                    .wait(t, |ib| ib.events.entry(name.into()).or_default().len() >= count)
+                    .wait(t, |ib| {
+                        let last = ib.last_event.get(name).cloned();
+                        let q = ib.events.entry(name.into()).or_default();
+                        if dedupe {
+                            // a state event sent again unchanged counts once
+                            squash(q, last.as_ref());
+                        }
+                        q.len() >= count
+                    })
                     .await;
+                if let Some(s) = step.get("settle").and_then(Value::as_f64) {
+                    // let late copies arrive (state events re-sent unchanged)
+                    tokio::time::sleep(Duration::from_secs_f64(s)).await;
+                }
                 let mut ib = c.inbox.lock().unwrap();
                 let q = ib.events.entry(name.into()).or_default();
                 if mode == "latest" {
@@ -1601,6 +1636,13 @@ impl<'a> Run<'a> {
                     let n = count.min(q.len());
                     got = q.drain(..n).collect();
                 }
+            }
+            if let Some(last) = got.last() {
+                c.inbox
+                    .lock()
+                    .unwrap()
+                    .last_event
+                    .insert(name.to_owned(), last.clone());
             }
             let body = match mode.as_str() {
                 "shape" => Value::Array(got.iter().map(shape).collect()),

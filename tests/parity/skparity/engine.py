@@ -165,6 +165,7 @@ class Client:
         self.pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
         self.events: dict[str, deque[dict[str, Any]]] = defaultdict(deque)
         self.frames: dict[Any, list[bytes]] = defaultdict(list)
+        self.last_event: dict[str, dict[str, Any]] = {}  # the last one an `events` step took
         self.arrived = asyncio.Event()
         self.reader = asyncio.create_task(self._read())
 
@@ -228,6 +229,18 @@ class Client:
             await self.reader
 
 
+def squash(q: deque[dict[str, Any]], last: dict[str, Any] | None) -> None:
+    """Drop queued events equal to the one taken last, and repeats of the one before them."""
+    while q and last is not None and q[0] == last:
+        q.popleft()
+    i = 1
+    while i < len(q):
+        if q[i] == q[i - 1]:
+            del q[i]
+        else:
+            i += 1
+
+
 def hello_frame(token: str, protocol: str, caps: list[str]) -> dict[str, Any]:
     return {
         "jsonrpc": "2.0",
@@ -260,7 +273,10 @@ class Places:
 
     @staticmethod
     def make(label: str) -> Places:
-        tmp = Path(tempfile.mkdtemp(prefix=f"sk-parity-{label}-"))
+        # the same prefix and length for every backend: a name search may also match the root's
+        # own path (the replayer makes `sk-parity-` + 8 characters too)
+        del label
+        tmp = Path(tempfile.mkdtemp(prefix="sk-parity-"))
         if sys.platform == "win32":
             tmp = Path(os.path.realpath(tmp))  # the long name, as the backends report it
         home, root = tmp / "home", tmp / "root"
@@ -519,13 +535,24 @@ class Run:
                     if hit(e):
                         break
             else:
-                ok = await client.wait(lambda: len(q) >= count, float(step.get("timeout", 20)))
+                dedupe = bool(step.get("dedupe"))
+
+                def ready() -> bool:
+                    if dedupe:  # a state event sent again unchanged counts once
+                        squash(q, client.last_event.get(name))
+                    return len(q) >= count
+
+                ok = await client.wait(ready, float(step.get("timeout", 20)))
+                if step.get("settle"):  # let late copies arrive (state events re-sent unchanged)
+                    await asyncio.sleep(float(step["settle"]))
                 if mode == "latest":  # everything queued by now; the newest one is recorded
                     got = list(q)[-1:]
                     q.clear()
                     mode = "all"
                 else:
                     got = [q.popleft() for _ in range(min(count, len(q)))]
+            if got:
+                client.last_event[name] = got[-1]
             if mode == "shape":
                 body: Any = [shape(e) for e in got]
             elif mode == "count":
