@@ -106,6 +106,10 @@ describe("installRefusal", () => {
     expect(installRefusal(zip, "portable", linux, "linux", fakeFiles([zip], [linux]))).toBe("updateNotAnUpdate");
     const other = `${linux}/SpaceKnife-0.4.0-linux-riscv64-portable.tar.gz`; // no such build
     expect(installRefusal(other, "portable", linux, "linux", fakeFiles([other], [linux]))).toBe("updateNotAnUpdate");
+    // the Tauri app's Linux portable copy (crates/sk-core update asset_templates): not this shell's
+    const tauri = `${linux}/SpaceKnife-0.4.0-linux-x64-tauri.tar.gz`;
+    expect(installRefusal(tauri, "portable", linux, "linux", fakeFiles([tauri], [linux]))).toBe("updateNotAnUpdate");
+    expect(portableVersion("SpaceKnife-0.4.0-linux-x64-tauri.tar.gz")).toBeNull();
     for (const kind of ["dev", "unknown"] as const) {
       const file = `${linux}/SpaceKnife-0.4.0-x86_64.AppImage`;
       expect(installRefusal(file, kind, linux, "linux", fakeFiles([file], [linux]))).toBe("updateNoInstall");

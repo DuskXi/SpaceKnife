@@ -19,7 +19,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "package:portable": "node scripts/portable.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
