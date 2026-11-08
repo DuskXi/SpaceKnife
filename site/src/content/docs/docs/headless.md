@@ -30,17 +30,16 @@ While it runs, the terminal shows when a browser connects or goes away (`14:02:1
 
 | How you installed SpaceKnife | The command |
 |---|---|
-| Windows installer | `%LOCALAPPDATA%\SpaceKnife\spaceknife-cli headless` (the default folder) |
+| Windows installer | `& "$env:LOCALAPPDATA\Programs\SpaceKnife\spaceknife-cli.exe" headless` in PowerShell (the default folder for the current user; for all users `C:\Program Files\SpaceKnife`) |
 | Windows portable | `.\spaceknife-cli headless` in its folder |
 | deb / rpm | `spaceknife-cli headless` |
 | Linux portable | `./spaceknife-cli headless` in its folder |
+| AppImage | `./SpaceKnife-<version>-x86_64.AppImage --headless` |
 | macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli headless` |
 
-It is a console program: the terminal waits for it, and <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. The pages it serves are the built interface in the `ui` folder next to `spaceknife-cli`; `--ui` names another folder.
+It is a console program: the terminal waits for it, and <kbd>Ctrl</kbd>+<kbd>C</kbd> stops it. The pages it serves are the built interface that comes with the app: the `ui` folder next to `spaceknife-cli`, or `resources/ui` beside it (Windows, the portable copies, the rpm, the AppImage), `/usr/lib/SpaceKnife/ui` for the deb, and `SpaceKnife.app/Contents/Resources/ui` on macOS. `--ui` names another folder.
 
 In a portable copy, headless mode keeps its data in the copy's `data` folder, as the app does ([Data locations](../data-locations/)); `SPACEKNIFE_HOME` still wins.
-
-<!-- TODO: confirm — default_ui_dir (crates/sk-server/src/cli/headless.rs) looks for `ui` next to spaceknife-cli, `resources/ui`, `../lib/SpaceKnife/ui` (deb / rpm) and `Contents/Resources/ui` (macOS); not yet checked on a real deb, rpm or macOS install. The AppImage runs spaceknife-cli only once the app's shells hand `--headless` on to it (merge plan §4, the shells' work). -->
 
 ## Options
 
@@ -50,12 +49,18 @@ In a portable copy, headless mode keeps its data in the copy's `data` folder, as
 | `--yes` | Don't ask before opening SpaceKnife to the network. Needed when there is no terminal to answer in |
 | `--tls-cert <file>` | Serve HTTPS with this certificate (PEM), together with `--tls-key` |
 | `--tls-key <file>` | The certificate's private key (PEM, not encrypted: see **HTTPS** under [Opening it to the network](#opening-it-to-the-network)) |
-| `--ui <folder>` | The built interface to serve (default: the `ui` folder next to the program) |
+| `--ui <folder>` | The built interface to serve (default: the one that comes with the app, see above) |
 | `--help` | List the options |
 
 The options go in any order, also as `--listen=0.0.0.0`. The help and the messages about wrong options are in the interface language (**Settings › General › Interface language**), as the rest of the command line.
 
-The way SpaceKnife 0.3.x started headless mode still works: `--headless` and `--listen <address>` anywhere among the arguments, for example `spaceknife-cli --yes --listen 0.0.0.0` (what else the 0.3.x command line held, such as Chromium's switches, is skipped). On Windows, `SpaceKnife --headless …` typed in a terminal in the app's folder runs `SpaceKnife.com` there, which starts `spaceknife-cli` with the same arguments and waits for it, as in 0.3.x; started without these options, it opens the window.
+The way SpaceKnife 0.3.x started headless mode still works, so scripts and service units written for 0.3.x keep running: `--headless` and `--listen <address>` anywhere among the arguments, for example `spaceknife-cli --yes --listen 0.0.0.0` (what else the 0.3.x command line held, such as Chromium's switches, is skipped). The app's own program takes them too and runs headless mode instead of opening the window:
+
+- Windows: `SpaceKnife --headless …` typed in a terminal in the app's folder runs `SpaceKnife.com` there, which starts `spaceknife-cli` with the same arguments and waits for it, as in 0.3.x; started without these options, it opens the window.
+- Linux: `spaceknife --headless …` (deb, rpm and the portable copies) and `./SpaceKnife-<version>-x86_64.AppImage --headless …`.
+- macOS: `/Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife --headless …`.
+
+On a computer without a desktop, use `spaceknife-cli` itself: the app's program needs the window's libraries even when it opens no window.
 
 The address can be written as:
 
@@ -151,7 +156,7 @@ When a scan finishes while the tab is in the background, a dot appears in the ta
 
 ## Linux servers without a display
 
-`spaceknife-cli` is a console program: it needs no X11 or Wayland and none of the window's libraries (GTK, WebKitGTK). On a server, the portable tar.gz is enough: unpack it and run `./spaceknife-cli headless`.
+`spaceknife-cli` is a console program: it needs no X11 or Wayland and none of the window's libraries (GTK, WebKitGTK, Chromium's). On a server, a portable tar.gz is enough, on RHEL 9 too: unpack it and run `./spaceknife-cli headless`. Take the small one (`SpaceKnife-<version>-linux-<arch>-tauri.tar.gz`, [the two kinds](../install/#portable-targz)): its `spaceknife-cli` and `ui` are the same as in the other, and the download is much smaller.
 
 Run it as the user whose files you want to see. It runs as root too, but then everything in the browser acts with root's rights.
 

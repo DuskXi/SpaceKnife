@@ -70,20 +70,24 @@ SpaceKnife 没有遥测，也不需要账户。它从网上取的东西只有 Gi
 
 | 你的安装方式 | 下载的文件 |
 |---|---|
-| Windows 安装包 | `SpaceKnife_<版本>_x64-setup.exe` |
-| Windows 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip` |
-| macOS | `SpaceKnife_<版本>_aarch64.dmg` 或 `…_x64.dmg`，按你的 Mac |
-| deb | `SpaceKnife_<版本>_amd64.deb` |
-| rpm | `SpaceKnife-<版本>-1.x86_64.rpm` |
-| AppImage | `SpaceKnife_<版本>_amd64.AppImage` |
-| Linux 便携版 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` |
+| Windows 安装包 | `SpaceKnife-<版本>-Setup-x64.exe` |
+| Windows 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`；ARM 版 Windows 上是 `…-win-arm64-portable.zip` |
+| macOS dmg | `SpaceKnife-<版本>-mac-arm64.dmg` 或 `…-mac-x64.dmg`，按你的 Mac |
+| macOS 便携版 | `SpaceKnife-<版本>-mac-arm64-portable.zip` 或 `…-mac-x64-portable.zip` |
+| deb | `spaceknife_<版本>_amd64.deb` |
+| rpm | `spaceknife-<版本>.x86_64.rpm` |
+| AppImage | `SpaceKnife-<版本>-x86_64.AppImage` |
+| Linux 便携版，小巧的一种 | `SpaceKnife-<版本>-linux-<x64 或 arm64>-tauri.tar.gz` |
+| Linux 便携版，自带引擎的一种 | `SpaceKnife-<版本>-linux-<x64 或 arm64>-portable.tar.gz` |
+
+便携版按它运行所在的处理器挑包，所以 ARM 电脑上的 x64 副本会换成 ARM 版。每种安装方式只拿自己那一种文件：Linux 便携版是哪一种就一直是哪一种（两种的区别见[便携版 tar.gz](../install/#便携版-targz)）。
 
 下载完会校验文件：
 
 - 把文件的 SHA-256 和同一个发布里公布的校验值（`SHA256SUMS*.txt`）比较，一致时卡片显示「SHA-256 校验通过」。
 - 不一致的文件立即删除：「下载的文件与发布的 SHA-256 校验值不符，已删除」。
 - 发布里有校验文件却读不到时，不下载。
-- 发布里没有这个文件的校验值时，文件保留，并标注「这个版本没有发布校验和，文件未经校验」。
+- 发布里没有列出这个文件的校验值时，不下载：「这个版本的发布没有列出这个文件的 SHA-256 校验值，没有下载」。所以 SpaceKnife 装上的更新一定是校验过的。
 - `updates` 文件夹里已经有校验值正确的同一个文件时，直接用它，不再重新下载。
 
 自动下载失败（比如没有网络）时，下一次检查之后会再试，也可以点「重试」。SpaceKnife 对不上发布文件的安装方式（比如从源码运行），「一键下载」不可用，卡片提示「这种安装方式请到发布页下载」。
@@ -104,15 +108,15 @@ SpaceKnife 没有遥测，也不需要账户。它从网上取的东西只有 Gi
 
 | 你的安装方式 | 无缝更新 | 经典方式 |
 |---|---|---|
-| Windows 安装包 | SpaceKnife 关闭，安装程序在后台静默运行（不显示安装向导）替换旧版本，然后 SpaceKnife 自动重新打开。 | 「运行安装程序」：SpaceKnife 退出并打开安装向导，按步骤装好新版本。安装程序就地升级旧版本。 |
-| 便携版（Windows zip、Linux tar.gz） | SpaceKnife 关闭，由它自己换上新版本的程序文件（见下文），然后重新打开。`data` 文件夹原样保留。 | 「自己替换」：在文件夹中显示下载的压缩包，SpaceKnife 继续运行。退出 SpaceKnife 后把它解压覆盖旧文件，保留 `data` 文件夹。 |
+| Windows 安装包 | SpaceKnife 关闭，安装程序在后台静默运行（不显示安装向导）替换旧版本，然后 SpaceKnife 自动重新打开。为所有用户安装的，Windows 会请求一次管理员权限。 | 「运行安装程序」：SpaceKnife 退出并打开安装向导，按步骤装好新版本。安装程序就地升级旧版本。 |
+| 便携版（Windows zip、Linux tar.gz、macOS zip） | SpaceKnife 关闭，由它自己换上新版本的程序文件（见下文），然后重新打开。`data` 文件夹原样保留。 | 「自己替换」：在文件夹中显示下载的压缩包，SpaceKnife 继续运行。退出 SpaceKnife 后把它解压覆盖旧文件，保留 `data` 文件夹。 |
 | AppImage | SpaceKnife 关闭，新的 AppImage（已经设好可执行权限）替换旧文件，然后重新打开。 | 「自己替换」：在文件夹中显示新的 AppImage，SpaceKnife 继续运行。退出 SpaceKnife 后用它替换旧文件。 |
-| macOS | 没有 | 「打开磁盘映像」：SpaceKnife 退出并打开磁盘映像。把 SpaceKnife 拖进「应用程序」替换旧版本，再[放行一次](../install/#macos)。 |
+| macOS dmg | 没有 | 「打开磁盘映像」：SpaceKnife 退出并打开磁盘映像。把 SpaceKnife 拖进「应用程序」替换旧版本，再[放行一次](../install/#macos)。 |
 | deb、rpm | 没有 | 「打开安装包」：SpaceKnife 退出，并用系统的软件安装器打开安装包。 |
 
 不管用哪种方式，扫描数据和设置都会保留。「无缝更新」之后，窗口会提示一次「已更新到 SpaceKnife 0.4.0」（现在运行的版本）。
 
-**便携版的「无缝更新」**：SpaceKnife 先把压缩包解到 `updates` 文件夹里，然后退出；换文件的是新版本自带的后端程序，不是脚本。它等 SpaceKnife 完全退出，把程序文件夹里除 `data` 以外的东西移到 `updates/previous-<旧版本>`（文件还被占用时最多再等 30 秒），把新文件移进来，再启动新版本。有文件替换不了时，旧文件放回原处，打开的仍是旧版本。新版本不完整时什么都不动，SpaceKnife 也不退出，只提示原因。每一步都记在 `updates/update-<版本>.log` 里。
+**便携版的「无缝更新」**：SpaceKnife 先把压缩包解到 `updates` 文件夹里，再启动新版本自带的程序，由它来换文件，不经过脚本。动任何东西之前，这个程序先检查新文件，并问新版本能不能在这台电脑上启动：便携版要用系统的网页视图（Windows 上的 Microsoft Edge WebView2 Runtime；小巧的 Linux 便携版要用 WebKitGTK 4.1）。新版本启动不了或者不完整时，什么都不动，SpaceKnife 也不退出，卡片说明原因，比如「无法启动更新：…」（冒号后面是替换程序给出的原因，用英文写）。否则 SpaceKnife 退出，这个程序等它完全退出，把程序文件夹里除 `data` 以外的东西移到 `updates/previous-<旧版本>`（文件还被占用时最多再等 30 秒），把新文件移进来，再启动新版本。有文件替换不了时，旧文件放回原处，打开的仍是旧版本。每一步都记在 `updates/update-<版本>.log` 里。
 
 点会关闭 SpaceKnife 的按钮时，如果还有扫描在进行，第一次点只会提示「还有扫描在进行，更新会中断它（已扫描的部分不会保存）」，按钮上改写「再点一次继续」；再点一次才继续。「自己替换」不关闭 SpaceKnife，所以不会这样问。
 
@@ -129,7 +133,7 @@ SpaceKnife 从不自己安装更新，「无缝更新」和安装程序都一样
 - **顶部**：你的版本、这份 SpaceKnife 的安装方式和提示哪些版本；上一次检查的结果、检查的时间，以及下一次自动检查的时间。「检查更新」立即检查；「全部发布」打开 [Releases 页面](https://github.com/DuskXi/SpaceKnife/releases)。有新版本时，它的更新卡片也显示在这里，并且一直留着。
 - **跳过的系列**：被[跳过](#跳过一个系列)的系列的版本也显示在这里。状态写「有新版本 0.4.2（已跳过 0.4.x 的提示）」，卡片里有一行「已跳过 0.4.x 的版本提示：不弹出、不显示徽章、不自动下载」和「恢复提示」；点「恢复提示」，这个系列又照常提示。卡片里照样能下载和安装它。
 - **更新**：三项更新设置（检查、下载、提示哪些版本）。
-- **组件版本**：这份 SpaceKnife 的安装方式，SpaceKnife、Tauri、系统 WebView、Rust、协议的版本，以及你的系统。「复制版本信息」把它们一次复制下来，方便报告问题。
+- **组件版本**：这份 SpaceKnife 的安装方式，SpaceKnife、绘制窗口的外壳（Tauri；rpm、AppImage 和自带引擎的 Linux 便携版是 Electron）和它的网页视图、Rust、协议的版本，以及你的系统。「复制版本信息」把它们一次复制下来，方便报告问题。
 - **发布时间线**：最近 30 个版本，新的在前，标着「当前」「新」（比你的新）和「预览版」。点一个版本，用界面语言阅读它的发布说明；最新的默认展开。「在 GitHub 上查看」打开它的发布页。时间线来自上一次检查，离线时也在；第一次检查之前是空的。
 
 ## 关闭更新检查
@@ -161,7 +165,7 @@ SpaceKnife 不发送任何关于你、你的电脑或你的文件的信息：没
 
 ### 留在你电脑上的
 
-- 窗口和负责扫描的后端之间只用本机连接（回环地址，每次启动换一个随机令牌），其他电脑连不上。
+- 窗口和负责扫描的后端之间只用本机连接（回环地址，每次启动换一个随机令牌），其他电脑连不上。后端在应用里面运行；Electron 版里则是应用在旁边启动的 `spaceknife-cli serve`，随应用一起退出。只有[无头模式](../headless/)会在网络上监听，而且只在你要求时。
 - 日志文件和日志面板里有文件和文件夹的路径，比如无法读取的文件夹。
 - 「复制诊断信息」（「设置 › 高级」）只复制到剪贴板。复制的内容包括设置文件和日志文件夹的路径，路径里通常有你的用户名；贴出去之前检查一下。
 - 快照文件（`.sks`）里有扫描到的所有项的名称、大小和时间。分享快照等于分享你的文件夹结构；[导出](../export/)的报告也一样。

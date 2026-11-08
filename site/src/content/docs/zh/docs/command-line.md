@@ -11,13 +11,15 @@ SpaceKnife 附带一个命令行程序 `spaceknife-cli`，和替应用扫描的�
 
 | 安装方式 | 命令行 |
 |---|---|
-| Windows 安装包 | `%LOCALAPPDATA%\SpaceKnife\spaceknife-cli.exe`（默认安装目录） |
+| Windows 安装包 | 安装目录里的 `spaceknife-cli.exe`：仅当前用户是 `%LOCALAPPDATA%\Programs\SpaceKnife`，所有用户是 `C:\Program Files\SpaceKnife` |
 | Windows 便携版 | `SpaceKnife.exe` 旁边的 `spaceknife-cli.exe` |
 | deb / rpm | `spaceknife-cli`（`/usr/bin/spaceknife-cli`） |
 | Linux 便携版 | `spaceknife` 旁边的 `spaceknife-cli` |
-| AppImage | 在镜像里面：`./SpaceKnife_<版本>_amd64.AppImage --appimage-extract` 解到 `squashfs-root/`，再用 `squashfs-root/usr/bin/spaceknife-cli` |
+| AppImage | 在镜像里面：`./SpaceKnife-<版本>-x86_64.AppImage --appimage-extract` 解到 `squashfs-root/`，再用 `squashfs-root/spaceknife-cli`。只用无头模式的话不必这样：`./SpaceKnife-<版本>-x86_64.AppImage --headless` 就能运行（[无头模式](../headless/)） |
 | macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli` |
 | 从源码运行 | 仓库里 `cargo run -p sk-server --bin spaceknife-cli -- <命令>` |
+
+到 0.3.4 为止，命令行是应用里面的后端程序 `resources/backend/spaceknife-backend`（macOS 上是 `Contents/Resources/backend/spaceknife-backend`）。0.3.5 起是 `spaceknife-cli`：`scan`、`run`、`snapshot`、`version` 照旧，`scan` 的输出也和以前一样，脚本只要改路径。`schema` 去掉了（协议的 JSON Schema 在仓库里），`headless` 是新加的。
 
 本页的例子都写作 `spaceknife-cli`。可以把所在文件夹加进 PATH，或者设个别名：
 
@@ -26,13 +28,13 @@ alias skc=/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli
 ```
 
 :::note
-deb / rpm 安装后，`spaceknife`（`/usr/bin/spaceknife`）启动的是应用，`spaceknife-cli` 才是命令行。
+deb / rpm 安装后，`spaceknife`（`/usr/bin/spaceknife`）启动的是应用，`spaceknife-cli` 才是命令行。Windows 的安装目录和便携版里还有 `SpaceKnife.com`：在终端里输入 `SpaceKnife --headless …`，经由它运行无头模式，和 0.3.x 一样。
 
 `spaceknife-cli headless` 让 SpaceKnife 不开窗口运行，把界面提供给浏览器，本机或别的设备都能用。见[无头模式](../headless/)。
 :::
 
 :::caution[便携版]
-便携版把数据存在旁边的 `data` 文件夹里，但只有应用和无头模式知道这件事。要让命令行使用同一份快照和设置，把 `SPACEKNIFE_HOME` 设为这个 `data` 文件夹（见[环境变量](#环境变量)）。
+便携版把数据存在旁边的 `data` 文件夹里，但只有应用和无头模式会去找它；`scan`、`run`、`snapshot` 用的是你的用户目录。要让它们使用便携版的快照和设置，把 `SPACEKNIFE_HOME` 设为这个 `data` 文件夹（见[环境变量](#环境变量)）。
 :::
 
 输出的语言跟随「设置 › 常规 › 界面语言」（命令行会读取设置文件）；`--help` 的说明是英文，无头模式的除外。
@@ -231,7 +233,7 @@ spaceknife-cli version
 
 ## serve
 
-应用在自己的进程里运行后端；只有接入自己的客户端或调试时才需要 `serve`。开始监听后，它在标准输出打印一行 JSON（`{"event": "ready", "url": "ws://127.0.0.1:…/v1", …}`），日志输出到标准错误。
+应用在自己的进程里运行后端；Electron 版（rpm、AppImage 和自带引擎的 Linux 便携版）则像 0.3.x 启动后端那样，在旁边启动 `spaceknife-cli serve --token-stdin`。只有接入自己的客户端或调试时，才需要自己运行 `serve`。开始监听后，它在标准输出打印一行 JSON（`{"event": "ready", "url": "ws://127.0.0.1:…/v1", …}`），日志输出到标准错误。
 
 | 选项 | 默认 | 作用 |
 |---|---|---|
@@ -248,11 +250,11 @@ spaceknife-cli version
 
 ## 环境变量
 
-在启动应用或命令行之前设置。后端在应用进程里运行，看到的是同一套环境变量。
+在启动应用或命令行之前设置。后端在应用进程里运行，或者是应用自己启动的 `spaceknife-cli serve`，看到的是同一套环境变量。
 
 | 变量 | 作用 |
 |---|---|
-| `SPACEKNIFE_HOME` | 把 SpaceKnife 写的所有东西放进一个文件夹：`data`（快照、标签、日志）、`config`（设置、文件类别）、`cache`，应用还有 `desktop`（窗口自己的文件）。适合另开一套互不影响的环境、做测试，以及便携版。见[数据位置与便携模式](../data-locations/) |
+| `SPACEKNIFE_HOME` | 把 SpaceKnife 写的所有东西放进一个文件夹：`data`（快照、标签、日志）、`config`（设置、文件类别）、`cache`，应用还有窗口自己的文件（`desktop`；Electron 版是 `electron`）。适合另开一套互不影响的环境、做测试，以及便携版。见[数据位置与便携模式](../data-locations/) |
 | `SPACEKNIFE_SCAN_THREADS` | 列目录线程数，1–64。默认每个 CPU 一个，在 2–16 之间；macOS 上是 CPU 数的两倍，在 4–16 之间。手动并发数也不会超过它 |
 | `SPACEKNIFE_LANGUAGE` | `en` 或 `zh-CN`：命令行的输出固定用这种语言，不看设置。适合脚本和问题报告 |
 | `SPACEKNIFE_NO_BULK=1` | macOS：列文件改用 `readdir` 加 `fstatat`，不用 `getattrlistbulk`，用来对比速度 |
