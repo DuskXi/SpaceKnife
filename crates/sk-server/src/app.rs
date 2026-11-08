@@ -95,6 +95,10 @@ pub struct Tuning {
     pub settings_file: Option<PathBuf>,
     /// the log bus the `log` topic reads (None: [`LogBus::global`])
     pub log_bus: Option<Arc<LogBus>>,
+    /// Test seam: every scan's [`sk_core::scan::ScanOptions::fault`] (a panic in a step of the
+    /// scan, to see the server go on).
+    #[doc(hidden)]
+    pub scan_fault: Option<sk_core::scan::ScanFault>,
 }
 
 impl Default for Tuning {
@@ -109,6 +113,7 @@ impl Default for Tuning {
             routes: None,
             settings_file: None,
             log_bus: None,
+            scan_fault: None,
         }
     }
 }
@@ -140,6 +145,8 @@ pub struct Config {
     pub install_kind: Option<String>,
     pub static_dir: Option<PathBuf>,
     pub secure: bool,
+    /// [`Tuning::scan_fault`]
+    pub scan_fault: Option<sk_core::scan::ScanFault>,
 }
 
 /// Everything the sessions share.
@@ -345,6 +352,7 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
         install_kind: opts.install_kind.clone(),
         static_dir: opts.static_dir.clone(),
         secure: tls.is_some(),
+        scan_fault: tuning.scan_fault,
     };
     let server = build(config, tuning.routes, tuning.settings_file, tuning.log_bus);
     server.port.store(port, Ordering::SeqCst);

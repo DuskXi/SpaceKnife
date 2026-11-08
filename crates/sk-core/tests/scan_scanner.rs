@@ -50,6 +50,63 @@ fn find(r: &Nodes, p: &Path) -> NodeId {
 }
 
 #[test]
+fn a_panic_while_listing_fails_the_scan() {
+    // a bug on a listing thread: the batch's error, the scan ends as failed (it used to wait for
+    // the batch forever, «scanning» for good); a panic in the fold reaches the caller (the server
+    // fails the scan then, `Scanner::fail`)
+    let (_t, root, facts) = tree();
+    for workers in [1, 4] {
+        let fault: sk_core::scan::ScanFault = Arc::new(|step| {
+            if step == "list" {
+                panic!("injected list bug");
+            }
+        });
+        let s = Arc::new(scanner(
+            &root,
+            ScanOptions {
+                concurrency: workers,
+                fault: Some(fault),
+                ..opts(50)
+            },
+        ));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let scan = s.clone();
+        // its own thread: a scan that never ends must fail the test, not hang it
+        std::thread::spawn(move || {
+            let _ = tx.send(run(&scan));
+        });
+        let p = rx
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the scan ended");
+        assert_eq!(p.state, ScanState::Failed, "{workers}");
+        assert!(p.message.contains("injected list bug"), "{}", p.message);
+    }
+    let fold: sk_core::scan::ScanFault = Arc::new(|step| {
+        if step == "fold" {
+            panic!("injected fold bug");
+        }
+    });
+    let s = scanner(
+        &root,
+        ScanOptions {
+            concurrency: 2,
+            fault: Some(fold),
+            ..opts(50)
+        },
+    );
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&s)));
+    assert!(unwound.is_err());
+    s.fail("stopped: injected fold bug");
+    let p = s.progress();
+    assert_eq!(p.state, ScanState::Failed);
+    assert_eq!(p.message, "stopped: injected fold bug");
+    // and a scan without faults is whole
+    let s = scanner(&root, ScanOptions::default());
+    assert_eq!(run(&s).state, ScanState::Done);
+    check_totals(&s, &facts);
+}
+
+#[test]
 fn scan_matches_tree() {
     let (_t, root, facts) = tree();
     let s = scanner(&root, ScanOptions::default());

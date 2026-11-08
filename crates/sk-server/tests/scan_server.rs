@@ -532,3 +532,71 @@ async fn continue_and_rescan_errors() {
     assert!(found, "the rescan found the new file");
     srv.shutdown();
 }
+
+#[tokio::test]
+async fn a_panic_in_a_scan_fails_that_scan_and_the_server_goes_on() {
+    // a bug while listing (a listing thread) or folding (the scan's own thread): that scan ends as
+    // failed with the reason, instead of «scanning» for good; the next scan works
+    use std::sync::{Arc, Mutex};
+    let _g = SERIAL.lock().await;
+    init();
+    let plan: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
+    let steps = plan.clone();
+    let mut tuning = sk_server::app::Tuning::for_tests();
+    tuning.scan_fault = Some(Arc::new(move |step: &str| {
+        let mut p = steps.lock().unwrap();
+        if p.first() == Some(&step) {
+            p.remove(0);
+            drop(p);
+            panic!("injected {step} bug");
+        }
+    }));
+    let srv = sk_server::start_with(
+        sk_server::ServeOptions {
+            token: TOKEN.to_owned(),
+            ..sk_server::ServeOptions::default()
+        },
+        tuning,
+    )
+    .await
+    .unwrap();
+    let c = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let facts = build_tree(&tmp.path().join("root"));
+    for step in ["list", "fold", ""] {
+        if !step.is_empty() {
+            plan.lock().unwrap().push(step);
+        }
+        let started = c
+            .ok(
+                "scan.start",
+                json!({"roots": [facts.root], "workers": 2, "auto_snapshot": false}),
+            )
+            .await;
+        let id = started["scan_id"].as_str().unwrap().to_owned();
+        c.subscribe("scan", json!({"scan_id": id})).await;
+        let want = id.clone();
+        let ev = c
+            .event_where("scan.progress", 20.0, move |p| {
+                let s = &p["status"];
+                s["scan_id"] == want.as_str() && s["state"] != "scanning" && s["state"] != "queued"
+            })
+            .await;
+        let status = c.ok("scan.status", json!({"scan_id": id})).await;
+        if step.is_empty() {
+            assert_eq!(status["state"], "done", "{status}");
+            assert_eq!(status["files"], facts.files);
+        } else {
+            assert_eq!(ev["status"]["state"], "failed", "{step}: {ev}");
+            assert_eq!(status["state"], "failed", "{step}: {status}");
+            let message = status["message"].as_str().unwrap_or("");
+            assert!(
+                message.contains(&format!("injected {step} bug")),
+                "{step}: {status}"
+            );
+        }
+        c.ok("scan.close", json!({"scan_id": id})).await;
+    }
+    assert!(plan.lock().unwrap().is_empty());
+    srv.shutdown();
+}

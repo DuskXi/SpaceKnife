@@ -491,10 +491,12 @@ pub struct ScanManager {
     low_io: AtomicUsize,
     /// (when, bytes) of the scans closed lately (the memory watchdog allows for them)
     pub closed: Mutex<Vec<(Instant, usize)>>,
+    /// [`crate::app::Tuning::scan_fault`] (tests)
+    fault: Option<sk_core::scan::ScanFault>,
 }
 
 impl ScanManager {
-    pub fn new(_config: &Config, settings: &Arc<SettingsStore>) -> ScanManager {
+    pub fn new(config: &Config, settings: &Arc<SettingsStore>) -> ScanManager {
         // the governor counts in folders listed at once (the walker's gate), up to its widest width
         let opts = RegistryOptions {
             max_workers: sk_core::scan::listing_max(),
@@ -510,6 +512,7 @@ impl ScanManager {
             io_ready,
             io_starting: AtomicBool::new(false),
             low_io: AtomicUsize::new(0),
+            fault: config.scan_fault.clone(),
             closed: Mutex::new(Vec::new()),
         }
     }
@@ -656,6 +659,7 @@ impl ScanManager {
             gate: governor
                 .clone()
                 .map(|g| Arc::new(g) as Arc<dyn sk_core::scan::IoGate>),
+            fault: self.fault.clone(),
             ..ScanOptions::default()
         };
         let roots_in = params.roots.clone();
@@ -757,7 +761,7 @@ impl ScanManager {
         std::thread::Builder::new()
             .name(format!("scan-{}", h.id))
             .spawn(move || {
-                run_hard(&srv, &hh, true);
+                guarded(&srv, &hh, || run_hard(&srv, &hh, true));
                 end_run(&srv, &hh);
             })
             .map_err(|e| RpcError::internal(e.to_string()))?;
@@ -1269,17 +1273,66 @@ fn spawn_ticker(server: &Arc<Server>, h: &Arc<ScanHandle>) {
 }
 
 fn run_scan(server: &Arc<Server>, h: &Arc<ScanHandle>) {
-    let low = lower_io(server, h);
-    let mft_done = server.scans.mft_wanted(h) && run_mft(server, h, None);
-    if mft_done {
-        finish(server, h, Some(0));
-    } else {
-        run_hard(server, h, false);
-    }
-    if low {
-        restore_io(server);
-    }
+    let low = LowIo {
+        server,
+        on: lower_io(server, h),
+    };
+    guarded(server, h, || {
+        let mft_done = server.scans.mft_wanted(h) && run_mft(server, h, None);
+        if mft_done {
+            finish(server, h, Some(0));
+        } else {
+            run_hard(server, h, false);
+        }
+    });
+    drop(low);
     end_run(server, h);
+}
+
+/// Run the scan's work; a panic in it (a bug) fails the scan, with its message, instead of
+/// ending the scan's thread and leaving the scan «scanning» for good.
+fn guarded(server: &Arc<Server>, h: &Arc<ScanHandle>, work: impl FnOnce()) {
+    let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) else {
+        return;
+    };
+    let why = sk_core::scan::panic_message(payload.as_ref());
+    tracing::error!("scan {} stopped by a panic: {why}", h.id);
+    let message = tr!("扫描意外中断：{reason}", reason = why);
+    if let Some(s) = &h.scanner {
+        s.fail(&message);
+    }
+    {
+        let mut st = h.st.lock();
+        st.phase.clear();
+        st.mft_client = None;
+        st.mft_read = None;
+        st.transient = 0;
+        st.upgrade = None;
+    }
+    let first = h.root_paths().into_iter().next();
+    events::emit(
+        Source::Scan,
+        &tr!("扫描失败：{error}", error = message),
+        EventLevel::Error,
+        Some(&h.id),
+        first.as_deref(),
+    );
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| h.publish(server)));
+}
+
+/// The low I/O priority an idle-level scan took ([`lower_io`]), given back when dropped: also
+/// when a panic unwinds through the scan.
+struct LowIo<'a> {
+    server: &'a Server,
+    on: bool,
+}
+
+impl Drop for LowIo<'_> {
+    fn drop(&mut self) {
+        if self.on {
+            restore_io(self.server);
+        }
+    }
 }
 
 fn end_run(_server: &Arc<Server>, h: &Arc<ScanHandle>) {
