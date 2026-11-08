@@ -16,6 +16,9 @@
 ;   - 0.3.4's flags (--updated /S --force-run /currentuser /allusers) next to Tauri's;
 ;   - an installed 0.3.4 is uninstalled first with the flags electron-builder itself uses
 ;     (/S /KEEP_APP_DATA --keep-shortcuts --updated _?=…): data, shortcuts and pins stay;
+;   - the new files are unpacked into a staging folder beside $INSTDIR before that, and renamed
+;     into place after it (spaceknife.nsh SkMakeStage / SkPlaceAll): once 0.3.4 is gone only
+;     renames on one drive are left to do, and a full drive fails while 0.3.4 is still whole;
 ;   - WebView2 is also installed in an update when it is missing (0.3.4 did not need it), and
 ;     before anything of the old installation is touched; a failed silent update starts the old
 ;     version again;
@@ -147,6 +150,23 @@ RequestExecutionLevel user
 ; no MUI_LANGDLL_REGISTRY_* (the stock template keeps "Installer Language" in
 ; HKCU\Software\DuskXi\SpaceKnife): installer and uninstaller follow the system's language, as
 ; 0.3.4's did, and nothing is left under Software\DuskXi
+
+; What this installer puts in $INSTDIR, for spaceknife.nsh's staging (SkCheckStaged, SkPlaceAll):
+; every file (its path in $INSTDIR) and every folder they are in, each through the macro OP
+!macro SK_EACH_FILE OP
+  !insertmacro ${OP} "${MAINBINARYNAME}.exe"
+  {{#each resources}}
+  !insertmacro ${OP} "{{this.[1]}}"
+  {{/each}}
+  {{#each binaries}}
+  !insertmacro ${OP} "{{this}}"
+  {{/each}}
+!macroend
+!macro SK_EACH_DIR OP
+  {{#each resources_dirs}}
+  !insertmacro ${OP} "{{this}}"
+  {{/each}}
+!macroend
 
 {{#if installer_hooks}}
 !include "{{installer_hooks}}"
@@ -356,6 +376,8 @@ LangString skAppRunning ${LANG_ENGLISH} "SpaceKnife is still running. Click OK t
 LangString skOldUninstallFailed ${LANG_ENGLISH} "The installed SpaceKnife could not be removed (one of its files is in use). Nothing was changed; close SpaceKnife and try again."
 LangString skAnotherInstaller ${LANG_ENGLISH} "Another SpaceKnife installer is running."
 LangString skNoSpace ${LANG_ENGLISH} "There is not enough free space for SpaceKnife on this drive. Nothing was changed."
+LangString skStageFailed ${LANG_ENGLISH} "SpaceKnife's new files could not be written (is the drive full?). Nothing was changed."
+LangString skPlaceFailed ${LANG_ENGLISH} "SpaceKnife could not be put in place ($SkPlaceFailed is in use). Close what uses it and run the installer again."
 !endif
 !ifdef LANG_SIMPCHINESE
 LangString skDataTitle ${LANG_SIMPCHINESE} "你的数据"
@@ -373,6 +395,8 @@ LangString skAppRunning ${LANG_SIMPCHINESE} "SpaceKnife 仍在运行。点“确
 LangString skOldUninstallFailed ${LANG_SIMPCHINESE} "无法移除已安装的 SpaceKnife（它的文件正被占用）。什么都没有改动；请关闭 SpaceKnife 后重试。"
 LangString skAnotherInstaller ${LANG_SIMPCHINESE} "另一个 SpaceKnife 安装程序正在运行。"
 LangString skNoSpace ${LANG_SIMPCHINESE} "这个磁盘上的剩余空间不够安装 SpaceKnife。什么都没有改动。"
+LangString skStageFailed ${LANG_SIMPCHINESE} "SpaceKnife 的新文件写不进去（磁盘满了？）。什么都没有改动。"
+LangString skPlaceFailed ${LANG_SIMPCHINESE} "无法把 SpaceKnife 放到位（$SkPlaceFailed 正被占用）。请关闭占用它的程序后重新运行安装程序。"
 !endif
 
 ; ------------------------------------------------------------------ installer
@@ -591,8 +615,7 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
-  ; 0. room for the new files before the old ones go (after that there is no way back): the
-  ;    estimate + 64 MB
+  ; 0. room for the new files before the old ones go: the estimate + 64 MB
   ${GetRoot} "$INSTDIR" $R0
   ${DriveSpace} "$R0\" "/D=F /S=K" $R1
   ${IfNot} ${Errors}
@@ -604,7 +627,40 @@ Section Install
   ${EndIf}
   ClearErrors
 
-  ; 1. what runs from this folder (0.3.4 that is quitting, an update of a forked installation, a
+  ; 1. every new file, unpacked into the staging folder beside $INSTDIR while the installed
+  ;    version is still whole (spaceknife.nsh SkMakeStage): a full drive or a broken extraction
+  ;    stops here, with nothing changed
+  Call SkMakeStage
+  ${If} $SkStage == ""
+    ${SkLog} "no staging folder: nothing changed"
+    Abort "$(skStageFailed)"
+  ${EndIf}
+  ${SkLog} "staging in $SkStage (renames: $SkStageMove)"
+  SetOutPath "$SkStage"
+  ClearErrors
+  File "/oname=${MAINBINARYNAME}.exe" "${MAINBINARYSRCPATH}"
+  {{#each resources_dirs}}
+    CreateDirectory "$SkStage\\{{this}}"
+  {{/each}}
+  {{#each resources}}
+    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
+  {{/each}}
+  {{#each binaries}}
+    File /a "/oname={{this}}" "{{no-escape @key}}"
+  {{/each}}
+  ${If} ${Errors}
+    StrCpy $SkStageMissing "(an extraction error)"
+  ${Else}
+    Call SkCheckStaged
+  ${EndIf}
+  ; the staging folder must not be this process's current folder when it is renamed or removed
+  SetOutPath $PLUGINSDIR
+  ${If} $SkStageMissing != ""
+    ${SkLog} "the staged files are incomplete ($SkStageMissing): nothing changed"
+    Abort "$(skStageFailed)"
+  ${EndIf}
+
+  ; 2. what runs from this folder (0.3.4 that is quitting, an update of a forked installation, a
   ;    headless SpaceKnife.com): closed before anything changes
   StrCpy $R0 $INSTDIR
   Call SkCloseIn
@@ -613,7 +669,8 @@ Section Install
     Abort "$(skAppRunning)"
   ${EndIf}
 
-  ; 2. the installed 0.3.4: its own uninstaller, data, shortcuts and pins kept
+  ; 3. the installed 0.3.4: its own uninstaller, data, shortcuts and pins kept. From here on the
+  ;    earlier version can't come back; what is left to do are renames on one drive.
   ${If} $SkOldKind == "eb"
     DetailPrint "Removing SpaceKnife $SkOldVersion (Electron) from $SkOldDir"
     Call SkRemoveElectronBuilder
@@ -621,6 +678,7 @@ Section Install
       ${SkLog} "0.3.4 could not be removed: nothing changed"
       Abort "$(skOldUninstallFailed)"
     ${EndIf}
+    StrCpy $SkOldGone 1
     DeleteRegKey SHCTX "${SK_UNINSTKEY}"
     DeleteRegKey SHCTX "${SK_INSTKEY}"
   ${EndIf}
@@ -628,18 +686,20 @@ Section Install
   ${If} $SkOldKind == "fork"
   ${AndIf} $SkRelocated = 1
   ${AndIf} ${FileExists} "$SkOldDir\uninstall.exe"
+    StrCpy $SkOldGone 1
     CopyFiles /SILENT "$SkOldDir\uninstall.exe" "$PLUGINSDIR\fork-uninstaller.exe"
     ExecWait '"$PLUGINSDIR\fork-uninstaller.exe" /S $SkScopeFlag --keep-shortcuts --updated _?=$SkOldDir' $R6
     Delete "$SkOldDir\uninstall.exe"
     RMDir "$SkOldDir"
   ${EndIf}
-  ; 3. a stock Tauri test build
+  ; 4. a stock Tauri test build
   Call SkRemoveStockTauri
 
-  ; 4. an earlier forked version's files that this one no longer has (the interface's names change
+  ; 5. an earlier forked version's files that this one no longer has (the interface's names change
   ;    with every build); folders this installer owns, and only when the folder is safe
   ${If} $SkOldKind == "fork"
   ${AndIf} $SkRelocated <> 1
+    StrCpy $SkOldGone 1
     StrCpy $R0 $INSTDIR
     Call SkUnsafeDir
     ${If} $R0 == ""
@@ -648,23 +708,13 @@ Section Install
     ${EndIf}
   ${EndIf}
 
+  ; 6. the staged files into $INSTDIR: renames on one drive (spaceknife.nsh SkPlaceAll)
+  Call SkPlaceAll
+  ${If} $SkPlaceFailed != ""
+    ${SkLog} "$SkPlaceFailed could not be put in place"
+    Abort "$(skPlaceFailed)"
+  ${EndIf}
   SetOutPath $INSTDIR
-
-  ; Copy main executable
-  File "${MAINBINARYSRCPATH}"
-
-  ; Copy resources
-  {{#each resources_dirs}}
-    CreateDirectory "$INSTDIR\\{{this}}"
-  {{/each}}
-  {{#each resources}}
-    File /a "/oname={{this.[1]}}" "{{no-escape @key}}"
-  {{/each}}
-
-  ; Copy external binaries
-  {{#each binaries}}
-    File /a "/oname={{this}}" "{{no-escape @key}}"
-  {{/each}}
 
   ; Create file associations
   {{#each file_associations as |association| ~}}
@@ -779,7 +829,9 @@ Function .onInstSuccess
 FunctionEnd
 
 Function .onInstFailed
-  ; a silent update that failed before the new files: SpaceKnife comes back as it was
+  ; a silent update that failed before the earlier version was removed: SpaceKnife comes back as
+  ; it was; the staged files go
+  Call SkDropStage
   Call SkRestartPrevious
 FunctionEnd
 

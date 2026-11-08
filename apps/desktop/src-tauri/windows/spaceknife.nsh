@@ -54,6 +54,11 @@ Var SkTauriUninst
 Var SkTauriBin       ; its MainBinaryName
 Var SkLogFile        ; the log file's handle (silent runs write what they did)
 Var SkDirFromCmd     ; the folder /D= gave (NSIS takes /D= out of $CMDLINE)
+Var SkStage          ; the new files before they go into $INSTDIR ("" when there is none)
+Var SkStageMove      ; 1: $SkStage is beside $INSTDIR (renames), 0: elsewhere (copies)
+Var SkStageMissing   ; the first file the staging lacks ("" when it has them all)
+Var SkPlaceFailed    ; the first file that could not be put in place ("" when all were)
+Var SkOldGone        ; 1: the earlier installation's files are gone (nothing to start again)
 
 ; ------------------------------------------------------------------ small helpers (both sides)
 
@@ -557,6 +562,168 @@ Function SkDefaultDir
   StrCpy $INSTDIR "$0\${PRODUCTNAME}"
 FunctionEnd
 
+; ------------------------------------------------------------------ the new files, staged
+
+; The installer's files reach $INSTDIR in two steps, so that the step after the earlier version
+; is gone can't fail for want of space or a broken extraction: first everything is unpacked into
+; a staging folder beside $INSTDIR (same drive; not inside it, which 0.3.4's uninstaller empties),
+; while the earlier version is still whole; then, once it is removed, the staged files are renamed
+; into place — the folder itself when $INSTDIR is gone (0.3.4's uninstaller takes it), else file
+; by file. installer.nsi defines what there is to place (before it includes this file):
+;   !macro SK_EACH_FILE OP   - !insertmacro ${OP} "<path in $INSTDIR>" for every file
+;   !macro SK_EACH_DIR OP    - the same for every folder those files are in
+; When no folder can be made beside $INSTDIR (rights), the files are staged in $PLUGINSDIR and
+; copied instead (renamed, they would keep the temporary folder's permissions).
+
+!define SK_STAGE_SUFFIX ".sk-staging"
+
+; $SkStage/$SkStageMove for $INSTDIR, an empty folder ($SkStage "" when none could be made at all)
+Function SkMakeStage
+  Push $0
+  Push $1
+  ${GetParent} "$INSTDIR" $0
+  ${GetFileName} "$INSTDIR" $1
+  StrCpy $SkStage ""
+  StrCpy $SkStageMove 0
+  ${If} $0 != ""
+  ${AndIf} $1 != ""
+    StrCpy $SkStage "$0\$1${SK_STAGE_SUFFIX}"
+    StrCpy $SkStageMove 1
+    ; a staging folder an earlier run left (it failed half way): this installer's own
+    RMDir /r "$SkStage"
+    ClearErrors
+    CreateDirectory "$SkStage"
+    ${If} ${Errors}
+    ${OrIfNot} ${FileExists} "$SkStage\*.*"
+      ${SkLog} "no staging folder beside $INSTDIR: staging in the plug-ins folder"
+      StrCpy $SkStage ""
+      StrCpy $SkStageMove 0
+    ${EndIf}
+  ${EndIf}
+  ${If} $SkStage == ""
+    InitPluginsDir
+    StrCpy $SkStage "$PLUGINSDIR\stage"
+    RMDir /r "$SkStage"
+    ClearErrors
+    CreateDirectory "$SkStage"
+    ${IfNot} ${FileExists} "$SkStage\*.*"
+      StrCpy $SkStage ""
+    ${EndIf}
+  ${EndIf}
+  ClearErrors
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; Remove the staging folder (what is left of it), only ever one SkMakeStage made
+Function SkDropStage
+  Push $0
+  ${If} $SkStage != ""
+    StrLen $0 "${SK_STAGE_SUFFIX}"
+    IntOp $0 0 - $0
+    StrCpy $0 "$SkStage" "" $0
+    ${If} $0 == "${SK_STAGE_SUFFIX}"
+    ${OrIf} $SkStage == "$PLUGINSDIR\stage"
+      SetOutPath "$PLUGINSDIR"
+      RMDir /r "$SkStage"
+    ${EndIf}
+    StrCpy $SkStage ""
+  ${EndIf}
+  ClearErrors
+  Pop $0
+FunctionEnd
+
+!macro SK_STAGED_CHECK REL
+  ${IfNot} ${FileExists} "$SkStage\${REL}"
+  ${AndIf} $SkStageMissing == ""
+    StrCpy $SkStageMissing "${REL}"
+  ${EndIf}
+!macroend
+
+; $SkStageMissing = the first file the staging folder lacks, "" when it has every one
+Function SkCheckStaged
+  StrCpy $SkStageMissing ""
+  !insertmacro SK_EACH_FILE SK_STAGED_CHECK
+FunctionEnd
+
+; One staged file (its path in $INSTDIR on the stack) into place: renamed (the same drive), else
+; copied; a few tries (a scanner may hold a new file for a moment). $SkPlaceFailed when it can't.
+Function SkPlaceOne
+  Exch $R0
+  Push $R1
+  StrCpy $R1 0
+  sk_place_again:
+  ${If} $SkStageMove = 1
+    ${If} ${FileExists} "$INSTDIR\$R0"
+      Delete "$INSTDIR\$R0"
+    ${EndIf}
+    ClearErrors
+    Rename "$SkStage\$R0" "$INSTDIR\$R0"
+    ${IfNot} ${Errors}
+      Goto sk_place_done
+    ${EndIf}
+  ${EndIf}
+  ClearErrors
+  ${If} ${FileExists} "$SkStage\$R0"
+    CopyFiles /SILENT "$SkStage\$R0" "$INSTDIR\$R0"
+    ${IfNot} ${Errors}
+    ${AndIf} ${FileExists} "$INSTDIR\$R0"
+      Goto sk_place_done
+    ${EndIf}
+  ${EndIf}
+  IntOp $R1 $R1 + 1
+  ${If} $R1 < 5
+    Sleep 400
+    Goto sk_place_again
+  ${EndIf}
+  ${SkLog} "could not put $R0 in place"
+  ${If} $SkPlaceFailed == ""
+    StrCpy $SkPlaceFailed $R0
+  ${EndIf}
+  sk_place_done:
+  ClearErrors
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+!macro SK_PLACE_FILE REL
+  Push "${REL}"
+  Call SkPlaceOne
+!macroend
+
+!macro SK_MAKE_DIR REL
+  CreateDirectory "$INSTDIR\${REL}"
+!macroend
+
+; Every staged file into $INSTDIR (the earlier version is gone, or this is its own update in
+; place); then the staging folder goes. $SkPlaceFailed = the first file that could not be placed.
+Function SkPlaceAll
+  StrCpy $SkPlaceFailed ""
+  SetOutPath "$PLUGINSDIR"
+  ; a folder the earlier version left empty is no folder to keep
+  RMDir "$INSTDIR"
+  ${If} $SkStageMove = 1
+  ${AndIfNot} ${FileExists} "$INSTDIR\*.*"
+    ClearErrors
+    Rename "$SkStage" "$INSTDIR"
+    ${IfNot} ${Errors}
+    ${AndIf} ${FileExists} "$INSTDIR\${MAINBINARYNAME}.exe"
+      ${SkLog} "the staged folder became $INSTDIR"
+      StrCpy $SkStage ""
+      ClearErrors
+      Return
+    ${EndIf}
+  ${EndIf}
+  ClearErrors
+  CreateDirectory "$INSTDIR"
+  !insertmacro SK_EACH_DIR SK_MAKE_DIR
+  !insertmacro SK_EACH_FILE SK_PLACE_FILE
+  ${If} $SkPlaceFailed == ""
+    ${SkLog} "the staged files went into $INSTDIR"
+    Call SkDropStage
+  ${EndIf}
+FunctionEnd
+
 !macro SK_DEL FILE
   Delete "${FILE}"
 !macroend
@@ -719,6 +886,12 @@ Function SkRestartPrevious
   ${EndIf}
   ${If} $UpdateMode <> 1
   ${AndIf} $SkRun <> 1
+    Return
+  ${EndIf}
+  ; once the earlier files are gone there is nothing of it to start (a half-placed new version
+  ; is not started either: the installer has to run again)
+  ${If} $SkOldGone = 1
+    ${SkLog} "the earlier version is gone already: nothing to start again"
     Return
   ${EndIf}
   ${If} $SkOldDir != ""
