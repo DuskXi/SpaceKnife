@@ -11,8 +11,8 @@ use std::time::Duration;
 use common::*;
 use serde_json::json;
 use sk_core::summary::Walk;
-use sk_store::subtree::Summary;
 use sk_server::scans::ScanHandle;
+use sk_store::subtree::Summary;
 
 fn full(w: Walk) -> Arc<Summary> {
     match w {
@@ -22,7 +22,10 @@ fn full(w: Walk) -> Arc<Summary> {
     }
 }
 
-async fn scanned(c: &Client, srv: &sk_server::ServerHandle) -> (Arc<ScanHandle>, tempfile::TempDir) {
+async fn scanned(
+    c: &Client,
+    srv: &sk_server::ServerHandle,
+) -> (Arc<ScanHandle>, tempfile::TempDir) {
     let tmp = tempfile::tempdir().unwrap();
     let facts = build_tree(&tmp.path().join("root"));
     let st = c
@@ -108,7 +111,10 @@ async fn concurrent_callers_share_one_walk() {
         })
         .collect();
     let got: Vec<Arc<Summary>> = threads.into_iter().map(|t| t.join().unwrap()).collect();
-    assert!(got.iter().all(|g| Arc::ptr_eq(g, &got[0])), "one walk for all four");
+    assert!(
+        got.iter().all(|g| Arc::ptr_eq(g, &got[0])),
+        "one walk for all four"
+    );
     srv.shutdown();
 }
 

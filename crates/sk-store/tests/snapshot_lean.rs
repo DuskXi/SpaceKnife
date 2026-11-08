@@ -36,7 +36,8 @@ unsafe impl GlobalAlloc for Counting {
         let p = unsafe { System.realloc(ptr, layout, new) };
         if !p.is_null() {
             if new >= layout.size() {
-                let now = NOW.fetch_add(new - layout.size(), Ordering::SeqCst) + new - layout.size();
+                let now =
+                    NOW.fetch_add(new - layout.size(), Ordering::SeqCst) + new - layout.size();
                 PEAK.fetch_max(now, Ordering::SeqCst);
             } else {
                 NOW.fetch_sub(layout.size() - new, Ordering::SeqCst);

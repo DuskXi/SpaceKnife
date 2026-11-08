@@ -33,7 +33,10 @@ fn roots_of(root: &Path) -> Vec<String> {
 
 /// The auto-snapshot folder of these roots.
 fn folder_of(roots: &[String]) -> PathBuf {
-    sk_server::scans::auto_path(roots).parent().unwrap().to_path_buf()
+    sk_server::scans::auto_path(roots)
+        .parent()
+        .unwrap()
+        .to_path_buf()
 }
 
 /// The log-panel events of a scan (records with `event` and its `scan_id`), from the log bus.
@@ -84,7 +87,10 @@ async fn failing_listener_never_fails_the_scan() {
     h.publish(&srv.server); // the scan may have ended before the listeners came
     let seen = seen.lock().unwrap().clone();
     assert_eq!(seen.last().map(String::as_str), Some("done"), "{seen:?}");
-    assert_eq!(c.ok("scan.status", json!({"scan_id": id})).await["state"], "done");
+    assert_eq!(
+        c.ok("scan.status", json!({"scan_id": id})).await["state"],
+        "done"
+    );
     srv.shutdown();
 }
 
@@ -115,7 +121,10 @@ async fn prune_failure_keeps_the_saved_snapshot() {
     let saved = PathBuf::from(fin["snapshot"].as_str().unwrap());
     assert!(saved.exists());
     assert_eq!(saved.parent().unwrap(), folder);
-    assert!(folder.join("20200106-000000.sks").is_dir(), "prune could not remove it");
+    assert!(
+        folder.join("20200106-000000.sks").is_dir(),
+        "prune could not remove it"
+    );
     let msgs = events_of(&id).await;
     assert!(msgs.iter().any(|m| m.starts_with("硬扫描完成")), "{msgs:?}");
     assert!(
@@ -150,7 +159,11 @@ async fn unexpected_save_error_still_publishes() {
     let again = c.ok("scan.status", json!({"scan_id": id})).await;
     assert_eq!(again["state"], "done");
     assert!(again["snapshot"].is_null(), "{again}");
-    assert_eq!(folder_of(&h.root_paths()), folder, "the failure hit the scan's folder");
+    assert_eq!(
+        folder_of(&h.root_paths()),
+        folder,
+        "the failure hit the scan's folder"
+    );
     let msgs = events_of(&id).await;
     assert!(
         msgs.iter().any(|m| m.contains("自动保存快照失败")),
@@ -241,7 +254,11 @@ async fn expected_items_none_without_complete_snapshot() {
     let root = tmp.path().join("r");
     std::fs::create_dir(&root).unwrap();
     let roots = roots_of(&root);
-    save_snapshot(&sk_server::scans::auto_path(&roots), &roots[0], Some("failed"));
+    save_snapshot(
+        &sk_server::scans::auto_path(&roots),
+        &roots[0],
+        Some("failed"),
+    );
     assert_eq!(sk_server::scans::last_item_count(&roots), None);
 }
 

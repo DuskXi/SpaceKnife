@@ -1,6 +1,8 @@
 //! Port of the live-inotify part of 0.3.4's `tests/test_monitor_posix.py`: a real
 //! [`InotifyWatcher`] on a temp folder (Linux), the choice of watcher on every platform, and
 //! undecodable names through [`interpret`] (POSIX).
+// the helpers serve the live tests, which only build on Linux
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -116,7 +118,10 @@ mod live {
         let (w, got) = watching(&root, None);
         assert_eq!(w.name(), "inotify");
         let st = w.status();
-        assert_eq!((st.state, st.watched_dirs, st.polled_dirs), (WatchState::Running, 1, 0));
+        assert_eq!(
+            (st.state, st.watched_dirs, st.polled_dirs),
+            (WatchState::Running, 1, 0)
+        );
         let f = root.join("x.txt");
         std::fs::write(&f, b"hello").unwrap();
         got.wait_for(ChangeKind::Created, &f, Some(false));
@@ -166,7 +171,9 @@ mod live {
         got.wait_for(ChangeKind::Created, &d, Some(true));
         wait_until(5, "two watches", || w.status().watched_dirs == 2);
         std::fs::write(d.join("inner.txt"), b"1").unwrap();
-        wait_until(5, "inner.txt", || got.created_or_renamed(&d.join("inner.txt")));
+        wait_until(5, "inner.txt", || {
+            got.created_or_renamed(&d.join("inner.txt"))
+        });
         let e = root.join("e");
         std::fs::rename(&d, &e).unwrap();
         wait_until(5, "renamed d → e", || {
@@ -200,7 +207,11 @@ mod live {
         got.wait_for(ChangeKind::Created, &moved, Some(true));
         got.wait_for(ChangeKind::Created, &moved.join("a.txt"), Some(false));
         got.wait_for(ChangeKind::Created, &moved.join("sub"), Some(true));
-        got.wait_for(ChangeKind::Created, &moved.join("sub").join("b.txt"), Some(false));
+        got.wait_for(
+            ChangeKind::Created,
+            &moved.join("sub").join("b.txt"),
+            Some(false),
+        );
         // the walk also watched the subfolder
         std::fs::write(moved.join("sub").join("c.txt"), b"c").unwrap();
         got.wait_for(ChangeKind::Created, &moved.join("sub").join("c.txt"), None);
@@ -235,7 +246,11 @@ mod live {
         let st = w.status();
         assert_eq!(st.watched_dirs, 2);
         assert_eq!(st.state, WatchState::Degraded);
-        assert!(st.detail.contains("inotify") && st.detail.contains('2'), "{}", st.detail);
+        assert!(
+            st.detail.contains("inotify") && st.detail.contains('2'),
+            "{}",
+            st.detail
+        );
         // baselines are taken right away; the next change must be a new mtime
         std::thread::sleep(Duration::from_millis(1100));
         std::fs::write(c.join("new.txt"), b"n").unwrap();

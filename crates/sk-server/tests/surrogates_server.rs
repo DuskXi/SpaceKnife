@@ -84,7 +84,10 @@ async fn scan_of_undecodable_names_over_the_protocol() {
     let id = st["scan_id"].as_str().unwrap().to_owned();
     let status = wait_final(&c, &id, true).await;
     assert_eq!(status["state"], "done");
-    assert_eq!((status["files"].as_i64(), status["dirs"].as_i64()), (Some(3), Some(2)));
+    assert_eq!(
+        (status["files"].as_i64(), status["dirs"].as_i64()),
+        (Some(3), Some(2))
+    );
     // the auto snapshot holds the odd extension too
     assert!(!status["snapshot"].is_null(), "{status}");
     let again = c.ok("scan.status", json!({"scan_id": id})).await;
@@ -138,7 +141,9 @@ async fn scan_of_undecodable_names_over_the_protocol() {
     );
     let rec = c
         .event_where("log.record", 10.0, |p| {
-            p["message"].as_str().is_some_and(|m| m.starts_with("无法访问"))
+            p["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("无法访问"))
         })
         .await;
     assert_eq!(rec["message"], text.as_str());
@@ -149,8 +154,14 @@ async fn scan_of_undecodable_names_over_the_protocol() {
         .filter(|e| e.extra.get("scan_id").map(String::as_str) == Some(id.as_str()))
         .map(|e| e.message.clone())
         .collect();
-    assert!(events.iter().any(|m| m.starts_with("开始扫描")), "{events:?}");
-    assert!(events.iter().any(|m| m.starts_with("硬扫描完成")), "{events:?}");
+    assert!(
+        events.iter().any(|m| m.starts_with("开始扫描")),
+        "{events:?}"
+    );
+    assert!(
+        events.iter().any(|m| m.starts_with("硬扫描完成")),
+        "{events:?}"
+    );
     srv.shutdown();
 }
 
@@ -194,18 +205,20 @@ async fn snapshot_keeps_lone_surrogates() {
         .ok("tree.children", json!({"scan_id": live, "node": live_root}))
         .await;
     let b = c
-        .ok("tree.children", json!({"scan_id": lid, "node": loaded_root}))
+        .ok(
+            "tree.children",
+            json!({"scan_id": lid, "node": loaded_root}),
+        )
         .await;
     assert_eq!(names(&a), names(&b));
     assert_eq!(names(&b).len(), 1, "{:?} for {name:?}", names(&b));
     // the folder's path, built from the stored bytes, is the real one in both trees
     let find = |s: &sk_server::scans::ScanHandle| {
         let nodes = s.store.read();
-        let kid = nodes
+        nodes
             .children(nodes.roots().next().unwrap())
             .find(|&k| nodes.path(k) == odd_dir)
-            .map(|k| nodes.path(k));
-        kid
+            .map(|k| nodes.path(k))
     };
     assert_eq!(find(&h), Some(odd_dir.clone()), "live");
     assert_eq!(find(&lh), Some(odd_dir.clone()), "loaded");

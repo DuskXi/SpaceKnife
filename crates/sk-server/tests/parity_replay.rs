@@ -79,7 +79,11 @@ fn load_rules(extra: Option<&Value>) -> Value {
 
 fn strs(v: &Value) -> BTreeSet<String> {
     v.as_array()
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -121,10 +125,8 @@ fn iso_time() -> &'static regex::Regex {
 fn inline_time() -> &'static regex::Regex {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     R.get_or_init(|| {
-        regex::Regex::new(
-            r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?",
-        )
-        .unwrap()
+        regex::Regex::new(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?")
+            .unwrap()
     })
 }
 
@@ -641,7 +643,9 @@ fn compare(exp: &Value, act: &Value, rules: &Value) -> Vec<(String, Value, Value
                 } || matches!((e.as_u64(), a.as_u64()), (Some(i), Some(j)) if i == j);
                 if !same_int
                     && x != y
-                    && !(x.is_finite() && y.is_finite() && (x - y).abs() <= t * x.abs().max(y.abs()))
+                    && !(x.is_finite()
+                        && y.is_finite()
+                        && (x - y).abs() <= t * x.abs().max(y.abs()))
                 {
                     out.push((p.to_owned(), e.clone(), a.clone()));
                 }
@@ -766,7 +770,8 @@ fn expand(spec: &Value) -> Vec<Value> {
                     .replace("{i3}", &format!("{i:03}"))
                     .replace("{i}", &i.to_string());
                 g["path"] = json!(path);
-                g["size"] = json!(f["size"].as_u64().unwrap() + f["step"].as_u64().unwrap_or(0) * i);
+                g["size"] =
+                    json!(f["size"].as_u64().unwrap() + f["step"].as_u64().unwrap_or(0) * i);
                 g.as_object_mut().unwrap().remove("range");
                 g.as_object_mut().unwrap().remove("step");
                 out.push(g);
@@ -779,7 +784,8 @@ fn expand(spec: &Value) -> Vec<Value> {
 }
 
 fn rel(root: &Path, p: &str) -> PathBuf {
-    p.split('/').fold(root.to_path_buf(), |acc, part| acc.join(part))
+    p.split('/')
+        .fold(root.to_path_buf(), |acc, part| acc.join(part))
 }
 
 fn build_fixture(root: &Path, name: &str) {
@@ -817,7 +823,10 @@ fn build_fixture(root: &Path, name: &str) {
             set_times(&p, Some(t), t, t);
         }
         #[cfg(windows)]
-        if ["hidden", "readonly", "system"].iter().any(|k| f[*k] == true) {
+        if ["hidden", "readonly", "system"]
+            .iter()
+            .any(|k| f[*k] == true)
+        {
             set_attrs(&p, f);
         }
     }
@@ -937,7 +946,11 @@ fn root_key_034(roots: &[String]) -> String {
         .to_owned();
     let first = roots[0].trim_end_matches(['\\', '/']);
     let base = first.rsplit(['\\', '/']).next().unwrap_or("");
-    let base = if base.is_empty() { roots[0].as_str() } else { base };
+    let base = if base.is_empty() {
+        roots[0].as_str()
+    } else {
+        base
+    };
     let label: String = base
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
@@ -1200,7 +1213,10 @@ impl Client {
                         Message::Binary(b) => {
                             let n = u32::from_le_bytes(b[..4].try_into().unwrap()) as usize;
                             let h: Value = serde_json::from_slice(&b[4..4 + n]).unwrap();
-                            let key = h.get("request_id").map(|r| r.to_string()).unwrap_or_default();
+                            let key = h
+                                .get("request_id")
+                                .map(|r| r.to_string())
+                                .unwrap_or_default();
                             inbox
                                 .lock()
                                 .unwrap()
@@ -1228,7 +1244,12 @@ impl Client {
         })
     }
 
-    async fn call(&mut self, method: &str, params: &Value, secs: f64) -> Result<(u64, Value), String> {
+    async fn call(
+        &mut self,
+        method: &str,
+        params: &Value,
+        secs: f64,
+    ) -> Result<(u64, Value), String> {
         let id = self.next;
         self.next += 1;
         let (tx, rx) = oneshot::channel();
@@ -1325,8 +1346,10 @@ impl<'a> Run<'a> {
         let b = Backend::start(&self.places.home, &self.places.tmp, &self.env(), &args).await;
         let url = b.ready["url"].as_str().unwrap().to_owned();
         self.backend = Some(b);
-        self.clients
-            .insert("main".into(), Client::open(&url, None).await.expect("hello"));
+        self.clients.insert(
+            "main".into(),
+            Client::open(&url, None).await.expect("hello"),
+        );
     }
 
     async fn shutdown(&mut self) {
@@ -1348,7 +1371,11 @@ impl<'a> Run<'a> {
                 }
                 Value::Object(out)
             }
-            Value::Array(a) => Value::Array(a.iter().map(|x| self.resolve(x)).collect::<Result<_, _>>()?),
+            Value::Array(a) => Value::Array(
+                a.iter()
+                    .map(|x| self.resolve(x))
+                    .collect::<Result<_, _>>()?,
+            ),
             Value::String(s) if s.starts_with('$') => {
                 let head = s.split('/').next().unwrap();
                 if ["$ROOT", "$HOME", "$TMP"].contains(&head) {
@@ -1385,7 +1412,10 @@ impl<'a> Run<'a> {
             if let Ok((_, r)) = c
                 .call("tree.node", &json!({"scan_id": scan, "node": nid}), 120.0)
                 .await
-                && let Some(p) = r.get("result").and_then(|x| x.get("path")).and_then(Value::as_str)
+                && let Some(p) = r
+                    .get("result")
+                    .and_then(|x| x.get("path"))
+                    .and_then(Value::as_str)
             {
                 let p = self.norm.path_text(p);
                 self.norm.nodes.insert((scan.to_owned(), nid), p);
@@ -1441,7 +1471,9 @@ impl<'a> Run<'a> {
                 .clients
                 .get_mut(&on)
                 .ok_or_else(|| "no such session".to_owned())?;
-            let (rid, r) = c.call(method, &params, secs(step, "timeout", 120.0)).await?;
+            let (rid, r) = c
+                .call(method, &params, secs(step, "timeout", 120.0))
+                .await?;
             let mut rec = json!({"call": method});
             if let Some(result) = r.get("result") {
                 if let Some(name) = step["as"].as_str() {
@@ -1453,12 +1485,24 @@ impl<'a> Run<'a> {
                 let mut frames = Vec::new();
                 if step["binary"] == true {
                     // a frame follows when the picture changed; otherwise give a stray one a moment
-                    let wait = if truthy(result.get("changed")) { 15.0 } else { 0.5 };
+                    let wait = if truthy(result.get("changed")) {
+                        15.0
+                    } else {
+                        0.5
+                    };
                     let key = rid.to_string();
                     let c = self.clients.get_mut(&on).unwrap();
                     let k2 = key.clone();
-                    if c.wait(wait, |ib| ib.frames.get(&k2).is_some_and(|f| !f.is_empty())).await {
-                        frames = c.inbox.lock().unwrap().frames.remove(&key).unwrap_or_default();
+                    if c.wait(wait, |ib| ib.frames.get(&k2).is_some_and(|f| !f.is_empty()))
+                        .await
+                    {
+                        frames = c
+                            .inbox
+                            .lock()
+                            .unwrap()
+                            .frames
+                            .remove(&key)
+                            .unwrap_or_default();
                     }
                 }
                 let decoded: Vec<Frame> = frames.iter().map(|b| decode(b)).collect();
@@ -1468,10 +1512,18 @@ impl<'a> Run<'a> {
                 for f in &decoded {
                     let mut ids = BTreeSet::new();
                     if let Some((_, keys)) = f.columns.get("key") {
-                        ids.extend(keys.iter().map(|k| k.as_f64().unwrap() as i64 & KEY_NODE_MASK as i64));
+                        ids.extend(
+                            keys.iter()
+                                .map(|k| k.as_f64().unwrap() as i64 & KEY_NODE_MASK as i64),
+                        );
                     }
                     if let Some((_, nodes)) = f.columns.get("node") {
-                        ids.extend(nodes.iter().map(|n| n.as_f64().unwrap() as i64).filter(|&n| n >= 0));
+                        ids.extend(
+                            nodes
+                                .iter()
+                                .map(|n| n.as_f64().unwrap() as i64)
+                                .filter(|&n| n >= 0),
+                        );
                     }
                     self.resolve_ids(&on, ids, &scan).await;
                 }
@@ -1483,7 +1535,8 @@ impl<'a> Run<'a> {
                     self.norm.norm(&shown, "")
                 };
                 if step["binary"] == true {
-                    rec["frames"] = Value::Array(decoded.iter().map(|f| self.norm.frame(f)).collect());
+                    rec["frames"] =
+                        Value::Array(decoded.iter().map(|f| self.norm.frame(f)).collect());
                 }
             } else {
                 rec["error"] = self.norm.error(&r["error"]);
@@ -1495,7 +1548,11 @@ impl<'a> Run<'a> {
             let scan_id = scan_id.as_str().unwrap_or("").to_owned();
             let c = self.clients.get_mut(&on).unwrap();
             let (_, r) = c
-                .call("$/subscribe", &json!({"topic": "scan", "params": {"scan_id": scan_id}}), 120.0)
+                .call(
+                    "$/subscribe",
+                    &json!({"topic": "scan", "params": {"scan_id": scan_id}}),
+                    120.0,
+                )
                 .await?;
             let sub = r["result"]["sub"].as_str().unwrap_or("").to_owned();
             let want_snapshot = step["snapshot"] == true;
@@ -1517,7 +1574,9 @@ impl<'a> Run<'a> {
                         s["state"] != "scanning"
                             && s["state"] != "queued"
                             && (!want_snapshot || !s["snapshot"].is_null())
-                            && before.as_ref().is_none_or(|b| s.get("finished_at") != Some(b))
+                            && before
+                                .as_ref()
+                                .is_none_or(|b| s.get("finished_at") != Some(b))
                     })
                 })
                 .await;
@@ -1529,7 +1588,10 @@ impl<'a> Run<'a> {
             if let Some(name) = step["as"].as_str() {
                 self.saved.insert(name.to_owned(), status.clone());
             }
-            let items: Vec<i64> = seen.iter().map(|s| s["items"].as_i64().unwrap_or(0)).collect();
+            let items: Vec<i64> = seen
+                .iter()
+                .map(|s| s["items"].as_i64().unwrap_or(0))
+                .collect();
             let monotonic = items.windows(2).all(|w| w[0] <= w[1]);
             self.norm.scan = scan_id.clone();
             self.last_scan = scan_id.clone();
@@ -1538,7 +1600,9 @@ impl<'a> Run<'a> {
             self.resolve_ids(&on, ids, &scan_id).await;
             self.norm.scan = scan_id;
             let shown = pick(step, &status);
-            return Ok(Some(json!({"wait_scan": self.norm.norm(&shown, ""), "monotonic": monotonic})));
+            return Ok(Some(
+                json!({"wait_scan": self.norm.norm(&shown, ""), "monotonic": monotonic}),
+            ));
         }
         if let Some(u) = step.get("until") {
             let end = Instant::now() + Duration::from_secs_f64(secs(step, "timeout", 30.0));
@@ -1597,7 +1661,9 @@ impl<'a> Run<'a> {
                 let set = stop["in"].as_array().cloned().unwrap_or_default();
                 let hit = |e: &Value| set.contains(e.get(&field).unwrap_or(&Value::Null));
                 ok = c
-                    .wait(t, |ib| ib.events.entry(name.into()).or_default().iter().any(hit))
+                    .wait(t, |ib| {
+                        ib.events.entry(name.into()).or_default().iter().any(hit)
+                    })
                     .await;
                 let mut ib = c.inbox.lock().unwrap();
                 let q = ib.events.entry(name.into()).or_default();
@@ -1649,7 +1715,10 @@ impl<'a> Run<'a> {
                 "shape" => Value::Array(got.iter().map(shape).collect()),
                 "count" => json!(got.len()),
                 _ => {
-                    let mut all: Vec<Value> = got.iter().map(|e| self.norm.norm(&pick(step, e), "")).collect();
+                    let mut all: Vec<Value> = got
+                        .iter()
+                        .map(|e| self.norm.norm(&pick(step, e), ""))
+                        .collect();
                     if mode == "last" {
                         all = all.split_off(all.len().saturating_sub(1));
                     }
@@ -1674,7 +1743,10 @@ impl<'a> Run<'a> {
             return Ok(Some(json!({"handshake": self.handshake(h).await})));
         }
         if let Some(name) = step["connect"].as_str() {
-            let url = self.backend.as_ref().unwrap().ready["url"].as_str().unwrap().to_owned();
+            let url = self.backend.as_ref().unwrap().ready["url"]
+                .as_str()
+                .unwrap()
+                .to_owned();
             let caps = step["capabilities"]
                 .as_array()
                 .map(|a| a.iter().map(|x| x.as_str().unwrap().to_owned()).collect());
@@ -1736,7 +1808,9 @@ impl<'a> Run<'a> {
     }
 
     fn fs(&self, op: &Value) -> Result<(), String> {
-        let p = op["path"].as_str().map(|s| PathBuf::from(self.places.path(s)));
+        let p = op["path"]
+            .as_str()
+            .map(|s| PathBuf::from(self.places.path(s)));
         let t = op["mtime"].as_f64().unwrap_or(1_600_000_000.0);
         match op["op"].as_str().unwrap_or("") {
             "write" => {
@@ -1756,11 +1830,8 @@ impl<'a> Run<'a> {
                     std::fs::remove_file(&p).map_err(|e| e.to_string())?;
                 }
             }
-            "rename" => std::fs::rename(
-                p.unwrap(),
-                self.places.path(op["to"].as_str().unwrap()),
-            )
-            .map_err(|e| e.to_string())?,
+            "rename" => std::fs::rename(p.unwrap(), self.places.path(op["to"].as_str().unwrap()))
+                .map_err(|e| e.to_string())?,
             "fixture" => build_fixture(&p.unwrap(), op["tree"].as_str().unwrap()),
             other => return Err(format!("unknown fs op {other}")),
         }
@@ -1769,7 +1840,10 @@ impl<'a> Run<'a> {
 
     /// A raw connection: what the server answers and how it closes.
     async fn handshake(&mut self, h: &Value) -> Value {
-        let mut url = self.backend.as_ref().unwrap().ready["url"].as_str().unwrap().to_owned();
+        let mut url = self.backend.as_ref().unwrap().ready["url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         if let Some(path) = h["path"].as_str() {
             url = format!("{}{path}", &url[..url.rfind('/').unwrap()]);
         }
@@ -1781,14 +1855,22 @@ impl<'a> Run<'a> {
             );
         }
         if let Some(o) = h["origin"].as_str() {
-            req.headers_mut().insert("Origin", HeaderValue::from_str(o).unwrap());
+            req.headers_mut()
+                .insert("Origin", HeaderValue::from_str(o).unwrap());
         }
-        let ws = match tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(req)).await {
+        let ws = match tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio_tungstenite::connect_async(req),
+        )
+        .await
+        {
             Ok(Ok((ws, _))) => ws,
             Ok(Err(tokio_tungstenite::tungstenite::Error::Http(r))) => {
                 return json!({"http_status": r.status().as_u16()});
             }
-            Ok(Err(e)) => return json!({"refused": format!("{e:?}").split('(').next().unwrap_or("").to_owned()}),
+            Ok(Err(e)) => {
+                return json!({"refused": format!("{e:?}").split('(').next().unwrap_or("").to_owned()});
+            }
             Err(_) => return json!({"refused": "TimeoutError"}),
         };
         let (mut sink, mut stream) = ws.split();
@@ -1841,7 +1923,10 @@ impl<'a> Run<'a> {
                     }
                 }
                 Ok(Some(Ok(Message::Close(c)))) => {
-                    out.insert("close_code".into(), c.map_or(Value::Null, |c| json!(u16::from(c.code))));
+                    out.insert(
+                        "close_code".into(),
+                        c.map_or(Value::Null, |c| json!(u16::from(c.code))),
+                    );
                     break;
                 }
                 Ok(Some(Ok(_))) => {}
@@ -1935,7 +2020,10 @@ fn apply_home_template(src: &Path, places: &Places, feed: &str) {
 async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
     let dir = parity_dir();
     let sc = read_json(&dir.join("scenarios").join(format!("{name}.json")));
-    let golden_path = dir.join("golden").join(platform()).join(format!("{name}.json"));
+    let golden_path = dir
+        .join("golden")
+        .join(platform())
+        .join(format!("{name}.json"));
     let runs_here = sc["platforms"]
         .as_array()
         .is_none_or(|a| a.iter().any(|p| p == platform()));
@@ -1952,7 +2040,13 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
     }
     let upgrade = sc.get("setup").is_some();
     if upgrade {
-        apply_home_template(&dir.join("golden").join(platform()).join(format!("{name}.home")), &places, &feed);
+        apply_home_template(
+            &dir.join("golden")
+                .join(platform())
+                .join(format!("{name}.home")),
+            &places,
+            &feed,
+        );
     }
     let mapping = places.mapping();
     let mut run = Run {
@@ -2001,7 +2095,11 @@ async fn replay(name: &str) -> Option<Vec<(String, Value, Value)>> {
     known.extend(sc["known_diffs"].as_array().cloned().unwrap_or_default());
     let bad: Vec<_> = diffs
         .into_iter()
-        .filter(|(p, _, _)| !known.iter().any(|k| glob_match(k["path"].as_str().unwrap(), p)))
+        .filter(|(p, _, _)| {
+            !known
+                .iter()
+                .any(|k| glob_match(k["path"].as_str().unwrap(), p))
+        })
         .collect();
     if bad.is_empty() {
         remove_all(&places.tmp);
@@ -2078,7 +2176,8 @@ fn every_scenario_has_a_test() {
         .unwrap()
         .filter_map(|e| {
             let p = e.ok()?.path();
-            (p.extension()? == "json").then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
+            (p.extension()? == "json")
+                .then(|| p.file_stem().unwrap().to_string_lossy().into_owned())
         })
         .collect();
     on_disk.sort();
@@ -2093,12 +2192,21 @@ fn normalizer_helpers_follow_the_python_rules() {
     // norm.py's glob_match, STAMP, shape; hashlib.sha1
     assert!(glob_match("**/error/loc/**", "steps/3/error/loc/#len"));
     assert!(glob_match("**/error/loc/**", "steps/3/handshake/error/loc"));
-    assert!(glob_match("steps/*/wait_scan/monitor", "steps/12/wait_scan/monitor"));
-    assert!(!glob_match("steps/*/wait_scan/monitor", "steps/12/wait_scan/io"));
+    assert!(glob_match(
+        "steps/*/wait_scan/monitor",
+        "steps/12/wait_scan/monitor"
+    ));
+    assert!(!glob_match(
+        "steps/*/wait_scan/monitor",
+        "steps/12/wait_scan/io"
+    ));
     assert_eq!(replace_stamps("a/20261108-030158.sks"), "a/<stamp>.sks");
     assert_eq!(replace_stamps("120261108-030158"), "120261108-030158");
     assert_eq!(
-        sha1(b"abc").iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        sha1(b"abc")
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
         "a9993e364706816aba3e25717850c26c9cd0d89d"
     );
     // what 0.3.4's snapshot.root_key gives (Python, Windows)
@@ -2107,7 +2215,10 @@ fn normalizer_helpers_follow_the_python_rules() {
         root_key_034(&[r"C:\Temp\Sk-Parity\root\tree".to_owned()]),
         "tree-533b17933f71"
     );
-    assert_eq!(shape(&json!({"a": [1, {"b": null, "c": "x"}], "d": null})), json!({"a": ["mixed"]}));
+    assert_eq!(
+        shape(&json!({"a": [1, {"b": null, "c": "x"}], "d": null})),
+        json!({"a": ["mixed"]})
+    );
     assert_eq!(
         shape(&json!([{"a": 1}, {"b": true}])),
         json!([{"a": "number", "b": "bool"}])

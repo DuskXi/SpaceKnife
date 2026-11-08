@@ -82,7 +82,11 @@ async fn latest_drops_superseded_queued_calls() {
     for b in blockers {
         b.await.unwrap().unwrap();
     }
-    assert_eq!(*ran.lock().unwrap(), vec![4], "only the newest queued call runs");
+    assert_eq!(
+        *ran.lock().unwrap(),
+        vec![4],
+        "only the newest queued call runs"
+    );
     for r in &results[..4] {
         assert_eq!(r.as_ref().err().map(|e| e.code), Some(-32800), "superseded");
     }
@@ -115,7 +119,10 @@ async fn view_history_is_bounded() {
     let id = st["scan_id"].as_str().unwrap().to_owned();
     wait_done(&c, &id).await;
     let a = c
-        .ok("tree.find", json!({"scan_id": id, "path": facts.root.join("a")}))
+        .ok(
+            "tree.find",
+            json!({"scan_id": id, "path": facts.root.join("a")}),
+        )
         .await["node"]["id"]
         .clone();
     let v = c
@@ -132,7 +139,11 @@ async fn view_history_is_bounded() {
         } else {
             c.ok("view.home", json!({"view_id": view})).await
         };
-        let want = if i % 2 == 0 { &a } else { &r["state"]["zoom_node"] };
+        let want = if i % 2 == 0 {
+            &a
+        } else {
+            &r["state"]["zoom_node"]
+        };
         assert_eq!(&r["state"]["zoom_node"], want, "step {i}: {}", r["state"]);
         assert_eq!(r["state"]["can_back"], true, "step {i}");
     }
@@ -159,7 +170,7 @@ fn name_index_does_not_keep_its_store_alive() {
     {
         let nodes = store.read();
         index.update(&nodes, nodes.len());
-        assert!(index.len() > 0);
+        assert!(!index.is_empty());
     }
     let n = index.len();
     drop(store);
@@ -178,7 +189,9 @@ fn name_index_cache_is_bounded() {
     let ask = |q: &str| {
         let _ = index.ascii_tiers(&nodes, q, nodes.len(), true);
     };
-    let queries: Vec<String> = (0..200).map(|i| format!("{}{}", (b'a' + (i % 26) as u8) as char, i)).collect();
+    let queries: Vec<String> = (0..200)
+        .map(|i| format!("{}{}", (b'a' + (i % 26) as u8) as char, i))
+        .collect();
     for q in &queries[..20] {
         ask(q);
     }
@@ -187,7 +200,10 @@ fn name_index_cache_is_bounded() {
         ask(q);
     }
     let after = index.memory_bytes();
-    assert!(after <= settled * 2, "the cache grew from {settled} to {after} bytes");
+    assert!(
+        after <= settled * 2,
+        "the cache grew from {settled} to {after} bytes"
+    );
     assert!(index.memory_bytes() > 0);
 }
 
@@ -201,7 +217,10 @@ async fn closing_a_scan_gives_the_heap_back() {
     let tmp = tempfile::tempdir().unwrap();
     let facts = build_tree(&tmp.path().join("root"));
     let st = c
-        .ok("scan.start", json!({"roots": [facts.root], "auto_snapshot": false}))
+        .ok(
+            "scan.start",
+            json!({"roots": [facts.root], "auto_snapshot": false}),
+        )
         .await;
     let id = st["scan_id"].as_str().unwrap().to_owned();
     wait_done(&c, &id).await;
@@ -214,7 +233,10 @@ async fn closing_a_scan_gives_the_heap_back() {
     c.ok("scan.close", json!({"scan_id": id})).await;
     let closed = srv.server.scans.closed.lock().clone();
     assert_eq!(closed.len(), 1);
-    assert!(closed[0].1 > 0 && closed[0].1 == size, "{closed:?} vs {size}");
+    assert!(
+        closed[0].1 > 0 && closed[0].1 == size,
+        "{closed:?} vs {size}"
+    );
     assert_eq!(sk_server::diag::retained(&srv.server), size as u64);
     for _ in 0..100 {
         if weak.upgrade().is_none() {
@@ -222,7 +244,10 @@ async fn closing_a_scan_gives_the_heap_back() {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(weak.upgrade().is_none(), "the closed scan is still referenced");
+    assert!(
+        weak.upgrade().is_none(),
+        "the closed scan is still referenced"
+    );
     sk_core::memory::release(); // best effort: never fails
     srv.shutdown();
 }
@@ -259,7 +284,10 @@ async fn watchdog_stays_quiet_within_its_allowance() {
         assert!(!sk_server::diag::check(&srv.server, &mut last));
     }
     let text = sk_server::diag::report(&srv.server);
-    assert!(text.contains("accounted") && text.contains("compute"), "{text}");
+    assert!(
+        text.contains("accounted") && text.contains("compute"),
+        "{text}"
+    );
     srv.shutdown();
 }
 

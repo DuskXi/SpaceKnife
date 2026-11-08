@@ -49,7 +49,12 @@ fn ready_line(child: &mut Child) -> Value {
     assert!(!line.is_empty(), "the backend exited before its ready line");
     let ready: Value = serde_json::from_str(&line).unwrap();
     assert_eq!(ready["event"], "ready");
-    assert!(ready["url"].as_str().unwrap().starts_with("ws://127.0.0.1:"));
+    assert!(
+        ready["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("ws://127.0.0.1:")
+    );
     ready
 }
 
@@ -209,7 +214,15 @@ fn scan_exits_with_its_output_complete() {
     let missing = tmp.path().join("missing");
     let bad = run(&["scan", missing.to_str().unwrap()]);
     assert_eq!(bad.status.code(), Some(2));
-    let pooled = run(&["scan", root, "--workers", "2", "--no-snapshot", "--top", "3"]);
+    let pooled = run(&[
+        "scan",
+        root,
+        "--workers",
+        "2",
+        "--no-snapshot",
+        "--top",
+        "3",
+    ]);
     let text = String::from_utf8_lossy(&pooled.stdout).into_owned();
     assert_eq!(pooled.status.code(), Some(0), "{text}");
     assert!(text[text.find("最大的文件").unwrap()..].contains("movie.mp4"));
@@ -269,7 +282,11 @@ fn a_failed_output_keeps_the_snapshots() {
     assert!(saved.exists(), "--save was written (exit {code:?})");
     assert_complete(&saved);
     let snaps = snapshots_in(&home);
-    assert_eq!(snaps.len(), 1, "the auto snapshot was written (exit {code:?})");
+    assert_eq!(
+        snaps.len(),
+        1,
+        "the auto snapshot was written (exit {code:?})"
+    );
     assert_complete(&snaps[0]);
 }
 
@@ -305,7 +322,8 @@ fn stored_language_reads_what_the_settings_store_reads() {
             std::fs::write(&file, c).unwrap();
         }
         let fast = sk_server::cli::stored_language(&file).unwrap_or_else(|| "system".into());
-        let store = sk_core::settings::SettingsStore::new(Some(file.clone())).get_str("general.language");
+        let store =
+            sk_core::settings::SettingsStore::new(Some(file.clone())).get_str("general.language");
         if fast != store {
             wrong.push(format!("{content:?}: fast {fast}, store {store}"));
         }
@@ -331,8 +349,16 @@ fn largest_matches_a_stable_sort() {
             .map(|i| (nodes.allocs()[i as usize], i))
             .collect();
         // a stable sort by allocation, largest first: equal ones keep their id order
-        files.sort_by(|a, b| b.0.cmp(&a.0));
-        for k in [0usize, 1, 5, 17, files.len().saturating_sub(1), files.len(), files.len() + 50] {
+        files.sort_by_key(|f| std::cmp::Reverse(f.0));
+        for k in [
+            0usize,
+            1,
+            5,
+            17,
+            files.len().saturating_sub(1),
+            files.len(),
+            files.len() + 50,
+        ] {
             let want: Vec<u32> = files.iter().take(k).map(|f| f.1).collect();
             let got = sk_server::cli::scan::largest(&nodes, k);
             assert_eq!(got, want, "seed {seed}, k {k}");
@@ -377,7 +403,10 @@ fn a_path_it_cannot_read_is_scanned_the_hard_way() {
         flat.contains(&format!("不支持 MFT 快速扫描：{reason_flat}。改用硬扫描。")),
         "{text}"
     );
-    assert!(flat.contains(&format!("方式 硬扫描（{reason_flat}）")), "{text}");
+    assert!(
+        flat.contains(&format!("方式 硬扫描（{reason_flat}）")),
+        "{text}"
+    );
     let header = sk_store::snapshot::read_header(&saved).unwrap();
     assert_eq!(header.stats["files"], facts.files);
     assert_eq!(header.stats["method"], "hard");
