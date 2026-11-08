@@ -12,6 +12,7 @@
 //!   time (setting 「日志文件级别」).
 //! * the bus ([`LogBus`]): every record at DEBUG or above, the last 5000 kept, delivered to
 //!   subscribers with a minimum level.
+//! * panics: one line in the log file as well ([`install_panic_hook`], installed by [`init`]).
 //!
 //! Levels are named as the protocol names them ([`LogLevel`]): `WARN` is `WARNING`.
 
@@ -613,14 +614,61 @@ pub fn subscriber(cfg: &LogConfig) -> impl Subscriber + Send + Sync + for<'a> Lo
         .with(bus)
 }
 
-/// Install the process-wide subscriber (and route the `log` crate into it). Safe to call more
-/// than once: later calls only change the log file.
+/// Install the process-wide subscriber (and route the `log` crate into it) and the panic hook
+/// ([`install_panic_hook`]). Safe to call more than once: later calls only change the log file.
 pub fn init(cfg: &LogConfig) -> io::Result<()> {
+    install_panic_hook();
     if let Some((path, level)) = &cfg.file {
         set_file_logging(Some(path), *level)?;
     }
     let _ = subscriber(cfg).try_init();
     Ok(())
+}
+
+/// Panics go into the log file as well: the window program on Windows has no stderr, so a panic
+/// (caught and turned into an error, or not) left no trace. One line — the thread, where, the
+/// message — then the previous hook runs (stderr). The file's lock is only tried for a moment,
+/// never waited on: the panic may have come from this very thread while it held it. Once per
+/// process ([`init`] calls it).
+pub fn install_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if FILE_LEVEL.load(Ordering::Relaxed) > 0 {
+                let line = panic_line(info);
+                if let Some(mut sink) =
+                    FILE_SINK.try_lock_for(std::time::Duration::from_millis(100))
+                    && let Some(f) = sink.as_mut()
+                {
+                    let _ = f.write(line.as_bytes());
+                    let _ = f.flush();
+                }
+            }
+            previous(info);
+        }));
+    });
+}
+
+/// `date | ERROR    | panic - thread 'name' panicked at file:line:col: message`
+fn panic_line(info: &std::panic::PanicHookInfo<'_>) -> String {
+    let payload = info.payload();
+    let message = payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "Box<dyn Any>".to_owned());
+    let thread = std::thread::current();
+    let at = info
+        .location()
+        .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+        .unwrap_or_else(|| "?".to_owned());
+    format!(
+        "{} | {:<8} | panic - thread '{}' panicked at {at}: {message}\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+        "ERROR",
+        thread.name().unwrap_or("<unnamed>"),
+    )
 }
 
 /// Write the formatted fields of an event as `message k=v …` (used by tests and tools).
