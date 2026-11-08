@@ -227,7 +227,7 @@ xvfb-run -a node packaging/update-e2e.mjs target/electron-shell/portable/SpaceKn
 
 [packaging/nsis-logic.mjs](../packaging/nsis-logic.mjs) 不安装任何东西：用 Tauri 打包器的 NSIS 编译并运行 `packaging/nsis-logic/logic-test.nsi`，逐个检查 `spaceknife.nsh` 的逻辑：0.3.4 和 Tauri 的参数、提权副本的参数、目录保护、目录名补 `\SpaceKnife`、`/D=` 与默认目录的选择、暂存（整目录改名、整个改名后缺文件不退回、逐个文件改名、暂存不全时什么都不改、文件被占用、上级目录建不了暂存目录、残留的暂存目录只按名字清空、不是暂存目录的绝不删）、文件清单的写和按清单删（清单外的、`..`、盘符、通配符一律不删）、0.3.4 的文件清单、什么时候不用 0.3.4 的卸载程序、WebView2 的最低版本（读版本和升级换成测试替身）、沙箱里的 `.lnk` 改目标和 AUMID，以及启动应用时的环境。只在 Windows 上跑，只写临时文件夹，不写注册表；在自己的桌面上要经 [packaging/hidden-desktop.ps1](../packaging/hidden-desktop.ps1) 运行（启动的用例会开 cmd.exe）。`tools/tests/nsis_installer.test.mjs` 从源码核对它够不着的模板部分（各段的顺序、没有 `RMDir /r`）。
 
-[packaging/installer-experiments.ps1](../packaging/installer-experiments.ps1)（`Installer experiments` 工作流：`exp/**` 分支或手动，Windows Server 2022 和 2025）只在一次性的机器上运行：装好真实的 0.3.4 安装程序后，像 0.3.4 的「无缝更新」那样启动候选安装程序，覆盖当前用户、所有用户、0.3.4 在运行、文件被占用、没有 WebView2、降级和重装、两种范围并存、自定义目录、0.3.4 装在数据目录、控制台启动器、Defender 扫描等场景，每条断言写进一份 JSON。GitHub 的运行器是关了 UAC 的管理员，要开着 UAC 的场景记为 skip，要在脚本里说明的 Hyper-V 虚拟机上跑。
+[packaging/installer-experiments.ps1](../packaging/installer-experiments.ps1)（`Installer experiments` 工作流：`exp/**` 分支或手动，Windows Server 2022 和 2025）只在一次性的机器上运行：装好真实的 0.3.4 安装程序后，像 0.3.4 的「无缝更新」那样启动候选安装程序，覆盖当前用户、所有用户、0.3.4 在运行、文件被别的程序占着、没有 WebView2、降级和重装（0.3.5 开着时重装）、两种范围并存、自定义目录、0.3.4 装在数据目录、控制台启动器、Defender 扫描等场景，每条断言写进一份 JSON，失败的断言写明看到了什么。一个场景出错时记为一条失败的断言（错误信息和行号），重置 SpaceKnife 后接着跑下一个，JSON 每个场景之后和最后都写。GitHub 的运行器上脚本本身就是提权运行的（UAC 开着，但它启动的每个进程都已提权），要未提权管理员的场景记为 skip，要在脚本里说明的 Hyper-V 虚拟机上跑。
 
 ```bash
 node packaging/update-from-034.mjs portable|nsis|appimage|deb|rpm|dmg <0.3.4 的文件> <候选文件>
