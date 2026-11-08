@@ -29,6 +29,11 @@ extraResources:
 asar: true
 electronLanguages: [en-US, zh-CN] # the two UI languages (M7.5); drops the other Chromium locales
 npmRebuild: false # no native Node modules
+# No publish target and no update information (latest.yml, app-update.yml): the update check is
+# SpaceKnife's own (crates/sk-core update), as in 0.3.4. Unset, a GH_TOKEN in the environment (CI
+# has one for `gh release download`) makes electron-builder look for a GitHub repository to publish
+# to and stop when it finds none (src/main/builder.test.ts).
+publish: null
 
 win:
   target:
