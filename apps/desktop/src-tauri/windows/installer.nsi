@@ -19,9 +19,13 @@
 ;   - the new files are unpacked into a staging folder beside $INSTDIR before that, and renamed
 ;     into place after it (spaceknife.nsh SkMakeStage / SkPlaceAll): once 0.3.4 is gone only
 ;     renames on one drive are left to do, and a full drive fails while 0.3.4 is still whole;
-;   - WebView2 is also installed in an update when it is missing (0.3.4 did not need it), and
-;     before anything of the old installation is touched; a failed silent update starts the old
-;     version again;
+;   - WebView2 is also installed in an update when it is missing (0.3.4 did not need it), or
+;     updated when it is older than minimumWebview2Version, before anything of the old
+;     installation is touched; when that fails nothing changes, and a failed silent update starts
+;     the old version again;
+;   - a folder chosen on the directory page without "SpaceKnife" in it gets \SpaceKnife (0.3.4's
+;     rule), and files go by name only (the list of what was installed, written next to them):
+;     nothing deletes a folder as a whole;
 ;   - the uninstaller's 「你的数据」 page of 0.3.4 (apps/electron/build/installer.nsh) instead of
 ;     the stock "delete app data" box (which only knew the identifier's folders);
 ;   - no WiX migration, no reinstall page, no start menu folder page.
@@ -167,6 +171,13 @@ RequestExecutionLevel user
   !insertmacro ${OP} "{{this}}"
   {{/each}}
 !macroend
+; every folder below $INSTDIR those files need, the deepest first (the bundler's order), for
+; removing them only once they are empty
+!macro SK_EACH_ANCESTOR OP
+  {{#each resources_ancestors}}
+  !insertmacro ${OP} "{{this}}"
+  {{/each}}
+!macroend
 
 {{#if installer_hooks}}
 !include "{{installer_hooks}}"
@@ -266,6 +277,8 @@ Function SkSkipDirectory
 FunctionEnd
 
 Function SkLeaveDirectory
+  ; a folder without "SpaceKnife" in it gets \SpaceKnife, as with 0.3.4's installer
+  Call SkAppendName
   StrCpy $R0 $INSTDIR
   Call SkUnsafeDir
   ${If} $R0 != ""
@@ -681,17 +694,14 @@ Section Install
   ; 4. a stock Tauri test build
   Call SkRemoveStockTauri
 
-  ; 5. an earlier forked version's files that this one no longer has (the interface's names change
-  ;    with every build); folders this installer owns, and only when the folder is safe
+  ; 5. an earlier forked version's files (the interface's names change with every build): exactly
+  ;    those its installer listed (SkWriteManifest), and its folders once they are empty; what
+  ;    else is in the folder stays
   ${If} $SkOldKind == "fork"
   ${AndIf} $SkRelocated <> 1
     StrCpy $SkOldGone 1
     StrCpy $R0 $INSTDIR
-    Call SkUnsafeDir
-    ${If} $R0 == ""
-      RMDir /r "$INSTDIR\ui"
-      RMDir /r "$INSTDIR\licenses"
-    ${EndIf}
+    Call SkRemoveListed
   ${EndIf}
 
   ; 6. the staged files into $INSTDIR: renames on one drive (spaceknife.nsh SkPlaceAll)
@@ -718,6 +728,8 @@ Section Install
   {{/each}}
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
+  ; what the next update and the uninstaller remove
+  Call SkWriteManifest
 
   ; an earlier main binary of another name (Tauri's rule; the names compare without case)
   ReadRegStr $OldMainBinaryName SHCTX "${SK_UNINSTKEY}" "MainBinaryName"
@@ -864,10 +876,11 @@ Section Uninstall
     Delete "$INSTDIR\\{{this}}"
   {{/each}}
 
-  ; the console launcher and the folders this installer owns, whatever version filled them
+  ; the console launcher, and what the installation listed (the same files, by its own list):
+  ; never a folder as a whole, what else is in them stays
   Delete "$INSTDIR\SpaceKnife.com"
-  RMDir /r "$INSTDIR\ui"
-  RMDir /r "$INSTDIR\licenses"
+  StrCpy $R0 $INSTDIR
+  Call un.SkRemoveListed
 
   ; Delete app associations
   {{#each file_associations as |association| ~}}

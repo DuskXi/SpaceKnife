@@ -13,8 +13,9 @@
 //
 // --previous installs that one first and upgrades it with this one, as an update does. The update
 // in place checks what an update of a forked installation must do: the same folder, a stale file of
-// the interface gone, a file the user put there kept, no staging folder left, the app started
-// again with --updated and the installer's environment. It installs into this user's profile, so
+// the interface that the earlier build's list of files names gone, files the user put there (in
+// the folder, in its ui folder) kept, no staging folder left, the app started again with --updated
+// and the installer's environment. It installs into this user's profile, so
 // it refuses to run outside GitHub Actions. Exit status 1 on failure.
 
 import { spawnSync } from "node:child_process";
@@ -40,6 +41,7 @@ const UPDATE_ARGS = ["--updated", "/S", "--force-run", "/currentuser"]; // insta
 const dir = join(process.env.LOCALAPPDATA, "Programs", "SpaceKnife");
 const exe = join(dir, "SpaceKnife.exe");
 const uninstaller = join(dir, "uninstall.exe");
+const MANIFEST = "installed-files.txt"; // spaceknife.nsh SK_MANIFEST: what the installer put in the folder
 const data = join(process.env.LOCALAPPDATA, "SpaceKnife"); // the backend's data (paths.rs), not the program's folder
 const startMenu = join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs", "SpaceKnife.lnk");
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -102,17 +104,30 @@ if (smoke.status !== 0) fail("the installed app's smoke test failed");
 // an update in place, as the installed app runs it: the installer starts the new version with
 // --updated and its own environment (the ready file tells it from any other start)
 {
+  // a stale interface file an earlier build installed: on the list of files that build's installer
+  // wrote (spaceknife.nsh SkWriteManifest, UTF-16 LE), which is what an update removes; files of
+  // the user's — in the folder, and in its ui folder, on no list — stay
   const stale = join(dir, "ui", "stale-from-an-earlier-build.js");
   const mine = join(dir, "keep-me.txt");
+  const mineInUi = join(dir, "ui", "keep-me-too.txt");
+  const list = join(dir, MANIFEST);
+  if (!existsSync(list)) fail(`no ${list}: the installer wrote no list of its files`);
+  const listed = readFileSync(list).toString("utf16le").replace(/^﻿/, "");
+  if (!listed.split("\r\n").includes("SpaceKnife.exe") || !listed.includes("ui\\index.html\r\n")) fail(`${list} does not list the program and its interface:\n${listed}`);
+  writeFileSync(list, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(`ui\\stale-from-an-earlier-build.js\r\n${listed}`, "utf16le")]));
   writeFileSync(stale, "//\n");
   writeFileSync(mine, "the user's\n");
+  writeFileSync(mineInUi, "the user's\n");
   const scratch = mkdtempSync(join(tmpdir(), "sk-nsis-e2e-"));
   const ready = join(scratch, "ready.json");
   const env = { ...process.env, SPACEKNIFE_READY_FILE: ready, SPACEKNIFE_START_MINIMIZED: "1", SPACEKNIFE_HOME: join(scratch, "home") };
   run(setup, UPDATE_ARGS, "updating in place", env);
   await installed("updated in place");
-  if (existsSync(stale)) fail(`the update left ${stale}`);
+  if (existsSync(stale)) fail(`the update left ${stale}, which its list names`);
   if (!existsSync(mine)) fail(`the update took ${mine}`);
+  if (!existsSync(mineInUi)) fail(`the update took ${mineInUi}, which no list names`);
+  if (readFileSync(list).toString("utf16le").includes("stale-from-an-earlier-build")) fail(`${list} still lists the earlier build's file`);
+  rmSync(mineInUi, { force: true });
   const info = await until("the updated app to start (its ready file)", () => {
     try {
       return JSON.parse(readFileSync(ready, "utf8"));
@@ -139,6 +154,7 @@ await until("the program to be removed", () => !existsSync(exe) && !existsSync(j
 await sleep(2000);
 if (entry()) fail("the uninstall entry is left");
 if (location()) fail(`HKCU\\Software\\${GUID} is left`);
+if (existsSync(join(dir, MANIFEST))) fail(`the uninstaller left ${join(dir, MANIFEST)}`);
 if (existsSync(startMenu)) fail(`${startMenu} is left`);
 if (!existsSync(marker)) fail(`a silent uninstall took ${data}`);
 console.log(`after uninstalling, ${dir} ${existsSync(dir) ? `holds: ${readdirSync(dir).join(", ") || "(nothing)"}` : "is gone"}; the data folder stays`);

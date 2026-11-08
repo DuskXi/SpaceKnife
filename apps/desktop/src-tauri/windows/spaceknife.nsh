@@ -15,12 +15,17 @@
 ;     CreateProcess, which fails with ERROR_ELEVATION_REQUIRED for a manifest that asks for admin;
 ;     a per-machine install elevates itself (ShellExecuteEx "runas") and waits.
 ;
-; Nothing here deletes recursively outside folders this installer owns, and nothing ever deletes
-; the data folder except the uninstaller's 「你的数据」 box or --delete-app-data.
+; Nothing here deletes a folder as a whole: files go by name — the list an installation of this
+; installer wrote (SkWriteManifest / SkRemoveListed), 0.3.4's own list (files-0.3.4.nsh), the names
+; this installer stages — and folders only once they are empty, so whatever else lives in a folder
+; (one given with /D=, a file of the user's) stays. The one exception is SpaceKnife's own data
+; and cache folders in the uninstaller (un.SkRemoveData), and the data folder is never deleted
+; except through the uninstaller's 「你的数据」 box or --delete-app-data.
 
 !include LogicLib.nsh
 !include FileFunc.nsh
 !include WordFunc.nsh
+!include "${__FILEDIR__}\files-0.3.4.nsh"
 
 !define SK_GUID "3cb3f1fc-eef4-5813-9008-c29b5510458c"
 !define SK_UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SK_GUID}"
@@ -35,6 +40,9 @@
 !define SK_EB_UNINSTALLER "Uninstall SpaceKnife.exe"
 !define SK_INNER_FLAG "--sk-elevated"
 !define SK_UPDATED_ARG "--updated"
+; what this installer put in $INSTDIR, one path per line (folders end with \), for the next
+; update and the uninstaller (SkWriteManifest, SkRemoveListed)
+!define SK_MANIFEST "installed-files.txt"
 
 Var SkScope          ; "user" | "machine"
 Var SkScopeFlag      ; "/currentuser" | "/allusers" (what the scope is passed on as)
@@ -407,6 +415,132 @@ Function ${UN}SkCloseIn
   Pop $R1
 FunctionEnd
 
+; Push haystack, Push needle, Call ${UN}SkHas, Pop: 1 when the needle is in the haystack (in any
+; case, as NSIS compares and the file system names), else 0. Registers are kept.
+Function ${UN}SkHas
+  Exch $1
+  Exch
+  Exch $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  StrLen $3 $1
+  StrLen $4 $2
+  StrCpy $5 0
+  StrCpy $6 0
+  ${If} $3 > 0
+    IntOp $4 $4 - $3
+    ${DoWhile} $5 <= $4
+      StrCpy $6 $2 $3 $5
+      ${If} $6 == $1
+        StrCpy $6 1
+        ${Break}
+      ${EndIf}
+      StrCpy $6 0
+      IntOp $5 $5 + 1
+    ${Loop}
+  ${EndIf}
+  StrCpy $2 $6
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Exch
+  Pop $1
+  Exch $2
+FunctionEnd
+
+; $R2 = a line of the list -> $R3 = "" when it is a plain path inside the folder ("ui\index.html",
+; "ui\_nuxt\"), else "bad": empty, a drive or a stream (:), a leading \ (the root, \\server), a /,
+; a wildcard, or a . or .. part
+Function ${UN}SkPlainRelative
+  StrCpy $R3 "bad"
+  ${If} $R2 == ""
+    Return
+  ${EndIf}
+  StrCpy $R4 $R2 1
+  ${If} $R4 == "\"
+  ${OrIf} $R4 == "."
+    ; the root, \\server, or "." / ".." at the start
+    Return
+  ${EndIf}
+  !insertmacro SK_BAD_IF_HAS "${UN}" ":"
+  !insertmacro SK_BAD_IF_HAS "${UN}" "/"
+  !insertmacro SK_BAD_IF_HAS "${UN}" "*"
+  !insertmacro SK_BAD_IF_HAS "${UN}" "?"
+  StrCpy $R4 "\$R2\"
+  !insertmacro SK_BAD_IF_IN "${UN}" "$R4" "\..\"
+  !insertmacro SK_BAD_IF_IN "${UN}" "$R4" "\.\"
+  StrCpy $R3 ""
+  sk_plain_done:
+FunctionEnd
+
+; The files an installation of this installer put in the folder $R0, by its list ${SK_MANIFEST}
+; (SkWriteManifest): each one deleted, then each of its folders that is empty then (the list has
+; the deepest first; a few passes for any order), then the list. Nothing that is not on the list,
+; nothing outside $R0 (SkPlainRelative); no list, nothing. Registers are kept.
+Function ${UN}SkRemoveListed
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  Push $R5
+  StrCpy $R5 0
+  ${IfNot} ${FileExists} "$R0\${SK_MANIFEST}"
+    Goto sk_listed_done
+  ${EndIf}
+  sk_listed_pass:
+  ClearErrors
+  FileOpen $R1 "$R0\${SK_MANIFEST}" r
+  ${If} ${Errors}
+    Goto sk_listed_done
+  ${EndIf}
+  sk_listed_line:
+  ClearErrors
+  FileReadUTF16LE $R1 $R2
+  ${If} ${Errors}
+    FileClose $R1
+    IntOp $R5 $R5 + 1
+    ${If} $R5 < 4
+      Goto sk_listed_pass
+    ${EndIf}
+    Delete "$R0\${SK_MANIFEST}"
+    Goto sk_listed_done
+  ${EndIf}
+  ; the line's end (CR LF) off
+  ${Do}
+    StrCpy $R3 $R2 1 -1
+    ${If} $R3 == "$\r"
+    ${OrIf} $R3 == "$\n"
+      StrCpy $R2 $R2 -1
+    ${Else}
+      ${Break}
+    ${EndIf}
+  ${Loop}
+  Call ${UN}SkPlainRelative
+  ${If} $R3 != ""
+    Goto sk_listed_line
+  ${EndIf}
+  StrCpy $R3 $R2 1 -1
+  ${If} $R3 == "\"
+    ${If} $R5 > 0
+      StrCpy $R3 $R2 -1
+      RMDir "$R0\$R3"
+    ${EndIf}
+  ${ElseIf} $R5 = 0
+    Delete "$R0\$R2"
+  ${EndIf}
+  Goto sk_listed_line
+  sk_listed_done:
+  ClearErrors
+  Pop $R5
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+FunctionEnd
+
 ; A line in the log (silent runs): %TEMP%\SpaceKnife-install.log
 Function ${UN}SkLogLine
   Exch $R0
@@ -434,6 +568,21 @@ FunctionEnd
   ${AndIf} $R4 != "${ALLOWED}"
     StrCpy $R0 "${REASON}"
     Goto sk_unsafe_done
+  ${EndIf}
+!macroend
+
+; "${UN}" helpers inside SkPlainRelative: done, with $R3 not "" (bad), when the line ($R2) or HAY
+; holds NEEDLE
+!macro SK_BAD_IF_HAS UN NEEDLE
+  !insertmacro SK_BAD_IF_IN "${UN}" "$R2" "${NEEDLE}"
+!macroend
+!macro SK_BAD_IF_IN UN HAY NEEDLE
+  Push "${HAY}"
+  Push "${NEEDLE}"
+  Call ${UN}SkHas
+  Pop $R3
+  ${If} $R3 = 1
+    Goto sk_plain_done
   ${EndIf}
 !macroend
 
@@ -562,6 +711,39 @@ Function SkDefaultDir
   StrCpy $INSTDIR "$0\${PRODUCTNAME}"
 FunctionEnd
 
+; The folder once the scope is known (SkFindPrevious has run for it): the earlier installation's
+; (it keeps its folder: shortcuts and pins), else the one /D= gave — for either scope — else the
+; default one.
+Function SkChooseFolder
+  ${If} $SkOldDir != ""
+    StrCpy $INSTDIR $SkOldDir
+  ${ElseIf} $SkDirFromCmd != ""
+    StrCpy $INSTDIR $SkDirFromCmd
+  ${Else}
+    Call SkDefaultDir
+  ${EndIf}
+FunctionEnd
+
+; The folder taken on the directory page ($INSTDIR, typed, browsed or given with /D=): without
+; "SpaceKnife" anywhere in it (in any case), \SpaceKnife is added, as 0.3.4's installer did
+; (electron-builder's instFilesPre, decoded setup034 instructions 741-747), so SpaceKnife's files
+; never land loose in a folder such as D:\Tools.
+Function SkAppendName
+  Push $0
+  Push $INSTDIR
+  Push "${PRODUCTNAME}"
+  Call SkHas
+  Pop $0
+  ${If} $0 <> 1
+    StrCpy $0 $INSTDIR 1 -1
+    ${If} $0 == "\"
+      StrCpy $INSTDIR $INSTDIR -1
+    ${EndIf}
+    StrCpy $INSTDIR "$INSTDIR\${PRODUCTNAME}"
+  ${EndIf}
+  Pop $0
+FunctionEnd
+
 ; ------------------------------------------------------------------ the new files, staged
 
 ; The installer's files reach $INSTDIR in two steps, so that the step after the earlier version
@@ -570,12 +752,30 @@ FunctionEnd
 ; while the earlier version is still whole; then, once it is removed, the staged files are renamed
 ; into place — the folder itself when $INSTDIR is gone (0.3.4's uninstaller takes it), else file
 ; by file. installer.nsi defines what there is to place (before it includes this file):
-;   !macro SK_EACH_FILE OP   - !insertmacro ${OP} "<path in $INSTDIR>" for every file
-;   !macro SK_EACH_DIR OP    - the same for every folder those files are in
-; When no folder can be made beside $INSTDIR (rights), the files are staged in $PLUGINSDIR and
-; copied instead (renamed, they would keep the temporary folder's permissions).
+;   !macro SK_EACH_FILE OP      - !insertmacro ${OP} "<path in $INSTDIR>" for every file
+;   !macro SK_EACH_DIR OP       - the same for every folder those files are in
+;   !macro SK_EACH_ANCESTOR OP  - every folder below $INSTDIR they need, the deepest first
+; When no folder can be made beside $INSTDIR (rights, or one with files of another build in the
+; way), the files are staged in $PLUGINSDIR and copied instead (renamed, they would keep the
+; temporary folder's permissions). A staging folder is only ever emptied by these names.
 
 !define SK_STAGE_SUFFIX ".sk-staging"
+
+!macro SK_STAGE_DEL REL
+  Delete "$SkStage\${REL}"
+!macroend
+!macro SK_STAGE_RMDIR REL
+  RMDir "$SkStage\${REL}"
+!macroend
+
+; Empty $SkStage by the names this installer stages and remove it when nothing else is in it
+; (never as a whole: other files are not this installer's to delete)
+Function SkEmptyStage
+  !insertmacro SK_EACH_FILE SK_STAGE_DEL
+  !insertmacro SK_EACH_ANCESTOR SK_STAGE_RMDIR
+  RMDir "$SkStage"
+  ClearErrors
+FunctionEnd
 
 ; $SkStage/$SkStageMove for $INSTDIR, an empty folder ($SkStage "" when none could be made at all)
 Function SkMakeStage
@@ -589,21 +789,29 @@ Function SkMakeStage
   ${AndIf} $1 != ""
     StrCpy $SkStage "$0\$1${SK_STAGE_SUFFIX}"
     StrCpy $SkStageMove 1
-    ; a staging folder an earlier run left (it failed half way): this installer's own
-    RMDir /r "$SkStage"
+    ; a staging folder an earlier run left (it was ended half way): emptied by this build's names
+    ${If} ${FileExists} "$SkStage\*.*"
+      Call SkEmptyStage
+    ${EndIf}
     ClearErrors
-    CreateDirectory "$SkStage"
-    ${If} ${Errors}
-    ${OrIfNot} ${FileExists} "$SkStage\*.*"
-      ${SkLog} "no staging folder beside $INSTDIR: staging in the plug-ins folder"
+    ${If} ${FileExists} "$SkStage\*.*"
+      ${SkLog} "$SkStage holds files this installer did not stage: left as it is"
       StrCpy $SkStage ""
+    ${Else}
+      CreateDirectory "$SkStage"
+      ${If} ${Errors}
+      ${OrIfNot} ${FileExists} "$SkStage\*.*"
+        StrCpy $SkStage ""
+      ${EndIf}
+    ${EndIf}
+    ${If} $SkStage == ""
+      ${SkLog} "no staging folder beside $INSTDIR: staging in the plug-ins folder"
       StrCpy $SkStageMove 0
     ${EndIf}
   ${EndIf}
   ${If} $SkStage == ""
     InitPluginsDir
     StrCpy $SkStage "$PLUGINSDIR\stage"
-    RMDir /r "$SkStage"
     ClearErrors
     CreateDirectory "$SkStage"
     ${IfNot} ${FileExists} "$SkStage\*.*"
@@ -615,7 +823,8 @@ Function SkMakeStage
   Pop $0
 FunctionEnd
 
-; Remove the staging folder (what is left of it), only ever one SkMakeStage made
+; Remove the staging folder (what is left of it, by the names this installer stages), only ever
+; one SkMakeStage made
 Function SkDropStage
   Push $0
   ${If} $SkStage != ""
@@ -625,7 +834,7 @@ Function SkDropStage
     ${If} $0 == "${SK_STAGE_SUFFIX}"
     ${OrIf} $SkStage == "$PLUGINSDIR\stage"
       SetOutPath "$PLUGINSDIR"
-      RMDir /r "$SkStage"
+      Call SkEmptyStage
     ${EndIf}
     StrCpy $SkStage ""
   ${EndIf}
@@ -740,50 +949,81 @@ Function SkPlaceAll
   ${EndIf}
 FunctionEnd
 
-!macro SK_DEL FILE
-  Delete "${FILE}"
+!macro SK_MANIFEST_FILE REL
+  FileWriteUTF16LE $R1 "${REL}$\r$\n"
+!macroend
+!macro SK_MANIFEST_DIR REL
+  FileWriteUTF16LE $R1 "${REL}\$\r$\n"
 !macroend
 
-; 0.3.4's files (the real 0.3.4 installer's app-64.7z, plus its uninstaller): what goes when its
-; uninstaller can't be used (missing, or 0.3.4 was installed in the data folder, where its
-; RMDir /r "$INSTDIR" would take the user's data). Nothing else in that folder is touched.
+; The list of what this installer put in $INSTDIR (${SK_MANIFEST}): every file, then every folder
+; below $INSTDIR they are in, the deepest first. The next update and the uninstaller remove exactly
+; these (SkRemoveListed), whatever version they are.
+Function SkWriteManifest
+  Push $R1
+  ClearErrors
+  FileOpen $R1 "$INSTDIR\${SK_MANIFEST}" w
+  ${If} ${Errors}
+    ${SkLog} "could not write $INSTDIR\${SK_MANIFEST}"
+  ${Else}
+    FileWriteUTF16LE /BOM $R1 ""
+    !insertmacro SK_EACH_FILE SK_MANIFEST_FILE
+    !insertmacro SK_EACH_ANCESTOR SK_MANIFEST_DIR
+    FileClose $R1
+  ${EndIf}
+  ClearErrors
+  Pop $R1
+FunctionEnd
+
+!macro SK_034_DEL REL
+  Delete "$R0\${REL}"
+!macroend
+!macro SK_034_RMDIR REL
+  RMDir "$R0\${REL}"
+!macroend
+
+; 0.3.4's files (files-0.3.4.nsh: the real 0.3.4 installer's app-64.7z, plus its uninstaller) out
+; of the folder on the stack, then its folders that are empty then, then the folder when it is
+; empty: what goes when 0.3.4's uninstaller can't be used (SkOldUninstallerUse). Nothing else in
+; that folder is touched.
 Function SkRemove034Files
   Exch $R0
   ${If} $R0 == ""
     Pop $R0
     Return
   ${EndIf}
-  !insertmacro SK_DEL "$R0\SpaceKnife.exe"
-  !insertmacro SK_DEL "$R0\SpaceKnife.com"
-  !insertmacro SK_DEL "$R0\${SK_EB_UNINSTALLER}"
-  !insertmacro SK_DEL "$R0\chrome_100_percent.pak"
-  !insertmacro SK_DEL "$R0\chrome_200_percent.pak"
-  !insertmacro SK_DEL "$R0\d3dcompiler_47.dll"
-  !insertmacro SK_DEL "$R0\dxcompiler.dll"
-  !insertmacro SK_DEL "$R0\dxil.dll"
-  !insertmacro SK_DEL "$R0\ffmpeg.dll"
-  !insertmacro SK_DEL "$R0\icudtl.dat"
-  !insertmacro SK_DEL "$R0\LICENSE.electron.txt"
-  !insertmacro SK_DEL "$R0\LICENSES.chromium.html"
-  !insertmacro SK_DEL "$R0\resources.pak"
-  !insertmacro SK_DEL "$R0\snapshot_blob.bin"
-  !insertmacro SK_DEL "$R0\v8_context_snapshot.bin"
-  !insertmacro SK_DEL "$R0\vk_swiftshader.dll"
-  !insertmacro SK_DEL "$R0\vk_swiftshader_icd.json"
-  !insertmacro SK_DEL "$R0\vulkan-1.dll"
-  !insertmacro SK_DEL "$R0\locales\en-US.pak"
-  !insertmacro SK_DEL "$R0\locales\zh-CN.pak"
-  RMDir "$R0\locales"
-  !insertmacro SK_DEL "$R0\resources\app.asar"
-  !insertmacro SK_DEL "$R0\resources\elevate.exe"
-  ; resources\backend is 0.3.4's frozen Python backend and nothing else
-  RMDir /r "$R0\resources\backend"
-  RMDir /r "$R0\resources\licenses"
-  RMDir "$R0\resources"
+  !insertmacro SK_034_EACH_FILE SK_034_DEL
+  !insertmacro SK_034_EACH_DIR SK_034_RMDIR
   RMDir "$R0"
+  ClearErrors
   Pop $R0
 FunctionEnd
 
+; May 0.3.4's own uninstaller run on its folder $SkOldDir? Its every run ends with RMDir /r on it.
+; $R0 = "" when it may, else why not, and only 0.3.4's own files are removed (SkRemove034Files):
+; "unsafe <data|system>" (the data folder, where that would take the user's data, or a system
+; folder), "unnamed" (no "SpaceKnife" in the path, a folder such as D:\Tools that 0.3.4 shared
+; with other programs: a silent 0.3.4 install with /D= puts it there as given), "missing" (no
+; uninstaller).
+Function SkOldUninstallerUse
+  Push $R1
+  StrCpy $R0 $SkOldDir
+  Call SkUnsafeDir
+  ${If} $R0 != ""
+    StrCpy $R0 "unsafe $R0"
+  ${Else}
+    Push $SkOldDir
+    Push "${PRODUCTNAME}"
+    Call SkHas
+    Pop $R1
+    ${If} $R1 <> 1
+      StrCpy $R0 "unnamed"
+    ${ElseIfNot} ${FileExists} "$SkOldUninst"
+      StrCpy $R0 "missing"
+    ${EndIf}
+  ${EndIf}
+  Pop $R1
+FunctionEnd
 
 ; Remove 0.3.4 (electron-builder) from $SkOldDir, its data kept, its shortcuts and pins kept:
 ; the same command line electron-builder's own installer runs (installUtil.nsh uninstallOldVersion),
@@ -797,17 +1037,9 @@ Function SkRemoveElectronBuilder
     StrCpy $R0 "failed"
     Return
   ${EndIf}
-  StrCpy $R0 $SkOldDir
-  Call SkUnsafeDir
+  Call SkOldUninstallerUse
   ${If} $R0 != ""
-    ${SkLog} "0.3.4 is in an unsafe folder ($R0: $SkOldDir): removing its own files only"
-    Push $SkOldDir
-    Call SkRemove034Files
-    StrCpy $R0 ""
-    Return
-  ${EndIf}
-  ${IfNot} ${FileExists} "$SkOldUninst"
-    ${SkLog} "0.3.4's uninstaller is missing: removing its own files"
+    ${SkLog} "0.3.4's uninstaller is not used on $SkOldDir ($R0): removing its own files only"
     Push $SkOldDir
     Call SkRemove034Files
     StrCpy $R0 ""
