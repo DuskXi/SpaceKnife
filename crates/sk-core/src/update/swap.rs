@@ -586,7 +586,7 @@ pub fn startup_check(
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let spawned = {
-        let _quiet = QuietErrors::new();
+        let _quiet = ERROR_MODES.quiet();
         cmd.spawn()
     };
     let mut child = spawned.map_err(|e| StartError(format!("{name} can't be run: {e}")))?;
@@ -730,42 +730,64 @@ fn read_capped<R: io::Read + Send + 'static>(
     rx
 }
 
-/// Windows: while it lives, programs this process starts get no error boxes from the system (a
-/// missing DLL, a crash: the error mode is inherited when a process is created); afterwards the
-/// process's own mode is back. Nothing elsewhere.
-struct QuietErrors {
-    #[cfg(windows)]
-    before: u32,
+/// SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX: no error box for a missing DLL, none for a crash.
+const QUIET_MODE: u32 = 0x0001 | 0x0002;
+
+/// The error mode the programs this process starts inherit (Windows: it is copied when a process
+/// is created), shared by the starts that overlap (threads, tests): the first makes it quiet, the
+/// last puts the process's own mode back, so no start in between gets the boxes.
+struct ErrorModes {
+    /// how many starts are on, and the mode from before the first
+    state: std::sync::Mutex<(usize, u32)>,
+    /// sets the process's mode, returns the one before (SetErrorMode)
+    set: fn(u32) -> u32,
 }
 
-impl QuietErrors {
-    fn new() -> Self {
-        #[cfg(windows)]
-        {
-            use windows_sys::Win32::System::Diagnostics::Debug::{
-                SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SetErrorMode,
-            };
-            let quiet = SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX;
-            // SAFETY: the process's error mode, no pointers
-            let before = unsafe { SetErrorMode(quiet) };
-            unsafe { SetErrorMode(before | quiet) };
-            QuietErrors { before }
+impl ErrorModes {
+    /// Quiet until the guard is dropped (and every other one).
+    fn quiet(&self) -> QuietErrors<'_> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.0 == 0 {
+            let before = (self.set)(QUIET_MODE);
+            (self.set)(before | QUIET_MODE);
+            state.1 = before;
         }
-        #[cfg(not(windows))]
-        QuietErrors {}
+        state.0 += 1;
+        QuietErrors { modes: self }
     }
 }
 
-impl Drop for QuietErrors {
+struct QuietErrors<'a> {
+    modes: &'a ErrorModes,
+}
+
+impl Drop for QuietErrors<'_> {
     fn drop(&mut self) {
-        #[cfg(windows)]
-        {
-            use windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode;
-            // SAFETY: as in new
-            unsafe { SetErrorMode(self.before) };
+        let mut state = self.modes.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.0 -= 1;
+        if state.0 == 0 {
+            (self.modes.set)(state.1);
         }
     }
 }
+
+fn set_error_mode(mode: u32) -> u32 {
+    #[cfg(windows)]
+    {
+        // SAFETY: the process's error mode, no pointers
+        unsafe { windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode(mode) }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = mode;
+        0 // no such thing
+    }
+}
+
+static ERROR_MODES: ErrorModes = ErrorModes {
+    state: std::sync::Mutex::new((0, 0)),
+    set: set_error_mode,
+};
 
 // ---------------------------------------------------------------- the swap
 
@@ -1590,6 +1612,33 @@ mod tests {
             err.to_string()
                 .starts_with("the new version can't start on this computer: ")
         );
+    }
+
+    /// The process's error mode, as SetErrorMode keeps it (a test's own).
+    static FAKE_MODE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x8000);
+
+    fn fake_set(mode: u32) -> u32 {
+        FAKE_MODE.swap(mode, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[test]
+    fn starts_at_the_same_time_stay_quiet_until_the_last_is_done() {
+        // two checks at once (threads, tests): the first one done must not give the other's
+        // program the error boxes back while it is being started
+        let modes = ErrorModes {
+            state: std::sync::Mutex::new((0, 0)),
+            set: fake_set,
+        };
+        let mode = || FAKE_MODE.load(std::sync::atomic::Ordering::SeqCst);
+        let first = modes.quiet();
+        assert_eq!(mode(), 0x8000 | QUIET_MODE); // the process's own bits kept
+        let second = modes.quiet();
+        drop(first);
+        assert_eq!(mode(), 0x8000 | QUIET_MODE, "the second start is still on");
+        drop(second);
+        assert_eq!(mode(), 0x8000, "the process's own mode is back");
+        drop(modes.quiet());
+        assert_eq!(mode(), 0x8000);
     }
 
     #[test]

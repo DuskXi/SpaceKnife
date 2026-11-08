@@ -383,7 +383,8 @@ async function portable() {
         return false;
       }
       const last = text.trim().split(/\r?\n/).at(-1) ?? "";
-      return / updated$/.test(last) || last.includes("kept the old version") || last.includes("did not quit");
+      // "not started: …": the helper refused the plan or found that the new version can't start here
+      return / updated$/.test(last) || last.includes("kept the old version") || last.includes("did not quit") || last.includes("not started: ");
     }, 180_000);
     console.log(text.trim());
     if (!/ updated$/.test(text.trim().split(/\r?\n/).at(-1))) throw new Error("the swap did not end with 'updated'");
