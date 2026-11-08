@@ -22,7 +22,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { fail, hello, pidAlive, portOpen, sleep, stop, until } from "./lib.mjs";
+import { appProcessOf, fail, hello, pidAlive, portOpen, sleep, stop, until } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const portable = args.includes("--portable");
@@ -31,18 +31,6 @@ const wantKind = kindAt >= 0 ? args[kindAt + 1] : portable ? "portable" : null;
 const target = args.find((a, i) => a !== "--portable" && a !== "--kind" && i !== kindAt + 1);
 if (!target) fail("usage: node packaging/smoke-app.mjs [--portable] [--kind nsis|appimage|deb|rpm|dmg] <program>");
 const app = resolve(target);
-
-/** The app's own process on Linux, from its backend's: the Tauri shell runs the backend in the app
- *  (the same process), the Electron shell runs spaceknife-cli as its child (the parent). */
-function appProcess(backendPid) {
-  try {
-    if (readFileSync(`/proc/${backendPid}/comm`, "utf8").trim() !== "spaceknife-cli") return backendPid;
-    const stat = readFileSync(`/proc/${backendPid}/stat`, "utf8");
-    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]); // the field after the state: ppid
-  } catch {
-    return backendPid;
-  }
-}
 
 /** The portable data folder of a program: next to it, on macOS next to its app bundle. */
 function dataFolder(program) {
@@ -88,7 +76,7 @@ async function smoke(home) {
     session.close();
     // an AppImage started by its runtime: the program is the runtime's child, and SIGTERM to the
     // runtime would not reach it; the runtime exits with it
-    const program = app.endsWith(".AppImage") ? appProcess(info.pid) : proc.pid;
+    const program = app.endsWith(".AppImage") ? appProcessOf(info.pid) : proc.pid;
     stop(program);
     await until("the app to exit", () => exited, 15_000).catch(() => {
       console.log("the app did not close on request: ending it");
@@ -114,8 +102,9 @@ if (portable) {
   await smoke(home);
   const stored = readdirSync(home).sort();
   console.log(`portable data folder holds: ${stored.join(", ")}`);
-  // the shell's own files (window.rs: theme, the webview's profile) are the first it writes
-  if (!stored.includes("desktop")) fail("the app did not keep its data in the portable folder");
+  // the shell's own files are the first it writes: the Tauri app's (window.rs: theme, the webview's
+  // profile) in desktop/, the Electron shell's (Chromium's profile, the theme) in electron/
+  if (!stored.includes("desktop") && !stored.includes("electron")) fail("the app did not keep its data in the portable folder");
 } else {
   const home = mkdtempSync(join(tmpdir(), "sk-app-home-"));
   await smoke(home);

@@ -693,8 +693,9 @@ fn native_machine() -> Option<String> {
 }
 
 /// The program that hosts the interface. Some kinds of install are built from one shell only (the
-/// rpm and the AppImage from the Electron shell; the Windows installer, the portable copies, the
-/// deb and the macOS disk images from Tauri), and an install updates to a file of its own shell.
+/// rpm and the AppImage from the Electron shell; the Windows installer, the Windows and macOS
+/// portable copies, the deb and the macOS disk images from Tauri), Linux has a portable copy of
+/// each (the Electron one under 0.3.4's name), and an install updates to a file of its own shell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Shell {
     /// The Tauri app: the backend runs in its process
@@ -739,7 +740,8 @@ pub fn shell_from(value: &str) -> Shell {
 /// The names are 0.3.4's, and stay so for good: an installed 0.3.x picks the newest release by
 /// its version first and only then looks for its file under exactly these names (v0.3.4
 /// `update.py` asset_templates; tools/release.mjs `expected` publishes them, Release check runs
-/// 0.3.4's own code against them).
+/// 0.3.4's own code against them). The one kind of install 0.3.4 did not have, the Tauri app's
+/// portable copy for Linux, has a name no 0.3.4 pattern matches (`-tauri.tar.gz`).
 pub fn asset_templates(
     kind: InstallKind,
     shell: Shell,
@@ -763,8 +765,13 @@ pub fn asset_templates(
         (InstallKind::Portable, Shell::Tauri) if system == "win32" => {
             vec!["SpaceKnife-{v}-win-x64-portable.zip".into()]
         }
-        (InstallKind::Portable, Shell::Tauri) if system.starts_with("linux") && known => {
+        // Linux: 0.3.4's name is the Electron shell's portable copy (0.3.4's copies on RHEL 9, which
+        // has no WebKitGTK 4.1, keep working); the Tauri one has a name 0.3.4's pattern never matches
+        (InstallKind::Portable, Shell::Electron) if system.starts_with("linux") && known => {
             vec![format!("SpaceKnife-{{v}}-linux-{a}-portable.tar.gz")]
+        }
+        (InstallKind::Portable, Shell::Tauri) if system.starts_with("linux") && known => {
+            vec![format!("SpaceKnife-{{v}}-linux-{a}-tauri.tar.gz")]
         }
         (InstallKind::Portable, Shell::Tauri) if system == "darwin" && known => {
             vec![format!("SpaceKnife-{{v}}-mac-{a}-portable.zip")]
@@ -970,6 +977,8 @@ static UPDATE_NAMES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         "SpaceKnife-{v}-win-arm64-portable.zip",
         "SpaceKnife-{v}-linux-x64-portable.tar.gz",
         "SpaceKnife-{v}-linux-arm64-portable.tar.gz",
+        "SpaceKnife-{v}-linux-x64-tauri.tar.gz",
+        "SpaceKnife-{v}-linux-arm64-tauri.tar.gz",
         "SpaceKnife-{v}-mac-arm64-portable.zip",
         "SpaceKnife-{v}-mac-x64-portable.zip",
         "SpaceKnife-{v}-x86_64.AppImage",

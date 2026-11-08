@@ -605,9 +605,13 @@ pub fn startup_check(
         cmd.spawn()
     };
     let mut child = spawned.map_err(|e| StartError(format!("{name} can't be run: {e}")))?;
-    let stdout = read_capped(child.stdout.take());
-    let stderr = read_capped(child.stderr.take());
+    let stdout = Captured::read(child.stdout.take());
+    let stderr = Captured::read(child.stderr.take());
     let deadline = Instant::now() + timeout;
+    // the pipes close with the program, unless something it started holds them (Chromium's zygote
+    // and crash handler, which inherit the Electron shell's output): what it wrote is taken without
+    // waiting for them
+    let grace = Duration::from_millis(500);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -615,18 +619,19 @@ pub fn startup_check(
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
+                // what it said on the way (a slow web view's start, the loader), for the log
+                let last = last_line(&String::from_utf8_lossy(&stderr.take(grace)));
                 return Err(StartError(format!(
-                    "{name} did not answer {STARTUP_CHECK} within {} s",
-                    timeout.as_secs()
+                    "{name} did not answer {STARTUP_CHECK} within {} s{}",
+                    timeout.as_secs(),
+                    last.map_or_else(String::new, |l| format!(" (it said: {l})"))
                 )));
             }
             Err(e) => return Err(StartError(format!("{name}: {e}"))),
         }
     };
-    // the pipes close with the program (unless something it started holds them: not waited for)
-    let grace = Duration::from_millis(500);
-    let stdout = stdout.recv_timeout(grace).unwrap_or_default();
-    let stderr = stderr.recv_timeout(grace).unwrap_or_default();
+    let stdout = stdout.take(grace);
+    let stderr = stderr.take(grace);
     #[cfg(unix)]
     let signal = std::os::unix::process::ExitStatusExt::signal(&status);
     #[cfg(not(unix))]
@@ -680,15 +685,7 @@ pub fn judge_startup(
         _ => {}
     }
     // the last thing it wrote to stderr: the loader's own words, a panic
-    let last = stderr
-        .lines()
-        .map(str::trim)
-        .rfind(|l| !l.is_empty())
-        .map(|l| {
-            // "/path/to/spaceknife: error while loading shared libraries: …" → from "error"
-            let l = l.find("error while loading").map_or(l, |at| &l[at..]);
-            l.chars().take(300).collect::<String>()
-        });
+    let last = last_line(stderr);
     let why = match (code, signal) {
         (Some(0), _) => format!("{name} did not answer {STARTUP_CHECK}"),
         (_, Some(sig)) => format!("{name} was ended by signal {sig}"),
@@ -718,31 +715,60 @@ pub fn judge_startup(
     })
 }
 
-/// A reader of one of the program's outputs, keeping its first [`STARTUP_OUTPUT_LIMIT`] bytes (it
-/// reads on to the end, so that the program never blocks on a full pipe).
-fn read_capped<R: io::Read + Send + 'static>(
-    from: Option<R>,
-) -> std::sync::mpsc::Receiver<Vec<u8>> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    if let Some(mut from) = from {
-        std::thread::spawn(move || {
-            let mut kept = Vec::new();
-            let mut buf = [0u8; 8192];
-            loop {
-                match from.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        let room = STARTUP_OUTPUT_LIMIT.saturating_sub(kept.len());
-                        kept.extend_from_slice(&buf[..n.min(room)]);
+/// The last line of a program's stderr that says something, from the loader's own words on
+/// ("/path/to/spaceknife: error while loading shared libraries: …" → from "error"), at most 300
+/// characters.
+fn last_line(stderr: &str) -> Option<String> {
+    stderr
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .map(|l| {
+            let l = l.find("error while loading").map_or(l, |at| &l[at..]);
+            l.chars().take(300).collect::<String>()
+        })
+}
+
+/// One of the program's outputs, read on a thread of its own to the end (so that the program never
+/// blocks on a full pipe), its first [`STARTUP_OUTPUT_LIMIT`] bytes kept where [`Captured::take`]
+/// finds them at any time: the end may come long after the program's, when a process it started
+/// holds the pipe.
+struct Captured {
+    kept: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    end: std::sync::mpsc::Receiver<()>,
+}
+
+impl Captured {
+    fn read<R: io::Read + Send + 'static>(from: Option<R>) -> Captured {
+        let kept = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (tx, end) = std::sync::mpsc::channel();
+        if let Some(mut from) = from {
+            let into = kept.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 8192];
+                loop {
+                    match from.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            let mut kept = into.lock().unwrap_or_else(|e| e.into_inner());
+                            let room = STARTUP_OUTPUT_LIMIT.saturating_sub(kept.len());
+                            kept.extend_from_slice(&buf[..n.min(room)]);
+                        }
                     }
                 }
-            }
-            let _ = tx.send(kept);
-        });
-    } else {
-        let _ = tx.send(Vec::new());
+                let _ = tx.send(());
+            });
+        } else {
+            let _ = tx.send(());
+        }
+        Captured { kept, end }
     }
-    rx
+
+    /// What was read: once the output has ended, or after `grace` (whatever has arrived by then).
+    fn take(&self, grace: Duration) -> Vec<u8> {
+        let _ = self.end.recv_timeout(grace);
+        self.kept.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
 }
 
 /// SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX: no error box for a missing DLL, none for a crash.
@@ -2071,10 +2097,38 @@ mod tests {
         path
     }
 
+    /// Put a program where a test runs it without this process ever holding the new file open for
+    /// writing: a test thread that starts a program meanwhile hands that descriptor to its child
+    /// until the child's exec, and Linux refuses to run a file that is open for writing ("Text file
+    /// busy", os error 26), which made these tests fail now and then. Unix: a hard link where the
+    /// file systems allow it, else a copy that another process (`cp`) writes; Windows: a copy (its
+    /// handles are not inherited, and it has no such refusal).
+    fn put_program(from: &Path, to: &Path) {
+        let _ = std::fs::remove_file(to);
+        #[cfg(unix)]
+        {
+            if std::fs::hard_link(from, to).is_err() {
+                copy_by_another_process(from, to);
+            }
+        }
+        #[cfg(not(unix))]
+        std::fs::copy(from, to).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn copy_by_another_process(from: &Path, to: &Path) {
+        let done = std::process::Command::new("cp")
+            .arg(from)
+            .arg(to)
+            .status()
+            .unwrap();
+        assert!(done.success(), "cp {} {}", from.display(), to.display());
+    }
+
     /// The new version's program of `plan` as examples/fake_app.rs, answering in `mode`.
     fn fake_new_program(plan: &Plan, mode: &str) -> PathBuf {
         let program = plan.new_program();
-        std::fs::copy(example("fake_app"), &program).unwrap();
+        put_program(&example("fake_app"), &program);
         std::fs::write(program.with_file_name("fake-app-mode.txt"), mode).unwrap();
         program
     }
@@ -2194,6 +2248,23 @@ mod tests {
     }
 
     #[test]
+    fn the_answer_counts_while_a_process_the_program_started_still_holds_its_output() {
+        // the Electron shell's program (the Linux portable copy 0.3.4's copies update to): Chromium's
+        // zygote and crash handler inherit its output and may keep it open a while after it has
+        // ended; its answer was written before that and is taken, without waiting for them
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let program = fake_new_program(&plan, "held");
+        let started = Instant::now();
+        assert_eq!(check(&program), Ok("webview fake 1.0".into()));
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "it waited for the process that holds the output: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn a_program_that_does_not_answer_is_ended() {
         let tmp = tempfile::tempdir().unwrap();
         let plan = tree(tmp.path());
@@ -2225,7 +2296,7 @@ mod tests {
         if cfg!(windows) {
             // links spaceknife_missing_runtime.dll, as a program without +crt-static links
             // VCRUNTIME140.dll
-            std::fs::copy(example("fake_app_missing_dll"), &program).unwrap();
+            put_program(&example("fake_app_missing_dll"), &program);
         } else {
             // the C library's name changed, as long as before: the loader can't find it
             let (from, to): (&[u8], &[u8]) = if cfg!(target_os = "macos") {
@@ -2242,12 +2313,17 @@ mod tests {
                 }
             }
             assert!(changed > 0, "the stand-in names no {from:?}");
-            std::fs::write(&program, bytes).unwrap();
+            // written here, never run: the program is a copy another process writes (put_program)
+            let patched = dir.join("patched.bin");
+            std::fs::write(&patched, bytes).unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
+                copy_by_another_process(&patched, &program);
                 std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
             }
+            #[cfg(not(unix))]
+            std::fs::copy(&patched, &program).unwrap();
         }
         program
     }

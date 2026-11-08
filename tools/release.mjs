@@ -39,7 +39,9 @@ const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 export class ReleaseError extends Error {}
 
 /** Every file of a release: {template, sums} — the checksum file it is published in (null: none),
- * and the shell that builds it (crates/sk-core update `Shell`). */
+ * the shell that builds it (crates/sk-core update `Shell`) and, for a kind of install 0.3.4 did
+ * not have, `since`: the version it came with (no 0.3.4 install may ever take it,
+ * tools/compat034.mjs). */
 export function expected() {
   const out = [
     // the installers (x64 only), listed in SHA256SUMS.txt: the Windows installer (Tauri's, the
@@ -52,12 +54,19 @@ export function expected() {
     // what AppImageUpdate reads (the AppImage's update information points at it), in no list
     { template: "SpaceKnife-{v}-x86_64.AppImage.zsync", sums: null, shell: "electron" },
   ];
-  for (const [target, ext] of [["win-x64", "zip"], ["win-arm64", "zip"], ["linux-x64", "tar.gz"], ["linux-arm64", "tar.gz"]]) {
-    out.push({ template: `SpaceKnife-{v}-${target}-portable.${ext}`, sums: `SHA256SUMS-portable-${target}.txt`, shell: "tauri" });
+  // the portable copies under 0.3.4's names: Windows from Tauri; Linux from the Electron shell, so
+  // that 0.3.4's copies on RHEL 9 (no WebKitGTK 4.1) keep working
+  for (const [target, ext, shell] of [["win-x64", "zip", "tauri"], ["win-arm64", "zip", "tauri"], ["linux-x64", "tar.gz", "electron"], ["linux-arm64", "tar.gz", "electron"]]) {
+    out.push({ template: `SpaceKnife-{v}-${target}-portable.${ext}`, sums: `SHA256SUMS-portable-${target}.txt`, shell });
   }
   for (const a of ["arm64", "x64"]) {
     out.push({ template: `SpaceKnife-{v}-mac-${a}.dmg`, sums: `SHA256SUMS-mac-${a}.txt`, shell: "tauri" });
     out.push({ template: `SpaceKnife-{v}-mac-${a}-portable.zip`, sums: `SHA256SUMS-mac-${a}.txt`, shell: "tauri" });
+  }
+  // the Tauri app's portable copy for Linux (new in 0.3.5): a name no 0.3.4 pattern matches, and a
+  // checksum list whose words ("tauri") are not in 0.3.4's file names, so 0.3.4 reads its own first
+  for (const a of ["x64", "arm64"]) {
+    out.push({ template: `SpaceKnife-{v}-linux-${a}-tauri.tar.gz`, sums: `SHA256SUMS-tauri-linux-${a}.txt`, shell: "tauri", since: "0.3.5" });
   }
   return out;
 }

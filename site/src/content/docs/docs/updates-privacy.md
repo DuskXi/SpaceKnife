@@ -77,6 +77,7 @@ The file goes into the `updates` folder in the [data folder](../data-locations/)
 | rpm | `SpaceKnife-<version>-1.x86_64.rpm` |
 | AppImage | `SpaceKnife_<version>_amd64.AppImage` |
 | Linux portable | `SpaceKnife-<version>-linux-x64-portable.tar.gz` |
+| Linux portable, light | `SpaceKnife-<version>-linux-x64-tauri.tar.gz` |
 
 Then SpaceKnife checks the file:
 

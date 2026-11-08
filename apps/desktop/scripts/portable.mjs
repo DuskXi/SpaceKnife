@@ -5,12 +5,15 @@
 // asset_templates, src-tauri/src/update.rs) and as install.rs unpacks it (one folder at the top):
 //
 //   target/portable/SpaceKnife-<v>-win-<x64|arm64>-portable.zip       (Windows; bsdtar's zip)
-//   target/portable/SpaceKnife-<v>-linux-<x64|arm64>-portable.tar.gz  (Linux)
+//   target/portable/SpaceKnife-<v>-linux-<x64|arm64>-tauri.tar.gz     (Linux: 0.3.4's name,
+//       -linux-<arch>-portable.tar.gz, is the Electron shell's portable copy, which 0.3.4's copies
+//       update to, apps/electron-shell/scripts/portable.mjs; this one is never offered to them)
 //   target/portable/SpaceKnife-<v>-mac-<x64|arm64>-portable.zip       (macOS: SpaceKnife.app, which
 //       holds spaceknife-cli, next to data; ditto's zip, which keeps the bundle's links, attributes
 //       and signature, as the app's own ditto unpacks it)
 //
-// The layout is also a contract with every 0.3.x portable copy, whose 「无缝更新」 unpacks the newest
+// The layout (the same on Linux, for this app's own 「无缝更新」) is also a contract with every 0.3.x
+// portable copy on Windows and macOS, whose 「无缝更新」 unpacks the newest
 // release's archive and checks it before anything moves (v0.3.4 apps/electron/src/main index.ts
 // replacePortable, update.ts swapHelper): one folder at the top holding the program under the name
 // 0.3.x runs (SpaceKnife.exe on Windows, spaceknife on Linux, SpaceKnife.app on macOS, whose
@@ -46,7 +49,7 @@ const HELPER = {
   mac: join("SpaceKnife.app", "Contents", "Resources", "backend", "spaceknife-backend"),
 };
 
-const name = `SpaceKnife-${version}-${os}-${arch}-portable`;
+const name = `SpaceKnife-${version}-${os}-${arch}-${os === "linux" ? "tauri" : "portable"}`;
 const work = join(root, "target", "portable");
 const folder = join(work, name);
 rmSync(folder, { recursive: true, force: true });

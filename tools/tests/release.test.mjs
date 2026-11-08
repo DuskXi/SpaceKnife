@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +23,8 @@ function put(folder, name, data) {
 }
 
 /** The artifacts of a release's build runs, laid out as `gh run download` writes them: the Tauri
- * builds (portable archives, the deb, the macOS files) and the Electron shell's installers. */
+ * builds (portable archives, the deb, the macOS files) and the Electron shell's installers and
+ * Linux portable copies. */
 function artifacts(root, version = V, { pkgVersion = version } = {}) {
   const groups = {
     // [files listed in the checksum file, the checksum file, files in no list]
@@ -35,8 +36,14 @@ function artifacts(root, version = V, { pkgVersion = version } = {}) {
     ],
     "SpaceKnife-installers-linux-x64": [[`spaceknife_${pkgVersion}_amd64.deb`], "SHA256SUMS-installers-linux-x64.txt", []],
   };
-  for (const [target, ext] of [["win-x64", "zip"], ["win-arm64", "zip"], ["linux-x64", "tar.gz"], ["linux-arm64", "tar.gz"]]) {
-    groups[`SpaceKnife-portable-${target}`] = [[`SpaceKnife-${version}-${target}-portable.${ext}`], `SHA256SUMS-portable-${target}.txt`, []];
+  for (const target of ["win-x64", "win-arm64"]) {
+    groups[`SpaceKnife-portable-${target}`] = [[`SpaceKnife-${version}-${target}-portable.zip`], `SHA256SUMS-portable-${target}.txt`, []];
+  }
+  // Linux: the Electron shell's portable copy under 0.3.4's name (electron.yml), the Tauri app's
+  // under its own (portable.yml)
+  for (const target of ["linux-x64", "linux-arm64"]) {
+    groups[`SpaceKnife-electron-portable-${target}`] = [[`SpaceKnife-${version}-${target}-portable.tar.gz`], `SHA256SUMS-portable-${target}.txt`, []];
+    groups[`SpaceKnife-portable-${target}`] = [[`SpaceKnife-${version}-${target}-tauri.tar.gz`], `SHA256SUMS-tauri-${target}.txt`, []];
   }
   for (const a of ["arm64", "x64"]) {
     groups[`SpaceKnife-mac-${a}`] = [[`SpaceKnife-${version}-mac-${a}.dmg`, `SpaceKnife-${version}-mac-${a}-portable.zip`], `SHA256SUMS-mac-${a}.txt`, []];
@@ -84,10 +91,26 @@ test("the release's files are 0.3.4's, for good", () => {
     ["SpaceKnife-{v}-mac-x64-portable.zip", "SHA256SUMS-mac-x64.txt"],
   ];
   assert.deepEqual(
-    release.expected().map((e) => [e.template, e.sums]),
+    release.expected()
+      .filter((e) => !e.since)
+      .map((e) => [e.template, e.sums]),
     v034,
   );
-  // and the checksum files 0.3.4's release published
+  // the one kind of install 0.3.4 did not have, the Tauri app's portable copy for Linux: a name no
+  // 0.3.4 install takes (tools/compat034.mjs), its own checksum list
+  assert.deepEqual(
+    release.expected()
+      .filter((e) => e.since)
+      .map((e) => [e.template, e.sums, e.shell, e.since]),
+    [
+      ["SpaceKnife-{v}-linux-x64-tauri.tar.gz", "SHA256SUMS-tauri-linux-x64.txt", "tauri", "0.3.5"],
+      ["SpaceKnife-{v}-linux-arm64-tauri.tar.gz", "SHA256SUMS-tauri-linux-arm64.txt", "tauri", "0.3.5"],
+    ],
+  );
+  // 0.3.4's Linux portable copies (which may run on RHEL 9, no WebKitGTK 4.1) get the Electron shell
+  const shell = new Map(release.expected().map((e) => [e.template, e.shell]));
+  for (const a of ["x64", "arm64"]) assert.equal(shell.get(`SpaceKnife-{v}-linux-${a}-portable.tar.gz`), "electron");
+  // the checksum files 0.3.4's release published, and the Tauri copies' own
   assert.deepEqual(release.publishedSums(), [
     "SHA256SUMS-mac-arm64.txt",
     "SHA256SUMS-mac-x64.txt",
@@ -95,6 +118,8 @@ test("the release's files are 0.3.4's, for good", () => {
     "SHA256SUMS-portable-linux-x64.txt",
     "SHA256SUMS-portable-win-arm64.txt",
     "SHA256SUMS-portable-win-x64.txt",
+    "SHA256SUMS-tauri-linux-arm64.txt",
+    "SHA256SUMS-tauri-linux-x64.txt",
     "SHA256SUMS.txt",
   ]);
 });
@@ -149,11 +174,14 @@ test("a wrong checksum, a missing file and a stray file are refused", () => {
 test("an installer goes into SHA256SUMS.txt, so it must be in an installer list", () => {
   const t = tmp();
   const a = artifacts(join(t, "a"));
-  // the deb listed in a portable list only: 0.3.4 reads SHA256SUMS.txt for it
+  // the deb listed in a portable list only (next to the Tauri app's Linux portable copy, in its
+  // list): 0.3.4 reads SHA256SUMS.txt for it
   const deb = `spaceknife_${V}_amd64.deb`;
   const folder = join(a, "SpaceKnife-installers-linux-x64");
-  unlinkSync(join(folder, "SHA256SUMS-installers-linux-x64.txt"));
-  writeFileSync(join(folder, "SHA256SUMS-portable-linux-x64.txt"), `${release.sha256(join(folder, deb))}  ${deb}\n`);
+  const portable = join(a, "SpaceKnife-portable-linux-x64");
+  const digest = put(portable, deb, readFileSync(join(folder, deb)));
+  rmSync(folder, { recursive: true });
+  writeFileSync(join(portable, "SHA256SUMS-tauri-linux-x64.txt"), `${readFileSync(join(portable, "SHA256SUMS-tauri-linux-x64.txt"), "utf8")}${digest}  ${deb}\n`);
   assert.throws(() => release.assemble(V, a, join(t, "out")), (e) => e.message.includes(`${deb} is in no SHA256SUMS-installers-*.txt`));
 });
 

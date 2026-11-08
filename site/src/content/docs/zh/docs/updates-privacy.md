@@ -77,6 +77,7 @@ SpaceKnife 没有遥测，也不需要账户。它从网上取的东西只有 Gi
 | rpm | `SpaceKnife-<版本>-1.x86_64.rpm` |
 | AppImage | `SpaceKnife_<版本>_amd64.AppImage` |
 | Linux 便携版 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` |
+| Linux 轻量便携版 | `SpaceKnife-<版本>-linux-x64-tauri.tar.gz` |
 
 下载完会校验文件：
 

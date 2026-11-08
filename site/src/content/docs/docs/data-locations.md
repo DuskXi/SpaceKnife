@@ -105,7 +105,7 @@ The [command line](../command-line/) reads the same variable, so `spaceknife-cli
 
 ## Portable mode
 
-The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-linux-<arch>-portable.tar.gz` and `SpaceKnife-<version>-mac-<arch>-portable.zip`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the interface files all stay in it, and nothing is written to your user profile.
+The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-linux-<arch>-portable.tar.gz`, `SpaceKnife-<version>-linux-<arch>-tauri.tar.gz` and `SpaceKnife-<version>-mac-<arch>-portable.zip`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the interface files all stay in it, and nothing is written to your user profile.
 
 - An explicitly set `SPACEKNIFE_HOME` wins over the `data` folder.
 - Delete or rename `data` and the copy uses the normal per-user folders. Put it back and it is portable again.

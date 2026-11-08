@@ -139,6 +139,19 @@ def main(argv: list[str]) -> int:
                 except update.UpdateError as e:
                     row["error"] = str(e)
             out["installs"].append(row)
+        # for every file of the release, the 0.3.4 installs whose pick_asset takes it from a release
+        # that has only this file: a kind of install 0.3.4 did not have (the Tauri app's Linux
+        # portable copy) must have none, whatever else the release holds
+        if target is not None:
+            takers: dict[str, list[str]] = {}
+            for a in target.assets:
+                alone = target.model_copy(update={"assets": [a]})
+                takers[a.name] = [
+                    f"{kind} {system}/{machine}"
+                    for kind, system, machine in INSTALLS
+                    if update.pick_asset(alone, kind, system, machine) is not None  # type: ignore[arg-type]
+                ]
+            out["takers"] = takers
     finally:
         if http is not None:
             http.shutdown()

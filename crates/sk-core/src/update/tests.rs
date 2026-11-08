@@ -446,6 +446,8 @@ const ALL_ASSETS: &[&str] = &[
     "SpaceKnife-0.4.0-win-arm64-portable.zip",
     "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
     "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
+    "SpaceKnife-0.4.0-linux-x64-tauri.tar.gz",
+    "SpaceKnife-0.4.0-linux-arm64-tauri.tar.gz",
     "SpaceKnife-0.4.0-mac-arm64-portable.zip",
     "SpaceKnife-0.4.0-mac-x64-portable.zip",
     "SpaceKnife-0.4.0-x86_64.AppImage",
@@ -457,6 +459,8 @@ const ALL_ASSETS: &[&str] = &[
     "SHA256SUMS.txt",
     "SHA256SUMS-mac-arm64.txt",
     "SHA256SUMS-portable-win-x64.txt",
+    "SHA256SUMS-portable-linux-x64.txt",
+    "SHA256SUMS-tauri-linux-x64.txt",
 ];
 
 #[test]
@@ -491,12 +495,21 @@ fn pick_assets() {
             "AMD64",
             Some("SpaceKnife-0.4.0-win-x64-portable.zip"),
         ),
+        // Linux: the portable copy under 0.3.4's name is the Electron shell (what 0.3.4's copies on
+        // RHEL 9 update to), the Tauri one has a name of its own; each updates to its own kind
+        (
+            Portable,
+            Electron,
+            "linux",
+            "x86_64",
+            Some("SpaceKnife-0.4.0-linux-x64-portable.tar.gz"),
+        ),
         (
             Portable,
             Tauri,
             "linux",
             "x86_64",
-            Some("SpaceKnife-0.4.0-linux-x64-portable.tar.gz"),
+            Some("SpaceKnife-0.4.0-linux-x64-tauri.tar.gz"),
         ),
         (
             Portable,
@@ -507,10 +520,17 @@ fn pick_assets() {
         ),
         (
             Portable,
-            Tauri,
+            Electron,
             "linux",
             "aarch64",
             Some("SpaceKnife-0.4.0-linux-arm64-portable.tar.gz"),
+        ),
+        (
+            Portable,
+            Tauri,
+            "linux",
+            "aarch64",
+            Some("SpaceKnife-0.4.0-linux-arm64-tauri.tar.gz"),
         ),
         (
             Portable,
@@ -527,7 +547,9 @@ fn pick_assets() {
             Some("SpaceKnife-0.4.0-mac-x64-portable.zip"),
         ),
         (Portable, Electron, "win32", "AMD64", None),
+        (Portable, Electron, "darwin", "arm64", None),
         (Portable, Tauri, "linux", "riscv64", None),
+        (Portable, Electron, "linux", "riscv64", None),
         (
             Appimage,
             Electron,
@@ -610,14 +632,14 @@ fn the_names_are_the_ones_0_3_4_looks_for() {
         ),
         (
             Portable,
-            Tauri,
+            Electron,
             "linux",
             "x86_64",
             &["SpaceKnife-{v}-linux-x64-portable.tar.gz"],
         ),
         (
             Portable,
-            Tauri,
+            Electron,
             "linux",
             "aarch64",
             &["SpaceKnife-{v}-linux-arm64-portable.tar.gz"],
@@ -675,6 +697,123 @@ fn the_names_are_the_ones_0_3_4_looks_for() {
     }
 }
 
+/// 0.3.4's pattern for a template (v0.3.4 update.py pick_asset):
+/// `re.compile(re.escape(template).replace(re.escape("{v}"), _V_SLOT)).fullmatch(name)`, with
+/// `_V_SLOT = r"[0-9A-Za-z.+~_-]+"`; case-sensitive.
+fn matches_034(template: &str, name: &str) -> bool {
+    let pattern = regex::escape(template).replace(r"\{v\}", "[0-9A-Za-z.+~_-]+");
+    Regex::new(&format!("^(?:{pattern})$"))
+        .unwrap()
+        .is_match(name)
+}
+
+/// Every template of v0.3.4 update.py asset_templates, for every kind, platform and processor.
+const TEMPLATES_034: &[&str] = &[
+    "SpaceKnife-{v}-Setup-x64.exe",
+    "SpaceKnife-{v}-win-arm64-portable.zip",
+    "SpaceKnife-{v}-win-x64-portable.zip",
+    "SpaceKnife-{v}-linux-x64-portable.tar.gz",
+    "SpaceKnife-{v}-linux-arm64-portable.tar.gz",
+    "SpaceKnife-{v}-mac-x64-portable.zip",
+    "SpaceKnife-{v}-mac-arm64-portable.zip",
+    "SpaceKnife-{v}-x86_64.AppImage",
+    "spaceknife_{v}_amd64.deb",
+    "spaceknife-{v}.x86_64.rpm",
+    "SpaceKnife-{v}-mac-arm64.dmg",
+    "SpaceKnife-{v}-mac-x64.dmg",
+];
+
+#[test]
+fn no_0_3_4_install_ever_takes_the_tauri_portable_for_linux() {
+    // 0.3.4 picks the newest release first and then any file its pattern matches: a 0.3.4 copy on
+    // RHEL 9 (no WebKitGTK 4.1) must never get the Tauri app, whatever the version looks like
+    for (arch, machine) in [("x64", "x86_64"), ("arm64", "aarch64")] {
+        let template =
+            asset_template(InstallKind::Portable, Shell::Tauri, "linux", machine).unwrap();
+        assert!(
+            !template.ends_with(&format!("-linux-{arch}-portable.tar.gz")),
+            "{template}"
+        );
+        for v in [
+            "0.3.5",
+            "0.4.0-beta.1",
+            "0.4.0~beta.1",
+            "1.0.0+build.7",
+            "10.20.30",
+        ] {
+            let name = template.replace("{v}", v);
+            for t in TEMPLATES_034 {
+                assert!(!matches_034(t, &name), "0.3.4's {t} takes {name}");
+            }
+        }
+        // and 0.3.4's own name is still the one 0.3.4 takes: the Electron shell's portable copy
+        let electron =
+            asset_template(InstallKind::Portable, Shell::Electron, "linux", machine).unwrap();
+        assert!(matches_034(
+            &format!("SpaceKnife-{{v}}-linux-{arch}-portable.tar.gz"),
+            &electron.replace("{v}", "0.3.5")
+        ));
+    }
+}
+
+#[test]
+fn each_linux_portable_copy_updates_to_its_own_kind_only() {
+    use InstallKind::Portable;
+    // a release with only the other shell's file: none
+    let electron_only = release("0.4.0", &["SpaceKnife-0.4.0-linux-x64-portable.tar.gz"]);
+    let tauri_only = release("0.4.0", &["SpaceKnife-0.4.0-linux-x64-tauri.tar.gz"]);
+    let pick = |r: &Release, shell| {
+        pick_asset(r, Portable, shell, Some("linux"), Some("x86_64")).map(|a| a.name.clone())
+    };
+    assert_eq!(pick(&electron_only, Shell::Tauri), None);
+    assert_eq!(pick(&tauri_only, Shell::Electron), None);
+    assert_eq!(
+        pick(&electron_only, Shell::Electron).as_deref(),
+        Some("SpaceKnife-0.4.0-linux-x64-portable.tar.gz")
+    );
+    assert_eq!(
+        pick(&tauri_only, Shell::Tauri).as_deref(),
+        Some("SpaceKnife-0.4.0-linux-x64-tauri.tar.gz")
+    );
+}
+
+#[test]
+fn each_linux_portable_copy_reads_its_own_checksum_list_first() {
+    // 0.3.4 reads the lists whose words are all in the file's name first (v0.3.4 update.py
+    // checksum_files, the same rule here): 0.3.4's file finds its list first, and the Tauri copy's
+    // list does not get in its way
+    let r = release(
+        "0.4.0",
+        &[
+            "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
+            "SpaceKnife-0.4.0-linux-x64-tauri.tar.gz",
+            "SHA256SUMS.txt",
+            "SHA256SUMS-portable-linux-x64.txt",
+            "SHA256SUMS-portable-linux-arm64.txt",
+            "SHA256SUMS-tauri-linux-x64.txt",
+            "SHA256SUMS-tauri-linux-arm64.txt",
+            "SHA256SUMS-mac-x64.txt",
+        ],
+    );
+    let order = |name: &str| -> Vec<String> {
+        let a = r.assets.iter().find(|a| a.name == name).unwrap();
+        checksum_files(&r, a)
+            .iter()
+            .map(|s| s.name.clone())
+            .collect()
+    };
+    let electron = order("SpaceKnife-0.4.0-linux-x64-portable.tar.gz");
+    assert_eq!(
+        electron[..2],
+        ["SHA256SUMS-portable-linux-x64.txt", "SHA256SUMS.txt"]
+    );
+    let tauri = order("SpaceKnife-0.4.0-linux-x64-tauri.tar.gz");
+    assert_eq!(
+        tauri[..2],
+        ["SHA256SUMS-tauri-linux-x64.txt", "SHA256SUMS.txt"]
+    );
+}
+
 #[test]
 fn the_shell_comes_from_the_launcher() {
     assert_eq!(shell_from(""), Shell::Tauri); // the Tauri app runs the backend in its own process
@@ -693,7 +832,8 @@ fn the_processor_is_read_at_run_time() {
     assert_eq!(windows_machine_arch(0), None);
     let m = machine();
     assert!(["x64", "arm64"].contains(&m.as_str()), "{m}");
-    // without a machine, the file is the one of the processor this runs on
+    // without a machine, the file is the one of the processor this runs on (on Linux the Tauri
+    // app's portable copy has a name of its own)
     let r = release(
         "0.4.0",
         &[
@@ -701,6 +841,8 @@ fn the_processor_is_read_at_run_time() {
             "SpaceKnife-0.4.0-win-arm64-portable.zip",
             "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
             "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
+            "SpaceKnife-0.4.0-linux-x64-tauri.tar.gz",
+            "SpaceKnife-0.4.0-linux-arm64-tauri.tar.gz",
             "SpaceKnife-0.4.0-mac-x64-portable.zip",
             "SpaceKnife-0.4.0-mac-arm64-portable.zip",
         ],
@@ -727,24 +869,26 @@ fn a_portable_copy_on_windows_on_arm_keeps_the_x64_build_without_an_arm_one() {
         &[
             "SpaceKnife-0.4.0-win-x64-portable.zip",
             "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
+            "SpaceKnife-0.4.0-linux-x64-tauri.tar.gz",
         ],
     );
-    let pick = |system: &str, machine: &str| {
+    let pick = |shell: Shell, system: &str, machine: &str| {
         pick_asset(
             &r,
             InstallKind::Portable,
-            Shell::Tauri,
+            shell,
             Some(system),
             Some(machine),
         )
         .map(|a| a.name.clone())
     };
     assert_eq!(
-        pick("win32", "ARM64").as_deref(),
+        pick(Shell::Tauri, "win32", "ARM64").as_deref(),
         Some("SpaceKnife-0.4.0-win-x64-portable.zip")
     );
-    // Linux runs no x64 build on ARM
-    assert!(pick("linux", "aarch64").is_none());
+    // Linux runs no x64 build on ARM, of either shell
+    assert!(pick(Shell::Tauri, "linux", "aarch64").is_none());
+    assert!(pick(Shell::Electron, "linux", "aarch64").is_none());
     assert_eq!(
         asset_template(InstallKind::Portable, Shell::Tauri, "win32", "ARM64").as_deref(),
         Some("SpaceKnife-{v}-win-arm64-portable.zip")
@@ -757,6 +901,8 @@ fn the_arm_and_mac_portable_files_are_update_files() {
     for name in [
         "SpaceKnife-0.4.0-win-arm64-portable.zip",
         "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
+        "SpaceKnife-0.4.0-linux-x64-tauri.tar.gz",
+        "SpaceKnife-0.4.0-linux-arm64-tauri.tar.gz",
         "SpaceKnife-0.4.0-mac-arm64-portable.zip",
         "SpaceKnife-0.4.0-mac-x64-portable.zip",
     ] {
@@ -862,7 +1008,7 @@ fn checksums() {
         "SHA256SUMS-portable-win-x64.txt"
     );
     assert_eq!(order("SpaceKnife-0.4.0-Setup-x64.exe")[0], "SHA256SUMS.txt");
-    assert_eq!(order("x").len(), 3);
+    assert_eq!(order("x").len(), 5);
 }
 
 // ---------------------------------------------------------------- environment and files
