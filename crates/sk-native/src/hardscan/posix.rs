@@ -1104,8 +1104,11 @@ mod tests {
 
     #[test]
     fn paths_past_path_max_open_piece_by_piece() {
-        let base = std::env::temp_dir().join(format!("spaceknife-long-{}", std::process::id()));
-        std::fs::create_dir(&base).unwrap();
+        let tmp = tempfile::Builder::new()
+            .prefix("spaceknife-long-")
+            .tempdir()
+            .unwrap();
+        let base = tmp.path().to_path_buf();
         let mut path = base.as_os_str().as_encoded_bytes().to_vec();
         let name = CString::new(vec![b'd'; 200]).unwrap();
         // SAFETY: plain calls on NUL-terminated names and our own descriptors.
@@ -1172,7 +1175,7 @@ mod tests {
         assert_eq!(open_long(&gap, flags).err(), Some(libc::ENAMETOOLONG));
         drop(dir);
         assert!(depth > 4096 / 201);
-        std::fs::remove_dir_all(&base).unwrap();
+        tmp.close().unwrap();
     }
 
     #[test]
@@ -1189,7 +1192,11 @@ mod tests {
     #[test]
     fn found_subfolders_keep_their_access_time() {
         use std::os::unix::ffi::OsStrExt;
-        let base = std::env::temp_dir().join(format!("spaceknife-noatime-{}", std::process::id()));
+        let tmp = tempfile::Builder::new()
+            .prefix("spaceknife-noatime-")
+            .tempdir()
+            .unwrap();
+        let base = tmp.path().to_path_buf();
         std::fs::create_dir_all(base.join("sub")).unwrap();
         std::fs::write(base.join("sub/f"), b"x").unwrap();
         let sub = CString::new(base.join("sub").as_os_str().as_bytes()).unwrap();
@@ -1252,6 +1259,6 @@ mod tests {
                 "keep_access_time {keep}"
             );
         }
-        std::fs::remove_dir_all(&base).unwrap();
+        tmp.close().unwrap();
     }
 }
