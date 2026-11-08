@@ -606,6 +606,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(windows)]
     fn units(le: &[u8]) -> Vec<u16> {
         le.chunks(2)
             .map(|p| u16::from_le_bytes([p[0], p[1]]))
