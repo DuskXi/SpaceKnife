@@ -61,6 +61,8 @@ Var Out
 !define SK_WEBVIEW2_READ TestWebView2Read
 !define SK_WEBVIEW2_UPDATE TestWebView2Update
 Var TestWv2Updates
+; SkCheckReplaceable looks once more only
+!define SK_HELD_TRIES 2
 
 !include "${SK_HELPERS}"
 LangString skAppRunning 1033 "running"
@@ -488,6 +490,26 @@ Function Manifest
   !insertmacro EXISTS "list" "$INSTDIR\${SK_MANIFEST}"
 FunctionEnd
 
+; SkCheckReplaceable (an update in place): a file held by a program that lets no one delete it is
+; reported; one held by a program that shares it for deleting too (as scanners do), or not held,
+; is not
+Function Replaceable
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  StrCpy $INSTDIR "$R8\Programs\SpaceKnife"
+  !insertmacro SK_EACH_FILE SK_PUT_PLACED
+  ; read, shared for reading only (as the experiments' holder of 0.3.4's app.asar)
+  System::Call 'kernel32::CreateFileW(w "$INSTDIR\ui\index.html", i 0x80000000, i 1, p 0, i 3, i 0x80, p 0) p .r7'
+  Call SkCheckReplaceable
+  !insertmacro OUT "held=$SkHeldFile"
+  System::Call 'kernel32::CloseHandle(p r7)'
+  System::Call 'kernel32::CreateFileW(w "$INSTDIR\ui\index.html", i 0x80000000, i 7, p 0, i 3, i 0x80, p 0) p .r7'
+  Call SkCheckReplaceable
+  !insertmacro OUT "shared=$SkHeldFile"
+  System::Call 'kernel32::CloseHandle(p r7)'
+  Call SkCheckReplaceable
+  !insertmacro OUT "free=$SkHeldFile"
+FunctionEnd
+
 ; SkOldUninstallerUse: may 0.3.4's own uninstaller (RMDir /r on its folder) run there?
 !macro T_OLD DIR UNINST
   StrCpy $SkOldDir "${DIR}"
@@ -598,6 +620,8 @@ Function .onInit
     Call WebView2
   ${ElseIf} $R9 == "start"
     Call StartApp
+  ${ElseIf} $R9 == "replaceable"
+    Call Replaceable
   ${Else}
     Call Staging
   ${EndIf}

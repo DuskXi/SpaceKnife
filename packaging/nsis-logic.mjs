@@ -292,6 +292,12 @@ try {
     expect("SkDropStage leaves a folder it did not make", got, { kept: "1" });
   }
   {
+    // an update in place (installer.nsi step 2): no file it replaces may be held by a program that
+    // lets no one delete it (what follows is not undone); one shared for deleting too may go
+    const { got } = run("replaceable");
+    expect("SkCheckReplaceable", got, { held: "ui\\index.html", shared: "", free: "" });
+  }
+  {
     // the app the installer starts after an update gets the installer's environment (0.3.4's
     // update test passes its ready file and release list so), unless the installer runs elevated
     // through UAC: then it starts as the desktop user, with that user's own environment

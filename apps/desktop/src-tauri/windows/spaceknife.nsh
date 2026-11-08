@@ -67,6 +67,7 @@ Var SkStageMove      ; 1: $SkStage is beside $INSTDIR (renames), 0: elsewhere (c
 Var SkStageMissing   ; the first file the staging lacks ("" when it has them all)
 Var SkPlaceFailed    ; the first file that could not be put in place ("" when all were)
 Var SkOldGone        ; 1: the earlier installation's files are gone (nothing to start again)
+Var SkHeldFile       ; SkCheckReplaceable: the first file another program keeps from being replaced
 
 ; ------------------------------------------------------------------ small helpers (both sides)
 
@@ -947,6 +948,51 @@ Function SkPlaceAll
     ${SkLog} "the staged files went into $INSTDIR"
     Call SkDropStage
   ${EndIf}
+FunctionEnd
+
+; How many times (500 ms apart) SkCheckReplaceable looks again (the logic test sets its own)
+!define /ifndef SK_HELD_TRIES 10
+
+!macro SK_HELD_CHECK REL
+  ${If} $SkHeldFile == ""
+  ${AndIf} ${FileExists} "$INSTDIR\${REL}"
+    ; DELETE with every share mode: a sharing violation only while some handle lets no one delete
+    ; or rename the file
+    System::Call 'kernel32::CreateFileW(w "$INSTDIR\${REL}", i 0x10000, i 7, p 0, i 3, i 0x80, p 0) p .r1 ?e'
+    Pop $2
+    ${If} $1 P= -1
+      ${If} $2 = 32
+        StrCpy $SkHeldFile "${REL}"
+      ${EndIf}
+    ${Else}
+      System::Call 'kernel32::CloseHandle(p r1)'
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; An update in place (an earlier forked version in $INSTDIR): the files this installer replaces must
+; be free to go before the first of them goes, as the steps after it are not undone (0.3.4's
+; uninstaller's are: it puts every file back). SkCloseIn has closed SpaceKnife; another program may
+; still hold one of them (a file manager, a scanner for a moment): looked at again for 5 s.
+; $SkHeldFile = the first one still held, "" when every one may go. Registers are kept.
+Function SkCheckReplaceable
+  Push $0
+  Push $1
+  Push $2
+  StrCpy $0 1
+  sk_held_again:
+  StrCpy $SkHeldFile ""
+  !insertmacro SK_EACH_FILE SK_HELD_CHECK
+  ${If} $SkHeldFile != ""
+  ${AndIf} $0 < ${SK_HELD_TRIES}
+    IntOp $0 $0 + 1
+    Sleep 500
+    Goto sk_held_again
+  ${EndIf}
+  ClearErrors
+  Pop $2
+  Pop $1
+  Pop $0
 FunctionEnd
 
 !macro SK_MANIFEST_FILE REL

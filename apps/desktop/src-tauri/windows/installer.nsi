@@ -650,12 +650,23 @@ Section Install
   ${EndIf}
 
   ; 2. what runs from this folder (0.3.4 that is quitting, an update of a forked installation, a
-  ;    headless SpaceKnife.com): closed before anything changes
+  ;    headless SpaceKnife.com): closed before anything changes. An update in place then checks
+  ;    that no other program keeps one of the files it replaces (SkCheckReplaceable: those steps
+  ;    are not undone; 0.3.4's uninstaller puts every file back by itself).
   StrCpy $R0 $INSTDIR
   Call SkCloseIn
   ${If} $R0 != ""
     ${SkLog} "files in $INSTDIR are in use: nothing changed"
     Abort "$(skAppRunning)"
+  ${EndIf}
+  ${If} $SkOldKind == "fork"
+  ${AndIf} $SkRelocated <> 1
+    Call SkCheckReplaceable
+    ${If} $SkHeldFile != ""
+      ${SkLog} "another program holds $INSTDIR\$SkHeldFile: nothing changed"
+      StrCpy $SkPlaceFailed $SkHeldFile
+      Abort "$(skPlaceFailed)"
+    ${EndIf}
   ${EndIf}
 
   ; 3. the installed 0.3.4: its own uninstaller, data, shortcuts and pins kept. From here on the
