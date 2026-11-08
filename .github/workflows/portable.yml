@@ -42,10 +42,12 @@ on:
     branches: [dev]
     paths:
       - .github/workflows/portable.yml
+      - .cargo/**
       - packaging/**
       - apps/desktop/scripts/**
       - tools/package_checks.mjs
       - tools/deb.mjs
+      - apps/desktop/src-tauri/build.rs
       - apps/desktop/src-tauri/tauri*.json
       - apps/desktop/src-tauri/src/install.rs
       - apps/desktop/src-tauri/src/portable.rs
@@ -174,12 +176,14 @@ jobs:
           ls target/portable-test/*
 
       # No file of the archive (zip and tar members read) names the build machine's home folder or is
-      # owned by its user, and on Linux every ELF file in it needs at most glibc 2.34, the RHEL 9 floor
-      # (tools/package_checks.mjs)
+      # owned by its user; on Linux every ELF file in it needs at most glibc 2.34, the RHEL 9 floor;
+      # on Windows no program in it imports the Visual C++ runtime, which the archive doesn't ship
+      # (+crt-static) (tools/package_checks.mjs)
       - name: Check the archive
         run: |
           node tools/package_checks.mjs paths "$archive"
           if [ "$RUNNER_OS" = Linux ]; then node tools/package_checks.mjs glibc "$archive"; fi
+          if [ "$RUNNER_OS" = Windows ]; then node tools/package_checks.mjs crt "$archive"; fi
 
       # what 0.3.x copies need of it: SpaceKnife.exe / spaceknife at the top, the swap helper
       # (a copy of spaceknife-cli) at resources/backend, answering --apply-update
