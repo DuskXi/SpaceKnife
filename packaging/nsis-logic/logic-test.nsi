@@ -2,9 +2,10 @@
 ; without installing anything: packaging/nsis-logic.mjs compiles this with the NSIS that Tauri's
 ; bundler uses and runs it once per case. Each run reads its case from the environment and writes
 ; key=value lines to SK_LOGIC_OUT; the staging cases work in the folder SK_LOGIC_SANDBOX only (a
-; temporary folder the runner makes and removes). No registry writes, no shortcuts; the one
+; temporary folder the runner makes and removes). No registry writes, no shortcuts on the desktop
+; or in the Start menu (the "shortcuts" case makes .lnk files in its sandbox folder); the one
 ; process started is cmd.exe standing in for the app (the "start" case). SkRunElevated, SkCloseIn,
-; SkRemove* and SkMigrateShortcut are compiled in but never called.
+; SkRemoveElectronBuilder and SkRemoveStockTauri are compiled in but never called.
 ;
 ;   makensis -DSK_HELPERS=<spaceknife.nsh> -DSK_UTILS=<Tauri's utils.nsh> -DSK_PLUGINS=<dir> -DSK_OUT=<exe> logic-test.nsi
 
@@ -48,9 +49,37 @@ Var Out
   !insertmacro ${OP} "ui\_nuxt"
   !insertmacro ${OP} "licenses"
 !macroend
+!macro SK_EACH_ANCESTOR OP
+  !insertmacro ${OP} "ui\_nuxt"
+  !insertmacro ${OP} "licenses"
+  !insertmacro ${OP} "ui"
+!macroend
+
+; the WebView2 runtime as the "webview2" case says it is (SkWebView2Minimum reads and updates it
+; through these): SK_LOGIC_WV2 = "<version before>|<version after an update>"
+!define MINIMUMWEBVIEW2VERSION "89.0.774.44"
+!define SK_WEBVIEW2_READ TestWebView2Read
+!define SK_WEBVIEW2_UPDATE TestWebView2Update
+Var TestWv2Updates
 
 !include "${SK_HELPERS}"
 LangString skAppRunning 1033 "running"
+LangString installingWebview2 1033 "installing WebView2"
+LangString webview2InstallError 1033 "WebView2 could not be installed"
+
+Function TestWebView2Read
+  ReadEnvStr $4 SK_LOGIC_WV2
+  ${If} $TestWv2Updates > 0
+    ${WordFind} "$4" "|" "+2" $4
+  ${Else}
+    ${WordFind} "$4" "|" "+1" $4
+  ${EndIf}
+  ClearErrors
+FunctionEnd
+
+Function TestWebView2Update
+  IntOp $TestWv2Updates $TestWv2Updates + 1
+FunctionEnd
 Section
 SectionEnd
 
@@ -146,20 +175,36 @@ Function Staging
   ${EndIf}
   ${If} $R9 == "inplace"
   ${OrIf} $R9 == "locked"
-    ; an earlier forked version in $INSTDIR, and a file of the user's
+  ${OrIf} $R9 == "held"
+    ; an earlier forked version in $INSTDIR, and files of the user's (one in its ui folder)
     !insertmacro PUT "$INSTDIR\${MAINBINARYNAME}.exe" "old exe"
     !insertmacro PUT "$INSTDIR\SpaceKnife.com" "old com"
     !insertmacro PUT "$INSTDIR\ui\stale-0.3.5.js" "old ui"
     !insertmacro PUT "$INSTDIR\user-file.txt" "the user's"
+    !insertmacro PUT "$INSTDIR\ui\user-ui.txt" "the user's"
+  ${EndIf}
+  ${If} $R9 == "inplace"
+  ${OrIf} $R9 == "locked"
+    ; and the list that earlier version's installer wrote (the "held" one has none)
+    FileOpen $0 "$INSTDIR\${SK_MANIFEST}" w
+    FileWriteUTF16LE /BOM $0 "${MAINBINARYNAME}.exe$\r$\nSpaceKnife.com$\r$\nui\stale-0.3.5.js$\r$\nui\$\r$\n"
+    FileClose $0
   ${EndIf}
   ${If} $R9 == "leftover"
-    ; a staging folder an earlier run left behind
+    ; a staging folder an earlier run of another build left behind: a name this one does not stage
     !insertmacro PUT "$R5\half-written.bin" "x"
+    !insertmacro PUT "$R5\ui\index.html" "an earlier build's"
+  ${EndIf}
+  ${If} $R9 == "leftover-known"
+    ; one this build's own run left (it was ended half way): only names it stages
+    !insertmacro PUT "$R5\${MAINBINARYNAME}.exe" "half"
+    !insertmacro PUT "$R5\ui\_nuxt\entry.js" "half"
   ${EndIf}
   Call SkMakeStage
   !insertmacro OUT "staged_in=$SkStage"
   !insertmacro EXISTS "made" "$SkStage\*.*"
   !insertmacro EXISTS "leftover" "$SkStage\half-written.bin"
+  !insertmacro EXISTS "leftover_kept" "$R5\half-written.bin"
   !insertmacro SK_EACH_DIR SK_STAGE_DIR
   !insertmacro SK_EACH_FILE SK_STAGE_ONE
   Call SkCheckStaged
@@ -169,22 +214,38 @@ Function Staging
     Call ReportPlacement
     Return
   ${EndIf}
-  ${If} $R9 == "inplace"
-  ${OrIf} $R9 == "locked"
-    ; installer.nsi step 5: the earlier forked version's ui and licenses go
-    RMDir /r "$INSTDIR\ui"
-    RMDir /r "$INSTDIR\licenses"
-  ${EndIf}
   ${If} $R9 == "locked"
     ; something holds SpaceKnife.com and lets nobody delete or replace it
     System::Call 'kernel32::CreateFileW(w "$INSTDIR\SpaceKnife.com", i 0x80000000, i 0, p 0, i 3, i 0x80, p 0) p .r7'
   ${EndIf}
+  ${If} $R9 == "inplace"
+  ${OrIf} $R9 == "locked"
+  ${OrIf} $R9 == "held"
+    ; installer.nsi step 5: the earlier forked version's files, by its list
+    StrCpy $R0 $INSTDIR
+    Call SkRemoveListed
+  ${EndIf}
+  ${If} $R9 == "vanished"
+    ; checked, then a scanner took the program out of the staging folder before it was renamed
+    Delete "$SkStage\${MAINBINARYNAME}.exe"
+  ${EndIf}
+  ${If} $R9 == "held"
+    ; checked, then a staged file went missing: the installed one stays where it is
+    Delete "$SkStage\SpaceKnife.com"
+  ${EndIf}
   Call SkPlaceAll
   ${If} $R9 == "locked"
-    System::Call 'kernel32::CloseHandle(p r7)'
+  ${OrIf} $R9 == "vanished"
+  ${OrIf} $R9 == "held"
+    ${If} $R9 == "locked"
+      System::Call 'kernel32::CloseHandle(p r7)'
+    ${EndIf}
     ; .onInstFailed
     Call SkDropStage
   ${EndIf}
+  !insertmacro EXISTS "instdir" "$INSTDIR\*.*"
+  !insertmacro EXISTS "user_ui" "$INSTDIR\ui\user-ui.txt"
+  !insertmacro EXISTS "old_list" "$INSTDIR\${SK_MANIFEST}"
   Call ReportPlacement
   ${If} $R9 == "fallback"
     System::Call 'kernel32::CloseHandle(p r6)'
@@ -219,6 +280,191 @@ Function StartApp
     StrCpy $R0 $R0 -1
   ${EndIf}
   !insertmacro OUT "started=$R0"
+FunctionEnd
+
+; SkMigrateShortcut on .lnk files in the sandbox (nothing on the desktop or in the Start menu): one
+; of an earlier folder is pointed here, one pointing here already, one of another program
+Function Shortcuts
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  !insertmacro PUT "$R8\old\${MAINBINARYNAME}.exe" "old"
+  !insertmacro PUT "$R8\new\${MAINBINARYNAME}.exe" "new"
+  !insertmacro PUT "$R8\mine\Mine.exe" "mine"
+  CreateShortcut "$R8\moved.lnk" "$R8\old\${MAINBINARYNAME}.exe"
+  CreateShortcut "$R8\here.lnk" "$R8\new\${MAINBINARYNAME}.exe"
+  CreateShortcut "$R8\other.lnk" "$R8\mine\Mine.exe"
+  StrCpy $INSTDIR "$R8\new"
+  StrCpy $R1 "$R8\old\${MAINBINARYNAME}.exe"
+  StrCpy $R0 "$R8\moved.lnk"
+  Call SkMigrateShortcut
+  StrCpy $R0 "$R8\here.lnk"
+  Call SkMigrateShortcut
+  StrCpy $R0 "$R8\other.lnk"
+  Call SkMigrateShortcut
+  StrCpy $R0 "$R8\gone.lnk"
+  Call SkMigrateShortcut
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  !insertmacro IsShortcutTarget "$R8\moved.lnk" "$R8\new\${MAINBINARYNAME}.exe"
+  Pop $0
+  !insertmacro OUT "moved=$0"
+  !insertmacro IsShortcutTarget "$R8\here.lnk" "$R8\new\${MAINBINARYNAME}.exe"
+  Pop $0
+  !insertmacro OUT "here=$0"
+  !insertmacro IsShortcutTarget "$R8\other.lnk" "$R8\mine\Mine.exe"
+  Pop $0
+  !insertmacro OUT "other=$0"
+  !insertmacro EXISTS "gone" "$R8\gone.lnk"
+FunctionEnd
+
+; SkRemove034Files in a folder 0.3.4 shared with other programs: its own files go, nothing else
+Function Remove034
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  StrCpy $R7 "$R8\Tools"
+  !insertmacro PUT "$R7\SpaceKnife.exe" "0.3.4"
+  !insertmacro PUT "$R7\${SK_EB_UNINSTALLER}" "0.3.4"
+  !insertmacro PUT "$R7\resources\app.asar" "0.3.4"
+  !insertmacro PUT "$R7\resources\backend\spaceknife-backend.exe" "0.3.4"
+  !insertmacro PUT "$R7\resources\backend\_internal\api-ms-win-core-file-l1-1-0.dll" "0.3.4"
+  !insertmacro PUT "$R7\resources\licenses\LICENSE.txt" "0.3.4"
+  !insertmacro PUT "$R7\locales\en-US.pak" "0.3.4"
+  !insertmacro PUT "$R7\mytool.exe" "the user's"
+  !insertmacro PUT "$R7\resources\backend\_internal\notes.txt" "the user's"
+  !insertmacro PUT "$R7\resources\other\keep.txt" "the user's"
+  Push $R7
+  Call SkRemove034Files
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  StrCpy $R7 "$R8\Tools"
+  !insertmacro EXISTS "exe" "$R7\SpaceKnife.exe"
+  !insertmacro EXISTS "uninstaller" "$R7\${SK_EB_UNINSTALLER}"
+  !insertmacro EXISTS "asar" "$R7\resources\app.asar"
+  !insertmacro EXISTS "backend" "$R7\resources\backend\spaceknife-backend.exe"
+  !insertmacro EXISTS "dll" "$R7\resources\backend\_internal\api-ms-win-core-file-l1-1-0.dll"
+  !insertmacro EXISTS "license" "$R7\resources\licenses\LICENSE.txt"
+  !insertmacro EXISTS "licenses" "$R7\resources\licenses\*.*"
+  !insertmacro EXISTS "locales" "$R7\locales\*.*"
+  !insertmacro EXISTS "mytool" "$R7\mytool.exe"
+  !insertmacro EXISTS "notes" "$R7\resources\backend\_internal\notes.txt"
+  !insertmacro EXISTS "keep" "$R7\resources\other\keep.txt"
+  !insertmacro EXISTS "folder" "$R7\*.*"
+FunctionEnd
+
+!macro T_APPEND P
+  StrCpy $INSTDIR "${P}"
+  Call SkAppendName
+  !insertmacro OUT "append ${P}=$INSTDIR"
+!macroend
+
+; the folder after the scope page and in .onInit: SkChooseFolder
+!macro T_CHOOSE SCOPE OLD CMD
+  StrCpy $SkScope "${SCOPE}"
+  StrCpy $SkOldDir "${OLD}"
+  StrCpy $SkDirFromCmd "${CMD}"
+  StrCpy $INSTDIR ""
+  Call SkChooseFolder
+  !insertmacro OUT "choose ${SCOPE}|${OLD}|${CMD}=$INSTDIR"
+!macroend
+
+Function Folders
+  !insertmacro T_APPEND "D:\Tools"
+  !insertmacro T_APPEND "D:\Tools\"
+  !insertmacro T_APPEND "D:\"
+  !insertmacro T_APPEND "C:\Program Files"
+  !insertmacro T_APPEND "D:\Apps\SpaceKnife"
+  !insertmacro T_APPEND "D:\apps\spaceknife"
+  !insertmacro T_APPEND "D:\SpaceKnife-tools\bin"
+  SetShellVarContext current
+  !insertmacro T_CHOOSE "user" "" "D:\Mine\SpaceKnife"
+  !insertmacro T_CHOOSE "machine" "" "D:\Mine\SpaceKnife"
+  !insertmacro T_CHOOSE "user" "D:\Old\SpaceKnife" "D:\Mine\SpaceKnife"
+  !insertmacro T_CHOOSE "user" "" ""
+  !insertmacro T_CHOOSE "machine" "" ""
+FunctionEnd
+
+; SkRemoveListed: the listed files and the folders they leave empty, nothing else, nothing outside
+Function Listed
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  StrCpy $R7 "$R8\Programs\SpaceKnife"
+  !insertmacro PUT "$R7\${MAINBINARYNAME}.exe" "x"
+  !insertmacro PUT "$R7\ui\index.html" "x"
+  !insertmacro PUT "$R7\ui\_nuxt\old.js" "x"
+  !insertmacro PUT "$R7\ui\user.txt" "the user's"
+  !insertmacro PUT "$R7\licenses\LICENSE.txt" "x"
+  !insertmacro PUT "$R7\keep-me.txt" "the user's"
+  !insertmacro PUT "$R8\Programs\victim.txt" "someone else's"
+  !insertmacro PUT "$R8\Programs\SpaceKnife-x\victim.txt" "someone else's"
+  FileOpen $0 "$R7\${SK_MANIFEST}" w
+  FileWriteUTF16LE /BOM $0 "${MAINBINARYNAME}.exe$\r$\nui\index.html$\r$\nui\_nuxt\old.js$\r$\nlicenses\LICENSE.txt$\r$\n"
+  FileWriteUTF16LE $0 "..\victim.txt$\r$\nui\..\..\victim.txt$\r$\n$R8\Programs\victim.txt$\r$\n\Programs\victim.txt$\r$\n"
+  FileWriteUTF16LE $0 "ui\*$\r$\nui/user.txt$\r$\nkeep-me.txt?$\r$\n.\keep-me.txt$\r$\n..\SpaceKnife-x\victim.txt$\r$\n$\r$\n"
+  FileWriteUTF16LE $0 "ui\_nuxt\$\r$\nlicenses\$\r$\nui\$\r$\n..\$\r$\n"
+  FileClose $0
+  StrCpy $R0 $R7
+  Call SkRemoveListed
+  !insertmacro OUT "kept_r0=$R0"
+  !insertmacro EXISTS "exe" "$R7\${MAINBINARYNAME}.exe"
+  !insertmacro EXISTS "index" "$R7\ui\index.html"
+  !insertmacro EXISTS "old" "$R7\ui\_nuxt\old.js"
+  !insertmacro EXISTS "nuxt" "$R7\ui\_nuxt\*.*"
+  !insertmacro EXISTS "user" "$R7\ui\user.txt"
+  !insertmacro EXISTS "ui" "$R7\ui\*.*"
+  !insertmacro EXISTS "licenses" "$R7\licenses\*.*"
+  !insertmacro EXISTS "keep" "$R7\keep-me.txt"
+  !insertmacro EXISTS "victim" "$R8\Programs\victim.txt"
+  !insertmacro EXISTS "victim2" "$R8\Programs\SpaceKnife-x\victim.txt"
+  !insertmacro EXISTS "list" "$R7\${SK_MANIFEST}"
+  !insertmacro EXISTS "folder" "$R7\*.*"
+  ; no list: nothing goes
+  StrCpy $R0 "$R8\Programs\SpaceKnife-x"
+  Call SkRemoveListed
+  !insertmacro EXISTS "nolist" "$R8\Programs\SpaceKnife-x\victim.txt"
+FunctionEnd
+
+!macro SK_PUT_PLACED REL
+  !insertmacro PUT "$INSTDIR\${REL}" "placed"
+!macroend
+
+; SkWriteManifest, then SkRemoveListed with that list: what was placed goes, the rest stays
+Function Manifest
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  StrCpy $INSTDIR "$R8\Programs\SpaceKnife"
+  !insertmacro SK_EACH_FILE SK_PUT_PLACED
+  !insertmacro PUT "$INSTDIR\ui\user.txt" "the user's"
+  Call SkWriteManifest
+  CopyFiles /SILENT "$INSTDIR\${SK_MANIFEST}" "$R8\written.txt"
+  StrCpy $R0 $INSTDIR
+  Call SkRemoveListed
+  !insertmacro EXISTS "exe" "$INSTDIR\${MAINBINARYNAME}.exe"
+  !insertmacro EXISTS "entry" "$INSTDIR\ui\_nuxt\entry.js"
+  !insertmacro EXISTS "nuxt" "$INSTDIR\ui\_nuxt\*.*"
+  !insertmacro EXISTS "licenses" "$INSTDIR\licenses\*.*"
+  !insertmacro EXISTS "user" "$INSTDIR\ui\user.txt"
+  !insertmacro EXISTS "list" "$INSTDIR\${SK_MANIFEST}"
+FunctionEnd
+
+; SkOldUninstallerUse: may 0.3.4's own uninstaller (RMDir /r on its folder) run there?
+!macro T_OLD DIR UNINST
+  StrCpy $SkOldDir "${DIR}"
+  StrCpy $SkOldUninst "${UNINST}"
+  Call SkOldUninstallerUse
+  !insertmacro OUT "old ${DIR}=$R0"
+!macroend
+
+Function OldUninstaller
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  !insertmacro PUT "$R8\Apps\SpaceKnife\${SK_EB_UNINSTALLER}" "u"
+  !insertmacro PUT "$R8\Tools\${SK_EB_UNINSTALLER}" "u"
+  SetShellVarContext current
+  !insertmacro T_OLD "$R8\Apps\SpaceKnife" "$R8\Apps\SpaceKnife\${SK_EB_UNINSTALLER}"
+  !insertmacro T_OLD "$R8\Tools" "$R8\Tools\${SK_EB_UNINSTALLER}"
+  !insertmacro T_OLD "$R8\Gone\SpaceKnife" "$R8\Gone\SpaceKnife\${SK_EB_UNINSTALLER}"
+  !insertmacro T_OLD "$LOCALAPPDATA\SpaceKnife" "$LOCALAPPDATA\SpaceKnife\${SK_EB_UNINSTALLER}"
+FunctionEnd
+
+; SkWebView2Minimum with the runtime SK_LOGIC_WV2 describes
+Function WebView2
+  StrCpy $TestWv2Updates 0
+  Call SkWebView2Minimum
+  !insertmacro OUT "short=$R0"
+  !insertmacro OUT "updates=$TestWv2Updates"
 FunctionEnd
 
 ; SkDropStage removes only a folder SkMakeStage made
@@ -288,6 +534,20 @@ Function .onInit
     !insertmacro T_DIR "D:\Apps\SpaceKnife"
   ${ElseIf} $R9 == "dropguard"
     Call DropGuard
+  ${ElseIf} $R9 == "shortcuts"
+    Call Shortcuts
+  ${ElseIf} $R9 == "remove034"
+    Call Remove034
+  ${ElseIf} $R9 == "folders"
+    Call Folders
+  ${ElseIf} $R9 == "listed"
+    Call Listed
+  ${ElseIf} $R9 == "manifest"
+    Call Manifest
+  ${ElseIf} $R9 == "olduninst"
+    Call OldUninstaller
+  ${ElseIf} $R9 == "webview2"
+    Call WebView2
   ${ElseIf} $R9 == "start"
     Call StartApp
   ${Else}

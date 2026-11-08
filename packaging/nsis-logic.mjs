@@ -157,20 +157,114 @@ try {
     expect("a new folder: staged beside it, renamed into place in one go", got, { ...placed, staged_in: `${box}\\Programs\\SpaceKnife.sk-staging`, made: "1", move: "1", user: "<none>" });
   }
   {
+    // emptied by the names this build stages, never as a whole: one with other names is not this
+    // build's to delete, it stays and the files are staged in the plug-ins folder instead
     const { got } = run("leftover");
-    expect("a staging folder an earlier run left is emptied first", got, { ...placed, made: "1", leftover: "0" });
+    expect("a staging folder another build left is kept (staged elsewhere)", got, { ...placed, staged_in: /\\temp\\ns[^\\]+\.tmp\\stage$/i, made: "1", move: "0", leftover: "0", leftover_kept: "1", staging_left: "1" });
+  }
+  {
+    const { got, box } = run("leftover-known");
+    expect("a staging folder this build left is emptied and used", got, { ...placed, staged_in: `${box}\\Programs\\SpaceKnife.sk-staging`, made: "1", move: "1", leftover: "0" });
+  }
+  {
+    // the folder was renamed into place whole, then the program is missing (a scanner took it):
+    // what is there stays, nothing falls back to the file by file placement (which deleted it)
+    const { got } = run("vanished");
+    expect("a whole-folder rename never falls back", got, { failed: "SpaceKnife.exe", exe: "<none>", entry: "new ui\\_nuxt\\entry.js", com: "new SpaceKnife.com", instdir: "1", stage: "", staging_left: "0" });
+  }
+  {
+    const { got } = run("held");
+    expect("an installed file stays when its staged one went missing", got, { failed: "SpaceKnife.com", com: "old com", exe: "new SpaceKnife.exe", entry: "new ui\\_nuxt\\entry.js", user: "the user's", stage: "", staging_left: "0" });
+  }
+  {
+    // .lnk files in the sandbox: the one of the earlier folder points here and gets the
+    // AppUserModelID too (the taskbar groups the running app with it), the one already pointing
+    // here gets it, another program's is left alone, a missing one is not made
+    const { got, box } = run("shortcuts");
+    const aumid = (lnk) => (readFileSync(join(box, lnk)).includes(Buffer.from("io.github.duskxi.spaceknife", "utf16le")) ? "1" : "0");
+    expect("SkMigrateShortcut", new Map([...got, ["moved_aumid", aumid("moved.lnk")], ["here_aumid", aumid("here.lnk")], ["other_aumid", aumid("other.lnk")]]), {
+      moved: "1",
+      moved_aumid: "1",
+      here: "1",
+      here_aumid: "1",
+      other: "1",
+      other_aumid: "0",
+      gone: "0",
+    });
+  }
+  {
+    // 0.3.4 in a folder it shared (its uninstaller can't be used there): exactly the files the
+    // real 0.3.4 installer put there go, and the folders they leave empty
+    const { got } = run("remove034");
+    expect("SkRemove034Files deletes 0.3.4's files only", got, { exe: "0", uninstaller: "0", asar: "0", backend: "0", dll: "0", license: "0", licenses: "0", locales: "0", mytool: "1", notes: "1", keep: "1", folder: "1" });
+  }
+  {
+    // a folder taken on the directory page without "SpaceKnife" in it gets \SpaceKnife (0.3.4's
+    // rule); after the scope page, /D= wins over the default folder in either scope, an earlier
+    // installation's folder over both
+    const { got } = run("folders");
+    expect("SkAppendName and SkChooseFolder", got, {
+      "append D:\\Tools": "D:\\Tools\\SpaceKnife",
+      "append D:\\Tools\\": "D:\\Tools\\SpaceKnife",
+      "append D:\\": "D:\\SpaceKnife",
+      "append C:\\Program Files": "C:\\Program Files\\SpaceKnife",
+      "append D:\\Apps\\SpaceKnife": "D:\\Apps\\SpaceKnife",
+      "append D:\\apps\\spaceknife": "D:\\apps\\spaceknife",
+      "append D:\\SpaceKnife-tools\\bin": "D:\\SpaceKnife-tools\\bin",
+      "choose user||D:\\Mine\\SpaceKnife": "D:\\Mine\\SpaceKnife",
+      "choose machine||D:\\Mine\\SpaceKnife": "D:\\Mine\\SpaceKnife",
+      "choose user|D:\\Old\\SpaceKnife|D:\\Mine\\SpaceKnife": "D:\\Old\\SpaceKnife",
+      "choose user||": /\\Programs\\SpaceKnife$/i,
+      "choose machine||": `${pf}\\SpaceKnife`,
+    });
+  }
+  {
+    // the list an installation wrote: exactly its files go, then its folders that are empty; a
+    // line that would reach outside the folder, a wildcard, a / or an empty line does nothing
+    const { got } = run("listed");
+    expect("SkRemoveListed", got, { exe: "0", index: "0", old: "0", nuxt: "0", user: "1", ui: "1", licenses: "0", keep: "1", victim: "1", victim2: "1", list: "0", folder: "1", nolist: "1", kept_r0: /\\Programs\\SpaceKnife$/ });
+  }
+  {
+    const { got, box } = run("manifest");
+    const written = readFileSync(join(box, "written.txt"));
+    const lines = written.toString("utf16le").replace(/^\uFEFF/, "").split("\r\n");
+    const want = ["SpaceKnife.exe", "SpaceKnife.com", "spaceknife-cli.exe", "ui\\index.html", "ui\\_nuxt\\entry.js", "licenses\\LICENSE.txt", "ui\\_nuxt\\", "licenses\\", "ui\\", ""];
+    const listOk = written[0] === 0xff && written[1] === 0xfe && JSON.stringify(lines) === JSON.stringify(want) ? "1" : JSON.stringify(lines);
+    expect("SkWriteManifest, then SkRemoveListed with it", new Map([...got, ["list_written", listOk]]), { list_written: "1", exe: "0", entry: "0", nuxt: "0", licenses: "0", user: "1", list: "0" });
+  }
+  {
+    // 0.3.4's uninstaller ends with RMDir /r on its folder: only where that folder is SpaceKnife's
+    const { got, box } = run("olduninst");
+    expect("SkOldUninstallerUse", got, {
+      [`old ${box}\\Apps\\SpaceKnife`]: "",
+      [`old ${box}\\Tools`]: "unnamed",
+      [`old ${box}\\Gone\\SpaceKnife`]: "missing",
+      [`old ${local}\\SpaceKnife`]: "unsafe data",
+    });
+  }
+  for (const [runtime, short, updates, what] of [
+    ["142.0.3595.80", "", "0", "a new enough WebView2 is left alone"],
+    ["89.0.774.44", "", "0", "the minimum itself is enough"],
+    ["88.0.705.81|142.0.3595.80", "", "1", "an older one is updated, then it is enough"],
+    ["88.0.705.81|88.0.705.81", "88.0.705.81", "1", "an older one that stays older stops the installer"],
+    ["89.0.774.9|89.0.774.9", "89.0.774.9", "1", "89.0.774.9 is older than 89.0.774.44"],
+  ]) {
+    const { got } = run("webview2", "", { SK_LOGIC_WV2: runtime });
+    expect(`SkWebView2Minimum: ${what}`, got, { short, updates });
   }
   {
     const { got } = run("missing", "", { SK_LOGIC_SKIP: "ui\\_nuxt\\entry.js" });
     expect("an incomplete staging stops with nothing changed (and is removed)", got, { missing: "ui\\_nuxt\\entry.js", exe: "<none>", entry: "<none>", staging_left: "0", stage: "" });
   }
   {
+    // the earlier build's files by its list (installer.nsi step 5): the stale interface file it
+    // listed goes, the user's files stay (one in the root, one in its ui folder)
     const { got } = run("inplace");
-    expect("an update in place: file by file, the stale interface gone, the user's file kept", got, { ...placed, move: "1", user: "the user's" });
+    expect("an update in place: file by file, the stale interface gone, the user's files kept", got, { ...placed, move: "1", user: "the user's", user_ui: "1", old_list: "0" });
   }
   {
     const { got } = run("locked");
-    expect("a file held by another program is reported (the rest goes in)", got, { failed: "SpaceKnife.com", com: "old com", exe: "new SpaceKnife.exe", entry: "new ui\\_nuxt\\entry.js", user: "the user's", staging_left: "0", stage: "" });
+    expect("a file held by another program is reported (the rest goes in)", got, { failed: "SpaceKnife.com", com: "old com", exe: "new SpaceKnife.exe", entry: "new ui\\_nuxt\\entry.js", user: "the user's", user_ui: "1", staging_left: "0", stage: "" });
   }
   {
     const { got } = run("fallback");
