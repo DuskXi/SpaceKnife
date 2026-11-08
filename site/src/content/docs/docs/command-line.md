@@ -32,10 +32,10 @@ On a deb or rpm install, `spaceknife` (`/usr/bin/spaceknife`) starts the app, an
 :::
 
 :::caution[Portable copies]
-A portable copy keeps its data in the `data` folder next to it, but only the app knows that. To make the command line use the same snapshots and settings, set `SPACEKNIFE_HOME` to that `data` folder (see [Environment variables](#environment-variables)).
+A portable copy keeps its data in the `data` folder next to it, but only the app and headless mode know that. To make the command line use the same snapshots and settings, set `SPACEKNIFE_HOME` to that `data` folder (see [Environment variables](#environment-variables)).
 :::
 
-Messages appear in the language chosen in **Settings › General › Interface language** (the command line reads your settings file). The `--help` texts are in English.
+Messages appear in the language chosen in **Settings › General › Interface language** (the command line reads your settings file). The `--help` texts are in English, except headless mode's.
 
 ## Commands
 
