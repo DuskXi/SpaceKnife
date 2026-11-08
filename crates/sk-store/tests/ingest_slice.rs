@@ -356,3 +356,49 @@ fn a_slice_over_a_folder_that_left_the_tree_folds_the_rest() {
     // (no check_invariants: the GONE row above was marked by hand, not moved out of its range)
     testing::assert_same_store(&vec.read(), &refst.read());
 }
+
+/// A slice that skips a listing (its folder left the tree) and also names an entry of a later
+/// listing is refused like any other bad slice, and changes nothing (such slices used to be
+/// renumbered before the checks: a reference past the last listing panicked there).
+#[test]
+fn a_bad_reference_beside_a_skipped_listing_is_refused() {
+    let store = Store::new();
+    let first = {
+        let mut a = store.appender();
+        let root = a.add_root_dir("C:\\r").unwrap();
+        a.ingest_listing(root, &testing::dirs_and_files("d", 3, 0))
+            .unwrap()
+    };
+    {
+        let mut w = store.write();
+        let f = w.flags(first).0;
+        w.set_raw(Col::Flags, first, f | Flags::GONE.0);
+        w.touch();
+    }
+    let one = testing::dirs_and_files("e", 1, 0);
+    let mut three = EntryBatch::new();
+    for _ in 0..3 {
+        append_batch(&mut three, &one);
+    }
+    let later = |listing| SliceRef::Entry { listing, entry: 0 };
+    for refs in [
+        [SliceRef::Node(first), SliceRef::Node(first + 1), later(2)],
+        [SliceRef::Node(first), SliceRef::Node(first + 1), later(7)],
+        [SliceRef::Node(first), later(2), SliceRef::Node(first + 1)],
+    ] {
+        let version = store.version();
+        let mut a = store.appender();
+        let len = a.len();
+        assert_eq!(
+            a.ingest_slice(&refs, &[0, 1, 2, 3], &three),
+            Err(StoreError::BadSlice(
+                "a listing can only name an entry of an earlier listing"
+            )),
+            "{refs:?}"
+        );
+        assert_eq!(a.len(), len);
+        assert_eq!(a.child_count(first + 1), 0);
+        drop(a);
+        assert_eq!(store.version(), version);
+    }
+}
