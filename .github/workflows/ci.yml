@@ -63,7 +63,11 @@ jobs:
       fail-fast: false
       matrix:
         # Platform floors from docs/PLAN.md: Windows 10+, Ubuntu 22.04+ / RHEL 9+ (glibc 2.34), macOS 14+.
-        os: [windows-latest, ubuntu-22.04, macos-14]
+        # GitHub retired its macos-14 runners on 2026-11-02: macOS 15 (Apple Silicon) is the oldest
+        # there is; the app still asks for macOS 14.0 (tauri.conf.json minimumSystemVersion, which
+        # apps/desktop/src-tauri/tests/config.rs keeps), and macos.yml builds on macos-15 and
+        # macos-15-intel.
+        os: [windows-latest, ubuntu-22.04, macos-15]
     defaults:
       run:
         shell: bash
