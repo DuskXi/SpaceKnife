@@ -33,7 +33,7 @@ pnpm bundle:portable   # 在 bundle 之后：target/portable/ 下的便携包
 
 在哪个系统上运行就出哪个系统的包（`src-tauri/tauri.{windows,linux,macos}.conf.json` 定目标：Windows 出 NSIS，Linux 出三种，macOS 出 app 和 dmg），一律为构建机自己的架构。Windows 和 Linux 的安装包只发 x64；arm64 只发便携包。安装包在 `target/release/bundle/<格式>/`，便携包在 `target/portable/`。
 
-`pnpm bundle` 是 `tauri build --config src-tauri/tauri.bundle.json`，它的 `beforeBuildCommand` 先 `pnpm generate`（界面的静态文件，`.output/public`，嵌进应用），再运行 [apps/desktop/scripts/prepare-bundle.mjs](../apps/desktop/scripts/prepare-bundle.mjs)：
+`pnpm bundle`（[scripts/bundle.mjs](../apps/desktop/scripts/bundle.mjs)）是带路径重映射（见下文「不带构建机路径」）的 `tauri build --config src-tauri/tauri.bundle.json`，后面的参数照传（CI 只出程序时用 `pnpm bundle --no-bundle`）；它的 `beforeBuildCommand` 先 `pnpm generate`（界面的静态文件，`.output/public`，嵌进应用），再运行 [apps/desktop/scripts/prepare-bundle.mjs](../apps/desktop/scripts/prepare-bundle.mjs)：
 
 - 以 release 编译 `spaceknife-cli`（`crates/sk-server`），放成 `src-tauri/target-bundle/spaceknife-cli-<目标三元组>[.exe]`，作为 Tauri 的 `externalBin` 装在应用旁边（名字是 `spaceknife-cli`）；
 - 写出许可证 `src-tauri/target-bundle/licenses/`（见下）。
@@ -46,7 +46,13 @@ CI：「Portable build」（[.github/workflows/portable.yml](../.github/workflow
 
 **许可证**：SpaceKnife 是 MIT（仓库根目录 `LICENSE`）。安装后的 `licenses/` 资源里有 `LICENSE.txt`、`THIRD-PARTY-rust.txt`（`spaceknife` 与 `spaceknife-cli` 链接的 crate，来自 `cargo metadata`）和 `THIRD-PARTY-ui.txt`（界面的 npm 生产依赖，来自 `pnpm licenses list --prod`，加上 Geist / Noto Sans SC 字体的 OFL）；相同的许可证文本只印一次。由 `prepare-bundle.mjs` 生成。
 
-**不带构建机路径**：Rust 的 panic 信息和调试路径里会带上构建机的绝对路径（也就带上了用户名）。<!-- TODO: confirm — Electron 版由 tools/build_package.py 做路径重映射（--remap-path-prefix）并逐个文件检查；Tauri 版的构建是否仍做这两步，待打包工作流定下来再写 -->
+**不带构建机路径**：Rust 的 panic 信息和调试路径里会带上构建机的绝对路径（也就带上了用户名）。所以发布用的构建（`pnpm bundle`，即 [scripts/bundle.mjs](../apps/desktop/scripts/bundle.mjs)；`prepare-bundle.mjs` 编的 `spaceknife-cli` 用同一组参数）给 rustc 加上 `--remap-path-prefix`：家目录、`CARGO_HOME`、`RUSTUP_HOME` 和仓库分别写成 `~`、`/cargo`、`/rustup`、`/spaceknife`（Cargo 的 trim-paths 还没稳定）；Windows 上再加 `-Clink-arg=/PDBALTPATH:%_PDB%`，程序里只留 PDB 的文件名（`tools/package_checks.mjs` 的 `remappedEnv`）。直接运行 `pnpm tauri build` 或 `cargo build --release` 不做这一步，只适合本机自用。
+
+做好的包由 `node tools/package_checks.mjs paths <文件或文件夹>…` 检查：任何文件里都不能出现构建机的家目录（UTF-8 和 UTF-16LE、两种斜杠、JSON / JS 转义、ASCII 字母不分大小写，后面不能紧跟别的名字字符），zip、tar、gzip、zstd 和 ar（deb）里的成员也看，成员里的压缩包再往里看；tar 成员的属主也不能是构建机的用户（Linux 便携包用 `--owner=0 --group=0 --numeric-owner` 打包）。读不了的格式（xz 等）算失败，不算通过。
+
+**glibc 下限**：Linux 的包里每个 ELF 文件都只能要 glibc 2.34 及以下（RHEL 9；Ubuntu 22.04 是 2.35）：`node tools/package_checks.mjs glibc <文件或文件夹>…`，和上面读同样的成员。判断是保守的：文件里出现的任何 `GLIBC_x.y` 都算；一个 ELF 文件都没有也算失败（多半是给错了文件夹）。
+
+两项检查在 CI 里跑：「Portable build」检查每个便携包（glibc 只在 Linux 上），带安装包时再检查安装包里的东西（NSIS 用 7-Zip 解开、deb 直接读、rpm 经 rpm2cpio、AppImage 用它自己的 `--appimage-extract` 解开）；「macOS build」检查便携 zip 和 dmg 里的应用（只读挂载）。测试在 `tools/tests/package_checks.test.mjs`。<!-- TODO: confirm — Tauri 的 AppImage 带着构建机（Ubuntu 22.04）的系统库（WebKitGTK、GTK 的加载器缓存等），第一次带安装包的构建要看它能不能过 glibc 下限和路径检查 -->
 
 rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用 `apt-get download` 取 Ubuntu 官方的 rpm 工具、`dpkg-deb -x` 解到用户目录，可以在 `RPM_CONFIGDIR/macros.d/` 里放一个定义 `%_buildhost localhost` 的宏文件。
 

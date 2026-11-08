@@ -19,7 +19,7 @@ pnpm tauri dev      # the app window (Rust side in src-tauri); the backend comes
 pnpm typecheck      # vue-tsc over app/ (nuxt typecheck)
 pnpm test           # vitest
 pnpm generate       # static output in .output/public (what Tauri bundles)
-pnpm bundle         # release bundles (tauri build + tauri.bundle.json: spaceknife-cli, licences)
+pnpm bundle         # release bundles (scripts/bundle.mjs: tauri build + tauri.bundle.json, build paths remapped; spaceknife-cli, licences)
 pnpm bundle:portable   # after bundle: target/portable/SpaceKnife-<v>-<os>-<arch>-portable.zip / .tar.gz
 cargo test -p spaceknife-desktop   # from the repository root
 ```
@@ -213,6 +213,8 @@ browser tab.
   serves the generated interface from `ui` next to the program (the portable archives carry it;
   `--ui <folder>` names another).
 - The release workflows (`.github/workflows/portable.yml`, `macos.yml`, `release.yml`) build with
-  `pnpm tauri build --no-bundle` / `pnpm bundle` and `pnpm bundle:portable`; `tools/release.mjs`
+  `pnpm bundle --no-bundle` / `pnpm bundle` and `pnpm bundle:portable`; `tools/release.mjs`
   assembles the release by Tauri's file names. The packaged app is tested with
-  `packaging/smoke-app.mjs`, `smoke-headless.mjs`, `update-e2e.mjs` and `nsis-e2e.mjs`.
+  `packaging/smoke-app.mjs`, `smoke-headless.mjs`, `update-e2e.mjs` and `nsis-e2e.mjs`, and every
+  package is checked by `tools/package_checks.mjs` (no build-machine home folder in any file; glibc
+  ≤ 2.34 in every ELF file of the Linux packages).

@@ -20,7 +20,7 @@
     "typecheck": "nuxt typecheck",
     "test": "vitest run",
     "tauri": "tauri",
-    "bundle": "tauri build --config src-tauri/tauri.bundle.json",
+    "bundle": "node scripts/bundle.mjs",
     "bundle:portable": "node scripts/portable.mjs",
     "bundle:prepare": "node scripts/prepare-bundle.mjs"
   },

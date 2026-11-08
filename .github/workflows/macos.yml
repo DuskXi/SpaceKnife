@@ -28,6 +28,7 @@ on:
       - .github/workflows/macos.yml
       - packaging/**
       - apps/desktop/scripts/**
+      - tools/package_checks.mjs
       - apps/desktop/src-tauri/tauri*.json
       - apps/desktop/src-tauri/src/install.rs
       - apps/desktop/src-tauri/src/portable.rs
@@ -107,6 +108,18 @@ jobs:
           mkdir -p target/mac
           cp target/release/bundle/dmg/*.dmg target/portable/*-portable.zip target/mac/
           ls -l target/mac
+
+      # No file names the build machine's home folder (the programs are built with it remapped:
+      # scripts/bundle.mjs; tools/package_checks.mjs): the portable zip's members, and the app in the
+      # dmg, mounted read-only
+      - name: Check the files
+        run: |
+          set -euo pipefail
+          node tools/package_checks.mjs paths target/mac/*-portable.zip
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" target/mac/*.dmg > /dev/null
+          trap 'hdiutil detach "$mnt" > /dev/null' EXIT
+          node tools/package_checks.mjs paths "$mnt"/*.app
 
       # unpacked the way the app unpacks an update (ditto): the bundle's links, attributes and signature
       - name: Unpack the portable zip again

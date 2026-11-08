@@ -60,6 +60,7 @@ if (os === "win") {
 } else if (os === "mac") {
   execFileSync("/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", folder, archive], { stdio: "inherit" });
 } else {
-  execFileSync("tar", ["-czf", archive, "-C", work, name], { stdio: "inherit" });
+  // owned by root, by number: no user name of the build machine in the archive (tools/package_checks.mjs)
+  execFileSync("tar", ["--owner=0", "--group=0", "--numeric-owner", "-czf", archive, "-C", work, name], { stdio: "inherit" });
 }
 console.log(`[portable] ${archive}`);

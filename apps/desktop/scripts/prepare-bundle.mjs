@@ -2,7 +2,8 @@
 // part of beforeBuildCommand, after `pnpm generate`):
 //
 // - src-tauri/target-bundle/spaceknife-cli-<target triple>[.exe]: the console binary (crates/sk-server), shipped
-//   next to the app as Tauri's externalBin (which wants the target triple in the name);
+//   next to the app as Tauri's externalBin (which wants the target triple in the name), built with the
+//   build machine's folders remapped (tools/package_checks.mjs remappedEnv);
 // - src-tauri/target-bundle/licenses/: LICENSE.txt (SpaceKnife, MIT), THIRD-PARTY-rust.txt (the crates linked
 //   into spaceknife and spaceknife-cli, from `cargo metadata`) and THIRD-PARTY-ui.txt (the npm
 //   packages of the interface: the production dependencies, a superset of what is bundled, and the
@@ -14,6 +15,8 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { remappedEnv } from "../../../tools/package_checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktop = resolve(here, "..");
@@ -42,7 +45,8 @@ function buildCli() {
   const explicitTarget = !!process.env.TAURI_ENV_TARGET_TRIPLE && process.env.TAURI_ENV_TARGET_TRIPLE !== hostTriple();
   if (explicitTarget) args.push("--target", triple);
   console.log(`[bundle] cargo ${args.join(" ")}`);
-  execFileSync("cargo", args, { cwd: root, stdio: "inherit" });
+  // the build paths remapped as in the app's build (scripts/bundle.mjs already set them: unchanged then)
+  execFileSync("cargo", args, { cwd: root, stdio: "inherit", env: remappedEnv(process.env) });
   const targetDir = process.env.CARGO_TARGET_DIR ? resolve(root, process.env.CARGO_TARGET_DIR) : join(root, "target");
   const built = join(targetDir, ...(explicitTarget ? [triple] : []), "release", `spaceknife-cli${exe}`);
   const dest = join(out, `spaceknife-cli-${triple}${exe}`);
