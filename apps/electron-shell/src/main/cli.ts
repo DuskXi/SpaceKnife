@@ -8,6 +8,23 @@
 // SpaceKnife.com (packaging/console-launcher `route`) make, so every shell treats a command line
 // alike: `--yes` or a TLS file alone is a mistake (exit 2, no window), as in 0.3.4.
 
+/** The swap helper's question to the new version of a portable copy before it puts it in place
+ *  (crates/sk-core/src/update/swap.rs STARTUP_CHECK, which the Tauri app answers too): by the time
+ *  main runs, the system has given this program every library it links (Electron's own, and on
+ *  Linux the system's GTK, NSS…). index.ts answers it first, with one line, and ends: no window, no
+ *  profile, no backend. */
+export const STARTUP_CHECK = "--startup-check";
+
+/** Whether the program's arguments (after its own path) ask the startup check. */
+export function isStartupCheck(args: readonly string[]): boolean {
+  return args.includes(STARTUP_CHECK);
+}
+
+/** The startup check's answer: one line of JSON. */
+export function startupCheckAnswer(versions: { readonly electron?: string }): string {
+  return `${JSON.stringify({ ok: true, electron: versions.electron ?? "" })}\n`;
+}
+
 /** The options of 0.3.4's app that start (or belong to) headless mode, `--name` and `--name=…`. */
 const HEADLESS_OPTIONS = new Set(["--headless", "--listen", "--yes", "--tls-cert", "--tls-key"]);
 const HELP_OPTIONS = new Set(["--help", "-h"]);

@@ -48,6 +48,8 @@ on:
       - tools/package_checks.mjs
       - tools/deb.mjs
       - apps/desktop/src-tauri/build.rs
+      - apps/desktop/src-tauri/src/main.rs
+      - apps/desktop/src-tauri/src/startup_check.rs
       - apps/desktop/src-tauri/tauri*.json
       - apps/desktop/src-tauri/src/install.rs
       - apps/desktop/src-tauri/src/portable.rs
@@ -187,6 +189,8 @@ jobs:
 
       # what 0.3.x copies need of it: SpaceKnife.exe / spaceknife at the top, the swap helper
       # (a copy of spaceknife-cli) at resources/backend, answering --apply-update
+      # the program answering the helper's --startup-check (it can start here: its libraries, the
+      # web view)
       - name: The layout 0.3.x copies update to
         run: |
           shopt -s nullglob
@@ -200,6 +204,11 @@ jobs:
           set -e
           echo "$helper --apply-update: $said (exit $code)"
           [ "$code" = 2 ] && echo "$said" | grep -q '"ok":false' || { echo "::error::the swap helper does not take --apply-update"; exit 1; }
+          set +e
+          said=$("${dir[0]}$program" --startup-check); code=$?
+          set -e
+          echo "$program --startup-check: $said (exit $code)"
+          [ "$code" = 0 ] && echo "$said" | grep -q '"ok":true' || { echo "::error::$program does not answer the swap helper's --startup-check"; exit 1; }
 
       - name: Smoke test in portable mode
         run: |

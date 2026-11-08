@@ -14,6 +14,7 @@ pub mod install;
 pub mod links;
 pub mod navigation;
 pub mod portable;
+pub mod startup_check;
 pub mod terminal;
 pub mod text;
 pub mod theme;
