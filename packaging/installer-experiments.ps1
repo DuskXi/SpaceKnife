@@ -232,7 +232,9 @@ function Get-Entries {
       }
     }
   }
-  return ,$out
+  # unrolled: callers wrap the call in @() (",$out" handed an empty list over as one item, so
+  # foreach ran once on an empty array and @(Get-Entries).Count was never 0)
+  return $out
 }
 function Get-InstallLocation([string]$Hive) { return Get-RegValue "$($Hive):\Software\$GUID" 'InstallLocation' }
 function Get-Lnk([string]$Path) {
@@ -301,7 +303,7 @@ function Stop-SpaceKnife {
 }
 function Reset-SpaceKnife {
   Stop-SpaceKnife
-  foreach ($e in Get-Entries) {
+  foreach ($e in @(Get-Entries)) {
     if ($e.quiet -or $e.uninstall) {
       $cmd = if ($e.quiet) { $e.quiet } else { "$($e.uninstall) /S" }
       if ($cmd -match '^"([^"]+)"\s*(.*)$') { $exe = $Matches[1]; $rest = $Matches[2] } else { $exe = $cmd; $rest = '/S' }
@@ -365,7 +367,7 @@ function Assert-Layout034([string]$Dir, [string]$Hive) {
   Assert '0.3.4 files' ((Test-Path "$Dir\SpaceKnife.exe") -and (Test-Path "$Dir\SpaceKnife.com") -and (Test-Path "$Dir\Uninstall SpaceKnife.exe") -and (Test-Path "$Dir\resources\app.asar")) $Dir
 }
 function Assert-Updated([string]$Dir, [string]$Hive, [string]$Version, [hashtable]$LnkBefore, [string[]]$Lnks, [datetime]$Since, [switch]$NoRestartCheck) {
-  $entries = Get-Entries
+  $entries = @(Get-Entries)
   Assert 'one SpaceKnife entry in this hive' (@($entries | Where-Object { $_.hive -eq $Hive }).Count -eq 1) ($entries | ConvertTo-Json -Compress)
   Assert "the entry is the GUID key, version $Version" (@($entries | Where-Object { $_.hive -eq $Hive -and $_.key -eq $GUID -and $_.version -eq $Version }).Count -eq 1) ($entries | ConvertTo-Json -Compress)
   Assert 'no stock Tauri keys' (-not (Test-Path "$($Hive):\Software\Microsoft\Windows\CurrentVersion\Uninstall\SpaceKnife") -and -not (Test-Path "$($Hive):\Software\DuskXi\SpaceKnife")) ''
@@ -577,7 +579,7 @@ if (Want 'S6') {
   Stop-SpaceKnife
   $code = Run-Wait $OLD '/S /currentuser'
   Assert '0.3.4 installer exits 0' ($code -eq 0) "exit $code"
-  $e = Get-Entries
+  $e = @(Get-Entries)
   Assert 'one entry, 0.3.4' ((@($e).Count -eq 1) -and ($e[0].version -eq '0.3.4') -and ($e[0].key -eq $GUID)) ($e | ConvertTo-Json -Compress)
   Assert-Layout034 $USERDIR 'HKCU'
   $tauriLeft = @('spaceknife-cli.exe', 'uninstall.exe', 'ui\index.html', 'licenses') | Where-Object { Test-Path -LiteralPath (Join-Path $USERDIR $_) }
@@ -607,12 +609,12 @@ if (Want 'S7') {
     Assert 'two 0.3.4 entries' (@(Get-Entries | Where-Object { $_.version -eq '0.3.4' }).Count -eq 2) (Get-Entries | ConvertTo-Json -Compress)
     $since = Get-Date
     Assert 'per-user update' ((Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /currentuser') -eq 0) ''
-    $e = Get-Entries
+    $e = @(Get-Entries)
     Assert 'HKCU 0.3.5, HKLM still 0.3.4' ((@($e | Where-Object { $_.hive -eq 'HKCU' -and $_.version -eq $NewVersion }).Count -eq 1) -and (@($e | Where-Object { $_.hive -eq 'HKLM' -and $_.version -eq '0.3.4' }).Count -eq 1)) ($e | ConvertTo-Json -Compress)
     Assert 'Program Files 0.3.4 untouched' (Test-Path "$MACHDIR\resources\app.asar") ''
     Stop-SpaceKnife
     Assert 'per-machine update' ((Spawn-Wait (Stage-Update $NEW) '--updated /S --force-run /allusers') -eq 0) ''
-    $e = Get-Entries
+    $e = @(Get-Entries)
     Assert 'both 0.3.5' (@($e | Where-Object { $_.version -eq $NewVersion }).Count -eq 2) ($e | ConvertTo-Json -Compress)
     Stop-SpaceKnife
   }
