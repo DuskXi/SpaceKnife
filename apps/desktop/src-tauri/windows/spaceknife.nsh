@@ -878,6 +878,9 @@ Function SkMigrateShortcut
     Pop $0
     ${If} $0 = 1
       !insertmacro SetShortcutTarget "$R0" "$INSTDIR\${MAINBINARYNAME}.exe"
+      ; (SetShortcutTarget leaves its IShellLink pointer in $0): where it points now
+      !insertmacro IsShortcutTarget "$R0" "$INSTDIR\${MAINBINARYNAME}.exe"
+      Pop $0
     ${EndIf}
   ${EndIf}
   ${If} $0 = 1
