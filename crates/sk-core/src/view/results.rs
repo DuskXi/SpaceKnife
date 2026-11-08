@@ -308,5 +308,7 @@ pub fn results_page(
         max_alloc: rows.iter().map(|r| r.alloc).max().unwrap_or(0),
         offset: offset as i64,
         rows: out,
+        // the rows are the last frame's
+        generation: view.last.as_ref().map_or(0, |f| f.generation),
     }
 }

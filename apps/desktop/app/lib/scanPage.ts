@@ -37,5 +37,5 @@ export function openMenu(viewId: string, row: Hit, frame: VisualFrame, at: { cli
   const node = row >= 0 ? frame.node[row]! : root!.node;
   const followsPointer = componentFor(frame.layout)?.hoverPlacement === "pointer";
   const avoid = followsPointer ? pointerBox({ x: at.clientX, y: at.clientY }) : hosts.get(viewId)?.menuAnchor(row)?.avoid;
-  set({ menu: { viewId, scanId, key, node: node > 0 ? node : null, x: at.clientX, y: at.clientY, avoid } });
+  set({ menu: { viewId, scanId, key, node: node > 0 ? node : null, x: at.clientX, y: at.clientY, avoid, generation: frame.info.generation } });
 }

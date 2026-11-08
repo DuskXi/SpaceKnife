@@ -10,8 +10,9 @@ import {
   type BasketSort,
   type Confirmed,
   basketSortLabel,
+  changedSince,
+  confirmation,
   confirmedOf,
-  grewSince,
   itemCount,
   mainVolume,
   parentOf,
@@ -70,22 +71,26 @@ function askDelete(): void {
   confirm.value = true;
 }
 
-function deleteNow(): void {
+// a confirmed item changed meanwhile (a group took in more, one member left as another came):
+// show the confirmed items as they are now and ask again
+function askAgain(): void {
+  confirmed.value = confirmedOf(stillConfirmed(confirmed.value, basket.value?.items ?? []));
+  confirm.value = true;
+  toast(t("删除篮在确认时有了变化，请再确认一次"));
+}
+
+async function deleteNow(): Promise<void> {
   const now = basket.value?.items ?? [];
-  if (grewSince(confirmed.value, now)) {
-    // a confirmed group took in more meanwhile: show what it holds now and ask again
-    confirmed.value = confirmedOf(stillConfirmed(confirmed.value, now));
-    toast(t("删除篮在确认时有了变化，请再确认一次"));
-    return;
-  }
-  const ids = confirmed.value.map((c) => c.id);
+  if (changedSince(confirmed.value, now)) return askAgain();
+  const sent = confirmation(confirmed.value, now);
   confirm.value = false;
-  void basketExecute("delete", ids);
+  // the backend checks the same (the change may not have reached this window yet)
+  if ((await basketExecute("delete", sent)) === "changed") askAgain();
 }
 
 // what the drawer shows when the button is clicked
-function trashNow(): void {
-  void basketExecute("trash", items.value.map((it) => it.id));
+async function trashNow(): Promise<void> {
+  if ((await basketExecute("trash", confirmedOf(items.value).slice())) === "changed") toast(t("删除篮刚刚有了变化，请看一眼再执行"));
 }
 </script>
 

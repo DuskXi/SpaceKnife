@@ -69,7 +69,13 @@ pub const CAP_LAYOUT_FLAME: &str = "layout.flame.v1";
 pub const CAP_LAYOUT_POLAR: &str = "layout.polar.v1";
 /// Update checks against the GitHub releases: update.* and the update.changed event.
 pub const CAP_UPDATES: &str = "updates.v1";
-pub const ALL_CAPABILITIES: [&str; 8] = [
+/// Node ids come with the numbering they belong to (`generation` of FrameInfo, ViewResults,
+/// TreeSummaryResult), and basket.add takes it back: ids of a tree renumbered since are refused.
+pub const CAP_NODE_GENERATION: &str = "node-generation.v1";
+/// Basket items carry `rev`; basket.execute takes the items the user confirmed (`confirm`) and
+/// runs nothing when one of them changed since (BASKET_CHANGED).
+pub const CAP_BASKET_CONFIRM: &str = "basket-confirm.v1";
+pub const ALL_CAPABILITIES: [&str; 10] = [
     CAP_BINARY_FRAMES,
     CAP_SUBSCRIPTIONS,
     CAP_CANCEL,
@@ -78,6 +84,8 @@ pub const ALL_CAPABILITIES: [&str; 8] = [
     CAP_LAYOUT_FLAME,
     CAP_LAYOUT_POLAR,
     CAP_UPDATES,
+    CAP_NODE_GENERATION,
+    CAP_BASKET_CONFIRM,
 ];
 
 /// Major component of a `"<major>.<minor>"` version string (`None` if it does not parse).

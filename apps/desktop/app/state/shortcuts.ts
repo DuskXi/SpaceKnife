@@ -105,7 +105,7 @@ export function onKey(e: KeyboardEvent): unknown {
   if (key === "Delete" && !ctrl && !onControl) {
     const frame = view?.frame;
     const row = frame?.info.selected_row;
-    if (row != null && frame && frame.kind[row]! < Kind.SMALL && frame.node[row]! > 0) return (done(), basketAdd(st.scan_id, frame.node[row]!));
+    if (row != null && frame && frame.kind[row]! < Kind.SMALL && frame.node[row]! > 0) return (done(), basketAdd(st.scan_id, frame.node[row]!, frame.info.generation));
   }
   if (ctrl && "01234".includes(key) && key.length === 1) {
     return (
@@ -167,5 +167,5 @@ function keyboardMenu(viewId: string, scanId: string, frame: Pick<VisualFrame, "
   const target = sel != null ? { key: frame.key[sel]!, node: frame.node[sel]! } : frame.info.root;
   const at = target && hosts.get(viewId)?.menuAnchor(sel ?? HIT_ROOT);
   if (!target || !at) return;
-  set({ menu: { viewId, scanId, key: target.key, node: target.node > 0 ? target.node : null, ...at } });
+  set({ menu: { viewId, scanId, key: target.key, node: target.node > 0 ? target.node : null, ...at, generation: frame.info.generation } });
 }

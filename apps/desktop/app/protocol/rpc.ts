@@ -119,8 +119,9 @@ export class Rpc {
       token,
       protocol: PROTOCOL_VERSION,
       client: { ...client, kind: "electron" },
-      // visuals.v1 and the layouts of the registered visualizations (state/actions.ts imports them first)
-      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", "updates.v1", ...visualCapabilities()],
+      // visuals.v1 and the layouts of the registered visualizations (state/actions.ts imports them
+      // first); node ids sent back with their numbering, the delete basket confirmed item by item
+      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", "updates.v1", "node-generation.v1", "basket-confirm.v1", ...visualCapabilities()],
     })) as HelloResult;
     return this.hello;
   }

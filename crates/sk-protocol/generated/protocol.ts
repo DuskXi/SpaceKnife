@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "6647971528122374";
+export const SCHEMA_HASH = "99bce398f511f02f";
 
 export interface AgeCond {
   end: number;
@@ -37,6 +37,12 @@ export interface AttrSet {
 }
 
 export interface BasketAddParams {
+  /**
+   * The numbering `nodes` (or `key`) were read in: the `generation` of the FrameInfo,
+   * ViewResults or TreeSummaryResult they came from. Ids of another numbering are refused
+   * (UNKNOWN_NODE: the tree was renumbered since); None: not checked (node-generation.v1)
+   */
+  generation?: number | null;
   /** A block of the view's frame (an aggregate's members) */
   key?: number | null;
   nodes?: number[];
@@ -55,11 +61,24 @@ export interface BasketAddResult {
   state: BasketState;
 }
 
+/** One item as the user confirmed it. */
+export interface BasketConfirm {
+  id: string;
+  /** Its `rev` then */
+  rev: number;
+}
+
 export interface BasketEvent {
   state: BasketState;
 }
 
 export interface BasketExecuteParams {
+  /**
+   * The items the user confirmed, as they were shown (instead of `ids`): exactly these run,
+   * and nothing runs (BASKET_CHANGED) when one of them left the basket or changed since
+   * (basket-confirm.v1)
+   */
+  confirm?: BasketConfirm[] | null;
   /** None: every item */
   ids?: string[] | null;
   mode: "trash" | "delete";
@@ -78,6 +97,12 @@ export interface BasketItem {
   /** Why it cannot be deleted as is (locked by …, missing …) */
   note: string;
   path: string;
+  /**
+   * Changes whenever what the item covers grows or it is added anew (a small-item group that
+   * took in more members keeps its id): basket.execute's `confirm` names the rev the user saw
+   * (basket-confirm.v1)
+   */
+  rev: number;
   scan_id: string;
   size: number;
   status: "ready" | "locked" | "missing" | "protected";
@@ -668,6 +693,12 @@ export interface FrameInfo {
   filter: FilterInfo | null;
   /** Rows changed by a file change since the last frame (UI-TM-43) */
   flash: FlashItem[];
+  /**
+   * The numbering of the node ids and keys in this frame: another one once the tree is
+   * renumbered (compaction after file changes, an MFT scan taking over, a comparison computed
+   * again). basket.add takes it with ids from this frame (node-generation.v1)
+   */
+  generation: number;
   /** None for drawlist.v1 */
   geometry: FlameGeometry | PolarGeometry | null;
   height: number;
@@ -1598,6 +1629,8 @@ export interface TreeSummaryResult {
   folder_class: FolderClassInfo | null;
   /** Parts that could not be worked out this time; empty when complete */
   gaps: SummaryGap[];
+  /** The numbering of the node ids in it (FrameInfo.generation) */
+  generation: number;
   /** Newest modification time in the subtree (0 = unknown) */
   latest_mtime: number;
   node: NodeInfo;
@@ -1739,6 +1772,8 @@ export interface ViewResults {
   alloc: number;
   /** Matching files below the zoom root (sum of the rows' counts) */
   files: number;
+  /** The numbering of the rows' node ids and keys (FrameInfo.generation of the frame `seq`) */
+  generation: number;
   /** Largest row, for the relative size bars */
   max_alloc: number;
   offset: number;

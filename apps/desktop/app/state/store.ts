@@ -222,6 +222,8 @@ export interface MenuState {
   y: number;
   /** the target block in client px: the menu keeps clear of it */
   avoid?: { x: number; y: number; w: number; h: number };
+  /** the numbering `key` and `node` were read in (the frame's or the result page's `generation`) */
+  generation?: number | null;
 }
 
 let nextTab = 1;

@@ -300,6 +300,8 @@ describe("Rpc", () => {
     });
     expect((hello.params as { capabilities: string[] }).capabilities).toContain("binary-frames.v1");
     expect((hello.params as { capabilities: string[] }).capabilities).toContain("updates.v1"); // update.changed
+    // basket.add with the numbering of its ids, basket.execute with what was confirmed
+    expect((hello.params as { capabilities: string[] }).capabilities).toEqual(expect.arrayContaining(["node-generation.v1", "basket-confirm.v1"]));
     expect(rpc.hello).toBeNull();
     ws.receive({ jsonrpc: "2.0", id: hello.id, result: HELLO });
     await expect(done).resolves.toEqual(HELLO);

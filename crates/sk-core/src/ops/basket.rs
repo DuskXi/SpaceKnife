@@ -78,6 +78,9 @@ pub struct BasketItem {
     pub key: String,
     /// group: its members' keys, parallel to `members`
     pub member_keys: Vec<String>,
+    /// the basket's version when what it covers last grew, or when it was added: a confirmation
+    /// names it ([`Basket::confirmed_targets`]); set by the basket
+    pub rev: u64,
 }
 
 impl BasketItem {
@@ -98,6 +101,7 @@ impl BasketItem {
             status: self.status,
             note: self.note.clone(),
             tag: None,
+            rev: self.rev as i64,
         }
     }
 }
@@ -603,6 +607,40 @@ impl Basket {
                 .filter_map(|id| g.entries.iter().find(|e| e.item.id == *id))
                 .collect(),
         };
+        Self::targets_of(chosen)
+    }
+
+    /// What executing exactly the items the user confirmed runs (`(id, rev)` as they were
+    /// shown), as [`Basket::targets`]; or, when one of them left the basket or its `rev` moved
+    /// since (it covers more now, or was added anew), the ids of those, and nothing runs.
+    /// Items added beside the confirmed ones are not part of it. One step under the lock.
+    pub fn confirmed_targets(
+        &self,
+        confirmed: &[(String, u64)],
+    ) -> Result<Vec<Target>, Vec<String>> {
+        let g = self.inner.lock();
+        let by_id: HashMap<&str, &Entry> =
+            g.entries.iter().map(|e| (e.item.id.as_str(), e)).collect();
+        let mut chosen: Vec<&Entry> = Vec::with_capacity(confirmed.len());
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut changed: Vec<String> = Vec::new();
+        for (id, rev) in confirmed {
+            match by_id.get(id.as_str()) {
+                Some(e) if e.item.rev == *rev => {
+                    if seen.insert(id.as_str()) {
+                        chosen.push(e); // once, however often it is named
+                    }
+                }
+                _ => changed.push(id.clone()),
+            }
+        }
+        if !changed.is_empty() {
+            return Err(changed);
+        }
+        Ok(Self::targets_of(chosen))
+    }
+
+    fn targets_of(chosen: Vec<&Entry>) -> Vec<Target> {
         let mut out = Vec::new();
         for e in chosen {
             if matches!(e.item.status, ItemStatus::Missing | ItemStatus::Protected) {
@@ -1162,6 +1200,7 @@ impl Inner {
             note: String::new(),
             key: String::new(),
             member_keys: Vec::new(),
+            rev: 0,
         };
         let mut entry = Entry::new(item, key);
         entry.measure = measure(nodes, &[id], false);
@@ -1327,6 +1366,7 @@ impl Inner {
                     note: String::new(),
                     key: String::new(),
                     member_keys: Vec::new(),
+                    rev: 0,
                 };
                 self.groups.insert(folder_key.clone(), item.id.clone());
                 self.entries.push(Entry::new(item, folder_key.clone()));
@@ -1366,6 +1406,8 @@ impl Inner {
         self.index_add(&id, &fresh_keys);
         result.added.push(id);
         self.version += 1;
+        // it covers more than before: a confirmation of what it was is not one of this
+        self.entries[pos].item.rev = self.version;
     }
 
     fn insert(&mut self, mut entry: Entry, result: &mut AddResult, check: bool) {
@@ -1386,12 +1428,13 @@ impl Inner {
             }
         }
         entry.item.status = Inner::status(&entry, check);
+        self.version += 1;
+        entry.item.rev = self.version;
         let id = entry.item.id.clone();
         let key = entry.key.clone();
         self.entries.push(entry);
         self.index_add(&id, &[key]);
         result.added.push(id);
-        self.version += 1;
     }
 
     fn apply_group(

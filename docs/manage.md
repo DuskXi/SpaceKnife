@@ -80,7 +80,7 @@ OpResult(path, ok, code: ok|missing|denied|locked|protected|no_trash|exists|canc
 ### 2.4 服务层（`crates/sk-server/src/ops_service.rs`）
 
 - 删除篮每个后端一份，所有会话共享，变化推 `basket.changed`；状态里每个卷带 `trash_status`（回收站说明、当前占用）。
-- `basket.execute {mode, ids}` → 任务 id；`ops.progress` 推给发起的会话（`mode`、进度、结束时逐项结果、`freed`、`can_undo`）。界面发它让用户确认的那些 id（删除篮所有会话共享，对话框打开之后别的会话加进来的不算在内；确认时某个确认过的小项聚合块被加了成员就再问一次）；`ids` 为空表示全部。同一时间只有一个操作：忙检查与登记在同一把锁下，两个同时的请求只有一个开始。
+- `basket.execute {mode, ids}` → 任务 id；`ops.progress` 推给发起的会话（`mode`、进度、结束时逐项结果、`freed`、`can_undo`）。界面发它让用户确认的那些项：`confirm` 是每一项的 `id` 和确认时看到的 `rev`（basket-confirm.v1；删除篮所有会话共享，对话框打开之后别的会话加进来的不算在内）。`rev` 在一项覆盖的范围变大时变（小项聚合块加了成员，即使同时少了一个、成员数不变），重新加入的项也是新的 `rev`；查锁、树变化后的重新核对不改它。执行时在登记任务的同一把锁下逐项核对，有一项离开了删除篮或 `rev` 不同，就什么都不执行，返回 BASKET_CHANGED（-32014），界面按现在的内容再问一次；界面发出之前自己也比一次。旧客户端照样可以发 `ids`（只执行这些）或都不发（全部），与 0.3.4 相同。同一时间只有一个操作：忙检查与登记在同一把锁下，两个同时的请求只有一个开始。
 - 永久删除先等 `DELETE_DELAY`（5 秒）：期间 `ops.undo` / `ops.cancel` 直接作废，什么都没碰。移到回收站完成后（或中途停下时已经移进去的部分）`ops.undo` 用 `restore` 放回原处并把条目放回删除篮。后端保留最近 8 个任务的撤销信息。
 - 加入后在后台检查占用（Restart Manager 等），树变化（监控事件）后 1 秒静默再 `refresh`。
 - 对比视图里的节点按路径映射到「现在」的树再加入；已删除的项、目标为历史快照时拒绝（「只能操作「现在」还在磁盘上的项」）。
@@ -155,7 +155,7 @@ def load_rules(extra_dir=None, *, host=None) -> RuleSet       # 内置 110 条 +
 | 方法 / 事件 | 说明 |
 |---|---|
 | `path.forms {scan_id, node}` | 四种格式 + `on_disk`（对比视图里同样可用） |
-| `basket.list / add / remove / clear / execute`，事件 `basket.changed` | `add {scan_id, nodes}` 或 `{view_id, key}`（聚合块的成员） |
+| `basket.list / add / remove / clear / execute`，事件 `basket.changed` | `add {scan_id, nodes}` 或 `{view_id, key}`（聚合块的成员），带 `generation`（读到这些 id 的画面、结果页或摘要的编号，node-generation.v1）：树在这之后重新编号过就拒绝（UNKNOWN_NODE，「树刚刚重新编号过，请在新的画面里再选一次」）；按块加入时以画面自己的编号为准，客户端不说也核对 |
 | `ops.cancel / undo`，事件 `ops.progress` | 见 2.4 |
 | `compare.sources / open / info / close / summary / node`，事件 `compare.progress` | 见 3.1 |
 | `export.targets / check / run` | 见 4 |

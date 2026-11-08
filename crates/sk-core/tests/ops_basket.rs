@@ -443,6 +443,64 @@ fn targets_expand_groups() {
     );
 }
 
+/// What the user confirmed runs exactly, or nothing: an item whose `rev` moved (a group that
+/// took in more members, an item removed and added anew) or that left the basket stops the
+/// whole execution; items added beside the confirmed ones are not run.
+#[test]
+fn confirmed_items_run_only_as_they_were_confirmed() {
+    let store = store();
+    let b = basket();
+    let folder = node(&store, "small");
+    let gid = add_group(&b, &store, folder, &small_members(&store, &[0, 1])).added[0].clone();
+    let fid = add(&b, &store, "s", &[node(&store, "docs/b.txt")]).added[0].clone();
+    let shown = |b: &Basket| -> Vec<(String, u64)> {
+        b.items().iter().map(|i| (i.id.clone(), i.rev)).collect()
+    };
+    let confirmed = shown(&b);
+    // another session adds beside them: not run
+    add(&b, &store, "s", &[node(&store, "docs/a.txt")]);
+    let paths = |t: Vec<Target>| -> Vec<String> { t.into_iter().map(|t| t.path).collect() };
+    assert_eq!(
+        paths(b.confirmed_targets(&confirmed).unwrap()),
+        [
+            path_of("small/s0.log"),
+            path_of("small/s1.log"),
+            path_of("docs/b.txt")
+        ]
+    );
+    // named twice, run once
+    let twice = vec![confirmed[1].clone(), confirmed[1].clone()];
+    assert_eq!(
+        paths(b.confirmed_targets(&twice).unwrap()),
+        [path_of("docs/b.txt")]
+    );
+    // the group takes in a member: it changed, nothing runs
+    add_group(&b, &store, folder, &small_members(&store, &[2]));
+    assert_eq!(
+        b.confirmed_targets(&confirmed).unwrap_err(),
+        std::slice::from_ref(&gid)
+    );
+    // confirmed again as it is now: it runs, its new member too
+    let again = shown(&b);
+    assert_eq!(b.confirmed_targets(&again).unwrap().len(), 5);
+    // removed and added anew, the same path: another rev
+    b.remove(std::slice::from_ref(&fid));
+    assert_eq!(
+        b.confirmed_targets(&again).unwrap_err(),
+        std::slice::from_ref(&fid)
+    );
+    add(&b, &store, "s", &[node(&store, "docs/b.txt")]);
+    assert_eq!(b.confirmed_targets(&again).unwrap_err(), [fid]);
+    // lock checks, refreshes and status changes leave a rev alone
+    let now = shown(&b);
+    b.set_lockers(&HashMap::from([(
+        path_of("docs/a.txt"),
+        vec!["editor".to_string()],
+    )]));
+    b.refresh(&mut |_: &str| Some(store.clone()));
+    assert_eq!(shown(&b), now);
+}
+
 // --------------------------------------------------------------------------- freeable (§2.3)
 
 fn vol(n: i64) -> HashMap<String, i64> {

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BasketItem, BasketVolume } from "@/protocol/generated";
 import { crumbLabel } from "@/lib/scanPage";
 
-import { confirmedOf, grewSince, itemCount, mainVolume, opUndoable, parentOf, sortedItems, statusText, stillConfirmed } from "./basketDrawer";
+import { changedSince, confirmation, confirmedOf, itemCount, mainVolume, opUndoable, parentOf, sortedItems, statusText, stillConfirmed } from "./basketDrawer";
 
 const item = (name: string, path: string, alloc: number) => ({ id: name, name, path, alloc }) as BasketItem;
 
@@ -32,22 +32,30 @@ describe("basket drawer helpers", () => {
 });
 
 describe("confirming a permanent deletion", () => {
-  const group = (id: string, members: number) => ({ id, name: id, path: id, alloc: 1, members }) as BasketItem;
+  const group = (id: string, members: number, rev = 1) => ({ id, name: id, path: id, alloc: 1, members, rev }) as BasketItem;
 
   it("runs what was confirmed, not what another session added meanwhile", () => {
-    const confirmed = confirmedOf([group("a", 0), group("g", 3)]);
-    const now = [group("a", 0), group("g", 3), group("added", 0)];
+    const confirmed = confirmedOf([group("a", 0, 4), group("g", 3, 7)]);
+    const now = [group("a", 0, 4), group("g", 3, 7), group("added", 0, 9)];
     expect(stillConfirmed(confirmed, now).map((i) => i.id)).toEqual(["a", "g"]);
-    expect(grewSince(confirmed, now)).toBe(false);
+    expect(changedSince(confirmed, now)).toBe(false);
+    // what basket.execute is sent: each confirmed item still there, as it was confirmed
+    expect(confirmation(confirmed, now)).toEqual([
+      { id: "a", rev: 4 },
+      { id: "g", rev: 7 },
+    ]);
     // gone meanwhile: simply not run
-    expect(stillConfirmed(confirmed, [group("g", 3)]).map((i) => i.id)).toEqual(["g"]);
-    expect(grewSince(confirmed, [group("g", 3)])).toBe(false);
+    expect(stillConfirmed(confirmed, [group("g", 3, 7)]).map((i) => i.id)).toEqual(["g"]);
+    expect(confirmation(confirmed, [group("g", 3, 7)])).toEqual([{ id: "g", rev: 7 }]);
+    expect(changedSince(confirmed, [group("g", 3, 7)])).toBe(false);
   });
 
-  it("asks again when a confirmed group grew", () => {
-    const confirmed = confirmedOf([group("g", 3)]);
-    expect(grewSince(confirmed, [group("g", 4)])).toBe(true);
-    expect(grewSince(confirmed, [group("g", 2)])).toBe(false); // members left: less, never more
+  it("asks again when a confirmed item changed, also where it holds as many members as before", () => {
+    const confirmed = confirmedOf([group("g", 3, 7)]);
+    expect(changedSince(confirmed, [group("g", 4, 8)])).toBe(true); // grew
+    // one member went, another came: the same count, another rev (the count alone said nothing)
+    expect(changedSince(confirmed, [group("g", 3, 9)])).toBe(true);
+    expect(changedSince(confirmed, [group("g", 2, 7)])).toBe(false); // members left: less, never more
   });
 });
 

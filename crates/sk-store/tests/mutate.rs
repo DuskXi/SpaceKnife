@@ -154,10 +154,36 @@ fn compact_renumbers_the_live_tree() {
     drop(c);
     // adopting it
     let v = store.version();
+    let g = store.generation();
     drop(r);
     store.write().adopt(&compacted);
     assert!(store.version() > v);
     assert_eq!(facts(&store.read()), before);
+    // every id is new: the numbering has another generation, unlike the changes before it
+    assert_ne!(store.generation(), g);
+    assert_ne!(store.generation(), compacted.generation());
+}
+
+/// The generation of a store's numbering: kept by changes that leave ids as they are (relists
+/// add rows and mark the old ones gone), new with every renumbering (an adoption), and never one
+/// another store has (a comparison computed again is a new store: its ids are no older one's).
+#[test]
+fn the_generation_moves_only_when_ids_are_renumbered() {
+    let mut spec = disk();
+    let store = scan_spec(&spec, "/r", 4);
+    let other = Store::new();
+    assert_ne!(store.generation(), other.generation());
+    let g = store.generation();
+    spec.get_mut("a")
+        .unwrap()
+        .children_mut()
+        .push(("new.bin".into(), f(9)));
+    relist_path(&store, &spec, "a");
+    assert_eq!(store.generation(), g);
+    let (compacted, _) = compact(&store.read()).unwrap();
+    store.write().adopt(&compacted);
+    let g2 = store.generation();
+    assert!(g2 > g && g2 != other.generation(), "{g} {g2}");
 }
 
 #[test]

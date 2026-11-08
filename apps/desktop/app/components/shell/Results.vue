@@ -50,6 +50,8 @@ const shown = shallowRef<{ meta: ViewResults; pages: Map<number, ResultRow[]> } 
 const active = ref(-1);
 const list = ref<HTMLDivElement | null>(null);
 let cache = { key: "", pages: new Map<number, ResultRow[]>(), inflight: new Map<number, () => void>() };
+// the numbering each row's node id and key were read in (view.results `generation`)
+const rowGeneration = new WeakMap<ResultRow, number>();
 // a new frame invalidates every page; while the scan runs (four frames a second) refetch once a second
 const running = useApp((s) => isRunning(s.scans[scanId.value]));
 const tick = useThrottled(seq, () => (running.value ? 1000 : 0));
@@ -89,6 +91,8 @@ watch(
           if (cache.key !== key) return;
           c.inflight.delete(p);
           if (!res) return;
+          // pages of one list may come from different frames: each row keeps its numbering
+          for (const r of res.rows) rowGeneration.set(r, res.generation);
           c.pages.set(p, res.rows);
           publish(res);
         })
@@ -130,11 +134,11 @@ const locate = (r: ResultRow) => r.kind !== "rest" && void viewCall(props.viewId
 async function menuFor(r: ResultRow, x: number, y: number): Promise<void> {
   if (r.kind === "rest") return;
   await viewCall(props.viewId, "view.reveal", { key: r.key });
-  set({ menu: { viewId: props.viewId, scanId: scanId.value, key: r.key, node: r.kind === "group" ? null : r.node, x, y } });
+  set({ menu: { viewId: props.viewId, scanId: scanId.value, key: r.key, node: r.kind === "group" ? null : r.node, x, y, generation: rowGeneration.get(r) ?? null } });
 }
 const zoom = (r: ResultRow) => r.kind !== "rest" && void viewCall(props.viewId, "view.zoom", { key: r.key });
 const toBasket = (r: ResultRow) => {
-  if (r.kind === "file" || r.kind === "folder") void basketAdd(scanId.value, r.node);
+  if (r.kind === "file" || r.kind === "folder") void basketAdd(scanId.value, r.node, rowGeneration.get(r));
 };
 
 function moveTo(i: number): void {

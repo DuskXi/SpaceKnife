@@ -113,6 +113,11 @@ pub struct BasketItem {
     pub note: String,
     #[serde(default)]
     pub tag: Option<String>,
+    /// Changes whenever what the item covers grows or it is added anew (a small-item group that
+    /// took in more members keeps its id): basket.execute's `confirm` names the rev the user saw
+    /// (basket-confirm.v1)
+    #[serde(default)]
+    pub rev: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -149,6 +154,11 @@ pub struct BasketAddParams {
     /// A block of the view's frame (an aggregate's members)
     #[serde(default)]
     pub key: Option<i64>,
+    /// The numbering `nodes` (or `key`) were read in: the `generation` of the FrameInfo,
+    /// ViewResults or TreeSummaryResult they came from. Ids of another numbering are refused
+    /// (UNKNOWN_NODE: the tree was renumbered since); None: not checked (node-generation.v1)
+    #[serde(default)]
+    pub generation: Option<u64>,
 }
 
 impl Validate for BasketAddParams {
@@ -195,6 +205,15 @@ pub struct BasketEvent {
 
 // --------------------------------------------------------------------------- execution (W5-41…49)
 
+/// One item as the user confirmed it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BasketConfirm {
+    pub id: String,
+    /// Its `rev` then
+    pub rev: i64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BasketExecuteParams {
@@ -202,9 +221,28 @@ pub struct BasketExecuteParams {
     /// None: every item
     #[serde(default)]
     pub ids: Option<Vec<String>>,
+    /// The items the user confirmed, as they were shown (instead of `ids`): exactly these run,
+    /// and nothing runs (BASKET_CHANGED) when one of them left the basket or changed since
+    /// (basket-confirm.v1)
+    #[serde(default)]
+    pub confirm: Option<Vec<BasketConfirm>>,
 }
 
-impl Validate for BasketExecuteParams {}
+impl Validate for BasketExecuteParams {
+    fn validate(&self) -> ValidationResult {
+        if let Some(c) = &self.confirm {
+            v::list_len("confirm", c, 0, 100_000)?;
+            if self.ids.is_some() {
+                return Err(v::ParamsError::new(
+                    "ids",
+                    "value_error",
+                    "ids and confirm cannot both be given",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OpTask {

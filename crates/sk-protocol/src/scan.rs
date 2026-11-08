@@ -629,6 +629,9 @@ pub struct TreeSummaryResult {
     /// Parts that could not be worked out this time; empty when complete
     #[serde(default)]
     pub gaps: Vec<SummaryGap>,
+    /// The numbering of the node ids in it (FrameInfo.generation)
+    #[serde(default)]
+    pub generation: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
