@@ -1,5 +1,8 @@
-# The Electron shell's packages: the Windows installer (NSIS), the RHEL 9 rpm and the AppImage. The
-# Tauri shell makes the portable copies, the deb and the macOS app (apps/desktop). Built by
+# The Electron shell's packages, only where the Tauri app can't run: the RHEL 9 rpm, the AppImage and
+# the unpacked Linux app that scripts/portable.mjs packs as the Linux portable copy under 0.3.4's
+# name. The Tauri shell makes the Windows installer (its forked NSIS template, apps/desktop/src-tauri/
+# windows), the other portable copies, the deb and the macOS app (apps/desktop); the win / nsis
+# settings below are no longer built or published. Built by
 # scripts/package.mjs, which first puts spaceknife-cli (and on Windows SpaceKnife.com) and the
 # licences in ../../target/electron-shell/stage and builds main and preload (electron-vite); the
 # interface is apps/desktop's Nuxt build. See docs/packaging.md. No code signing certificate yet:

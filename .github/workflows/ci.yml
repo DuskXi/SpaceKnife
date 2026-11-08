@@ -208,7 +208,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # the shell of the Windows installer, the RHEL 9 rpm and the AppImage
+        # the shell of the RHEL 9 rpm, the AppImage and the Linux portable copy under 0.3.4's name;
+        # its code is checked on Windows as well
         os: [ubuntu-22.04, windows-latest]
     defaults:
       run:
