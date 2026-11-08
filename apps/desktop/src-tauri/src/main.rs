@@ -34,5 +34,8 @@ fn main() {
     if spaceknife_desktop::cli::wants_headless(args.get(1..).unwrap_or(&[])) {
         std::process::exit(spaceknife_desktop::cli::run_headless(&args));
     }
+    // Windows, started by SpaceKnife.com from a terminal, which waits for the window as 0.3.4's
+    // did: that terminal's output, and its Ctrl+C (console.rs)
+    spaceknife_desktop::console::join_launchers_terminal();
     spaceknife_desktop::run();
 }

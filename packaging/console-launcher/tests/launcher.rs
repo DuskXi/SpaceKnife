@@ -77,27 +77,40 @@ fn help_alone_asks_for_headless_modes_help() {
 }
 
 #[test]
-fn anything_else_starts_the_window_and_returns() {
+fn anything_else_starts_the_window_and_waits_for_it_as_0_3_4_did() {
     let dir = app_folder("app", &["spaceknife-cli.exe", "SpaceKnife.exe"]);
     let record = dir.join("record.txt");
     let started = Instant::now();
     let out = Command::new(dir.join("SpaceKnife.com"))
         .args(["--updated", "x y"])
         .env("STUB_RECORD", &record)
+        .env("STUB_SLEEP_MS", "1500")
+        .env("STUB_ENV", "SPACEKNIFE_CONSOLE")
         .output()
         .unwrap();
-    // the terminal is free at once: the window's program is on its own
-    assert_eq!(out.status.code(), Some(0));
-    assert!(started.elapsed() < Duration::from_secs(20));
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while !record.is_file() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    std::thread::sleep(Duration::from_millis(200));
+    // the terminal waits for the window's program and ends as it did
+    assert!(started.elapsed() >= Duration::from_millis(1500));
+    assert_eq!(out.status.code(), Some(7));
     let text = std::fs::read_to_string(&record).unwrap();
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[0], "exe=SpaceKnife.exe");
-    assert_eq!(lines[2..], ["--updated", "x y"]);
+    // as 0.3.4 started it: its full path, then the arguments as typed
+    assert_eq!(Path::new(lines[1]), dir.join("SpaceKnife.exe"));
+    assert_eq!(lines[2..4], ["--updated", "x y"]);
+    // redirected (here: pipes): it got the handles, so its output is the launcher's, and no
+    // SPACEKNIFE_CONSOLE, which is for a terminal's console
+    assert_eq!(lines[4], "env SPACEKNIFE_CONSOLE=(unset)");
+    let shown = String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n");
+    assert_eq!(shown.trim_end(), text);
+}
+
+#[test]
+fn the_window_s_exit_code_is_the_launcher_s() {
+    let dir = app_folder("app-code", &["SpaceKnife.exe"]);
+    let (code, lines) = launch(&dir, &[]);
+    assert_eq!(code, Some(7));
+    assert_eq!(lines[0], "exe=SpaceKnife.exe");
+    assert_eq!(lines.len(), 2, "{lines:?}"); // no arguments
 }
 
 #[test]
