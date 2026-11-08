@@ -852,7 +852,8 @@ fn is_mount_dir(path: &Path) -> bool {
     let Ok(up) = std::fs::symlink_metadata(path.join("..")) else {
         return false;
     };
-    me.dev() != up.dev() || me.ino() == up.ino()
+    // a bind mount of the same file system keeps its device: its mount tells
+    me.dev() != up.dev() || me.ino() == up.ino() || super::remove::other_mount_than_parent(path)
 }
 
 #[cfg(not(any(windows, unix)))]

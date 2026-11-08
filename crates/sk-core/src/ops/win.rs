@@ -542,13 +542,38 @@ unsafe fn item_path(item: Unknown) -> Option<String> {
     }
 }
 
+/// [`item_path`] kept exactly, as a trash reference ([`super::trash::ref_of`]): the new item's
+/// name can hold a lone surrogate (the bin keeps the original extension).
+unsafe fn item_ref(item: Unknown) -> Option<String> {
+    use std::os::windows::ffi::OsStringExt;
+    if item.is_null() {
+        return None;
+    }
+    unsafe {
+        let get_display_name: unsafe extern "system" fn(Unknown, u32, *mut *mut u16) -> HRESULT =
+            method(item, 5);
+        let mut out: *mut u16 = null_mut();
+        if get_display_name(item, SIGDN_FILESYSPATH, &mut out) < 0 || out.is_null() {
+            return None;
+        }
+        let mut n = 0;
+        while *out.add(n) != 0 {
+            n += 1;
+        }
+        let os = std::ffi::OsString::from_wide(std::slice::from_raw_parts(out, n));
+        CoTaskMemFree(out as *const c_void);
+        Some(super::trash::ref_of(Path::new(&os)))
+    }
+}
+
 /// What the engine did with one item handed to [`recycle`].
 #[derive(Clone, Debug)]
 pub struct Recycled {
     pub path: String,
     /// HRESULT of the deletion (0 = done); E_ABORT when refused or cancelled
     pub hr: HRESULT,
-    /// the item's new path in the bin (`$R…`), None if not recycled
+    /// the item's new path in the bin (`$R…`, a trash reference: [`super::trash::ref_of`]),
+    /// None if not recycled
     pub recycled: Option<String>,
     /// the engine wanted to destroy it (no recycle): refused, untouched
     pub refused: bool,
@@ -745,12 +770,12 @@ unsafe extern "system" fn sink_post_delete(
         let sink = &mut *(this as *mut Sink<'_>);
         let path = item_path(item).unwrap_or_default();
         match sink.index.get(&path_key(&path)).copied() {
-            None => sink.unmatched.push((path, item_path(created))),
+            None => sink.unmatched.push((path, item_ref(created))),
             Some(i) if !sink.items[i].refused => {
                 let entry = &mut sink.items[i];
                 entry.reached = true;
                 entry.hr = hr;
-                entry.recycled = item_path(created);
+                entry.recycled = item_ref(created);
                 let snapshot = entry.clone();
                 (sink.on_item)(i, &snapshot);
             }

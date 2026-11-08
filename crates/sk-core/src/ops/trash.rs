@@ -135,9 +135,13 @@ pub const BATCH_ITEMS: usize = 64;
 /// Entries walked to tell a Linux trash's size (-1 beyond).
 pub const TRASH_USAGE_LIMIT: usize = 100_000;
 
-/// Test seams: a volume's recycle-bin settings, and the longest path the checks allow.
+/// Test seams: a volume's recycle-bin settings, the longest path the checks allow, and what a
+/// permanent deletion meets inside a folder.
 #[doc(hidden)]
 pub mod seams {
+    use std::ffi::OsString;
+    use std::path::Path;
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use parking_lot::Mutex;
@@ -147,8 +151,31 @@ pub mod seams {
     pub static BIN_SETTINGS: Mutex<Option<BinSettingsFn>> = Mutex::new(None);
     pub static MAX_PATH: AtomicUsize = AtomicUsize::new(super::WIN_MAX_PATH);
 
+    /// An entry a permanent deletion is about to open, the deleted folder itself first (tests
+    /// change the tree right then).
+    pub type EnteringFn = Arc<dyn Fn(&Path) + Send + Sync>;
+    pub static ENTERING: Mutex<Option<EnteringFn>> = Mutex::new(None);
+    /// The names listed in a folder being deleted (tests add names a file system can list but no
+    /// path can hold, as WinBtrfs shows Linux names with a backslash).
+    pub type ListedFn = Arc<dyn Fn(&Path, &mut Vec<OsString>) + Send + Sync>;
+    pub static LISTED: Mutex<Option<ListedFn>> = Mutex::new(None);
+
     pub fn max_path() -> usize {
         MAX_PATH.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn entering(folder: &Path) {
+        let f = ENTERING.lock().clone();
+        if let Some(f) = f {
+            f(folder);
+        }
+    }
+
+    pub(crate) fn listed(folder: &Path, names: &mut Vec<OsString>) {
+        let f = LISTED.lock().clone();
+        if let Some(f) = f {
+            f(folder, names);
+        }
     }
 }
 
@@ -566,84 +593,17 @@ fn remove_link(path: &Path) -> io::Result<()> {
     unlink(path).or_else(|_| std::fs::remove_dir(path))
 }
 
-fn mount_inside() -> io::Error {
-    io::Error::other(text("mount_inside"))
-}
-
-/// Delete a folder bottom-up; returns (first error, cancelled, anything deleted).
-fn remove_tree(top: &Path, cancel: Option<CancelFn<'_>>) -> (Option<io::Error>, bool, bool) {
-    let mut first: Option<io::Error> = None;
-    let mut deleted = false;
-    #[cfg(unix)]
-    let dev = {
-        use std::os::unix::fs::MetadataExt;
-        match std::fs::symlink_metadata(top) {
-            Ok(m) => m.dev(),
-            Err(e) => return (Some(e), false, false),
-        }
-    };
-    let mut stack: Vec<(PathBuf, bool)> = vec![(top.to_path_buf(), false)];
-    while let Some((folder, listed)) = stack.pop() {
-        if listed {
-            match std::fs::remove_dir(&folder) {
-                Ok(()) => deleted = true,
-                Err(e) => {
-                    first.get_or_insert(e);
-                }
-            }
-            continue;
-        }
-        if cancelled(cancel) {
-            return (first, true, deleted);
-        }
-        stack.push((folder.clone(), true));
-        let entries: Vec<PathBuf> = match std::fs::read_dir(&folder) {
-            Ok(it) => it.flatten().map(|e| e.path()).collect(),
-            Err(e) => {
-                first.get_or_insert(e);
-                continue;
-            }
-        };
-        for entry in entries {
-            let step = (|| -> io::Result<()> {
-                let meta = std::fs::symlink_metadata(&entry)?;
-                if is_link_like(&meta) {
-                    // symlink, junction: the link only, never what it points to
-                    if cfg!(windows) && super::paths::is_mount(&entry) {
-                        return Err(mount_inside());
-                    }
-                    remove_link(&entry)?;
-                    deleted = true;
-                } else if meta.is_dir() {
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::MetadataExt;
-                        if meta.dev() != dev {
-                            return Err(mount_inside());
-                        }
-                    }
-                    stack.push((entry.clone(), false));
-                } else {
-                    unlink(&entry)?;
-                    deleted = true;
-                }
-                Ok(())
-            })();
-            if let Err(e) = step {
-                first.get_or_insert(e);
-            }
-        }
-    }
-    (first, false, deleted)
-}
-
 fn delete_one(path: &str, p: &Path, cancel: Option<CancelFn<'_>>) -> OpResult {
     let run = || -> io::Result<Option<OpResult>> {
         let meta = std::fs::symlink_metadata(p)?;
         if is_link_like(&meta) {
             remove_link(p)?;
         } else if meta.is_dir() {
-            let (error, stopped, deleted) = remove_tree(p, cancel);
+            let super::remove::Removed {
+                first: error,
+                cancelled: stopped,
+                deleted,
+            } = super::remove::remove_tree(p, cancel);
             if stopped {
                 return Ok(Some(result_msg(
                     path,
@@ -679,11 +639,18 @@ fn delete_one(path: &str, p: &Path, cancel: Option<CancelFn<'_>>) -> OpResult {
 
 // --------------------------------------------------------------------------- Windows
 
-/// `$I` record → (size, deletion time as unix seconds, original path).
+/// `$I` record → (size, deletion time as unix seconds, original path as shown).
 ///
 /// Version 1 (Vista–8.1): 8-byte version, size, FILETIME, then the path in 260 UTF-16 units;
 /// version 2 (Windows 10+): the same header, a 4-byte length in units, then the path.
 pub fn parse_recycle_info(data: &[u8]) -> Result<(i64, f64, String), String> {
+    let (size, when, units) = parse_recycle_record(data)?;
+    Ok((size, when, String::from_utf16_lossy(&units)))
+}
+
+/// [`parse_recycle_info`] with the original path exactly as recorded, in UTF-16 units (a name
+/// that is not valid Unicode, a lone surrogate, comes back as it was).
+pub fn parse_recycle_record(data: &[u8]) -> Result<(i64, f64, Vec<u16>), String> {
     if data.len() < 24 {
         return Err("record too short".into());
     }
@@ -707,29 +674,100 @@ pub fn parse_recycle_info(data: &[u8]) -> Result<(i64, f64, String), String> {
         .map(|c| u16::from_le_bytes(*c))
         .take_while(|&u| u != 0)
         .collect();
-    let path = String::from_utf16_lossy(&units);
-    if path.is_empty() {
+    if units.is_empty() {
         return Err("record has no path".into());
     }
     Ok((
         size,
         (filetime - 116_444_736_000_000_000) as f64 / 1e7,
-        path,
+        units,
     ))
 }
 
-/// `$R…` path in the bin → its `$I…` record.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// `$R…` path in the bin (a reference, [`ref_of`]) → its `$I…` record (a reference).
+#[cfg(windows)]
 fn info_of(recycled: &str) -> String {
-    let p = Path::new(recycled);
-    let name = p
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let p = path_of_ref(recycled);
+    let name: Vec<u16> = p
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
+        .map(|n| n.encode_wide().collect())
         .unwrap_or_default();
-    let rest: String = name.chars().skip(2).collect();
-    p.with_file_name(format!("$I{rest}"))
-        .to_string_lossy()
-        .into_owned()
+    let info: Vec<u16> = "$I"
+        .encode_utf16()
+        .chain(name.into_iter().skip(2))
+        .collect();
+    ref_of(&p.with_file_name(std::ffi::OsString::from_wide(&info)))
+}
+
+/// Marks a trash reference spelled out unit by unit ([`ref_of`]); no path starts with a NUL.
+const EXACT_REF: &str = "\u{0}exact:";
+
+/// A path as a trash reference (what [`restore`] takes): the path itself where it is valid
+/// Unicode; else spelled out exactly (Windows: its UTF-16 units, elsewhere its bytes, in hex),
+/// so that a name with a lone surrogate or bytes that are not UTF-8 is found again. References
+/// stay in the backend (front ends get task ids).
+pub fn ref_of(p: &Path) -> String {
+    if let Some(s) = p.to_str() {
+        return s.to_string();
+    }
+    #[cfg(windows)]
+    let hex: String = {
+        use std::os::windows::ffi::OsStrExt;
+        p.as_os_str()
+            .encode_wide()
+            .map(|u| format!("{u:04x}"))
+            .collect()
+    };
+    #[cfg(unix)]
+    let hex: String = {
+        use std::os::unix::ffi::OsStrExt;
+        p.as_os_str()
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    };
+    #[cfg(not(any(windows, unix)))]
+    let hex: String = p.to_string_lossy().into_owned();
+    format!("{EXACT_REF}{hex}")
+}
+
+/// The path a trash reference names ([`ref_of`]).
+pub fn path_of_ref(r: &str) -> PathBuf {
+    let Some(hex) = r.strip_prefix(EXACT_REF) else {
+        return PathBuf::from(r);
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        let units: Option<Vec<u16>> = (0..hex.len() / 4)
+            .map(|i| {
+                hex.get(i * 4..i * 4 + 4)
+                    .and_then(|h| u16::from_str_radix(h, 16).ok())
+            })
+            .collect();
+        match units {
+            Some(u) if hex.len() % 4 == 0 => PathBuf::from(std::ffi::OsString::from_wide(&u)),
+            _ => PathBuf::from(r),
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let bytes: Option<Vec<u8>> = (0..hex.len() / 2)
+            .map(|i| {
+                hex.get(i * 2..i * 2 + 2)
+                    .and_then(|h| u8::from_str_radix(h, 16).ok())
+            })
+            .collect();
+        match bytes {
+            Some(b) if hex.len() % 2 == 0 => PathBuf::from(std::ffi::OsString::from_vec(b)),
+            _ => PathBuf::from(r),
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
+    PathBuf::from(r)
 }
 
 /// The result of a failed shell deletion.
@@ -899,7 +937,7 @@ fn match_unmatched(
     let mut found = HashMap::new();
     for (reported, recycled) in unmatched {
         let Some(recycled) = recycled else { continue };
-        let original = std::fs::read(info_of(recycled))
+        let original = std::fs::read(path_of_ref(&info_of(recycled)))
             .ok()
             .and_then(|d| parse_recycle_info(&d[..d.len().min(1 << 16)]).ok())
             .map(|r| r.2)
@@ -1104,12 +1142,14 @@ fn win_trash(
 fn win_restore(r: &str) -> io::Result<OpResult> {
     use super::paths::nt_normcase;
     use super::win;
-    let info = super::paths::absolute(Path::new(r));
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let info = super::paths::absolute(&path_of_ref(r));
     let folder = info.parent().map(Path::to_path_buf).unwrap_or_default();
-    let name = info
+    let name_units: Vec<u16> = info
         .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
+        .map(|n| n.encode_wide().collect())
         .unwrap_or_default();
+    let name = String::from_utf16_lossy(&name_units);
     let bin_dir = folder.parent().map(Path::to_path_buf).unwrap_or_default();
     let base = |p: &Path| {
         p.file_name()
@@ -1134,9 +1174,10 @@ fn win_restore(r: &str) -> io::Result<OpResult> {
     if !valid {
         return Ok(result_msg(r, OpCode::Error, text("bad_ref")));
     }
-    let original = match std::fs::read(&info) {
-        Ok(d) => match parse_recycle_info(&d[..d.len().min(1 << 16)]) {
-            Ok((_, _, p)) => p,
+    // the original path exactly as recorded (a lone surrogate stays one); shown with U+FFFD
+    let units = match std::fs::read(&info) {
+        Ok(d) => match parse_recycle_record(&d[..d.len().min(1 << 16)]) {
+            Ok((_, _, units)) => units,
             Err(_) => return Ok(result_msg(r, OpCode::Error, text("bad_ref"))),
         },
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -1144,34 +1185,36 @@ fn win_restore(r: &str) -> io::Result<OpResult> {
         }
         Err(e) => return Err(e),
     };
-    let payload = folder.join(format!("$R{}", &name[2..]));
+    let original = PathBuf::from(std::ffi::OsString::from_wide(&units));
+    let shown = String::from_utf16_lossy(&units);
+    let payload_name: Vec<u16> = "$R"
+        .encode_utf16()
+        .chain(name_units.iter().copied().skip(2))
+        .collect();
+    let payload = folder.join(std::ffi::OsString::from_wide(&payload_name));
     if std::fs::symlink_metadata(&payload).is_err() {
-        return Ok(result_msg(
-            &original,
-            OpCode::Missing,
-            text("gone_from_trash"),
-        ));
+        return Ok(result_msg(&shown, OpCode::Missing, text("gone_from_trash")));
     }
     if lexists(&original) {
-        return Ok(result(&original, OpCode::Exists));
+        return Ok(result(&shown, OpCode::Exists));
     }
-    if let Some(parent) = Path::new(&original).parent() {
+    if let Some(parent) = original.parent() {
         std::fs::create_dir_all(parent)?;
     }
     // MoveFileEx without REPLACE_EXISTING: never overwrites
-    if let Err(e) = rename_noreplace(&payload, Path::new(&original)) {
+    if let Err(e) = rename_noreplace(&payload, &original) {
         if e.kind() == io::ErrorKind::AlreadyExists {
-            return Ok(result(&original, OpCode::Exists));
+            return Ok(result(&shown, OpCode::Exists));
         }
-        return Ok(os_error(&original, &e));
+        return Ok(os_error(&shown, &e));
     }
     if let Err(e) = std::fs::remove_file(&info) {
         // Explorer drops a record whose $R is gone; nothing is lost
         tracing::warn!("restore: could not remove {}: {e}", info.display());
     }
     let folder_now = std::fs::metadata(&original).is_ok_and(|m| m.is_dir());
-    win::notify_changed(&original, folder_now);
-    Ok(OpResult::new(&original, OpCode::Ok, text("restored"), r))
+    win::notify_changed(&shown, folder_now);
+    Ok(OpResult::new(&shown, OpCode::Ok, text("restored"), r))
 }
 
 /// Rename that fails with `AlreadyExists` instead of replacing `dst`.
@@ -1215,21 +1258,25 @@ pub fn rename_noreplace(src: &Path, dst: &Path) -> io::Result<()> {
     }
 }
 
+/// `p` as Win32 must get it (the `\\?\` prefix where [`names::long_path`] puts one), its own
+/// units kept exactly (a lone surrogate stays one), NUL-terminated.
 #[cfg(windows)]
 fn wide_os(p: &Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
     let s = p.to_string_lossy();
+    let units: Vec<u16> = p.as_os_str().encode_wide().collect();
     let long = names::long_path(&s);
-    if long.len() != s.len() {
-        return std::ffi::OsStr::new(&long)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-    }
-    p.as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect()
+    let prefixed: Vec<u16> = if long.len() == s.len() {
+        units
+    } else if long.starts_with("\\\\?\\UNC\\") && units.starts_with(&[92, 92]) {
+        "\\\\?\\UNC\\"
+            .encode_utf16()
+            .chain(units[2..].iter().copied())
+            .collect()
+    } else {
+        "\\\\?\\".encode_utf16().chain(units).collect()
+    };
+    prefixed.into_iter().chain(std::iter::once(0)).collect()
 }
 
 /// A no-replace rename: Some(result), or None when this file system cannot.
@@ -1658,13 +1705,37 @@ pub mod fd {
                     _ => return os_error(path, &e),
                 }
             }
-            return OpResult::new(path, OpCode::Ok, text("trashed"), &info.to_string_lossy());
+            return OpResult::new(path, OpCode::Ok, text("trashed"), &ref_of(&info));
         }
         result_msg(path, OpCode::Error, text("no_name"))
     }
 
+    /// `posixpath.normpath` on the path's own bytes (`.` dropped, `..` taken back).
+    fn normalize(p: &Path) -> PathBuf {
+        use std::path::Component;
+        let mut out: Vec<Component<'_>> = Vec::new();
+        for c in p.components() {
+            match c {
+                Component::CurDir => {}
+                Component::ParentDir => match out.last() {
+                    Some(Component::Normal(_)) => {
+                        out.pop();
+                    }
+                    Some(Component::RootDir) => {}
+                    _ => out.push(c),
+                },
+                other => out.push(other),
+            }
+        }
+        if out.is_empty() {
+            PathBuf::from(".")
+        } else {
+            out.iter().collect()
+        }
+    }
+
     pub(crate) fn fd_restore(r: &str) -> io::Result<OpResult> {
-        let info = super::super::paths::absolute(Path::new(r));
+        let info = super::super::paths::absolute(&path_of_ref(r));
         let info_dir = info.parent().map(Path::to_path_buf).unwrap_or_default();
         let root = info_dir.parent().map(Path::to_path_buf).unwrap_or_default();
         let uid = uid();
@@ -1676,8 +1747,7 @@ pub mod fd {
         if !info.to_string_lossy().ends_with(".trashinfo") || name(&info_dir) != "info" {
             return Ok(result_msg(r, OpCode::Error, text("bad_ref")));
         }
-        let norm = |p: &Path| super::super::paths::posix_normpath(&p.to_string_lossy());
-        let topdir: Option<PathBuf> = if norm(&root) == norm(&home_trash()) {
+        let topdir: Option<PathBuf> = if normalize(&root) == normalize(&home_trash()) {
             None
         } else if name(&root) == format!(".Trash-{uid}") {
             root.parent().map(Path::to_path_buf)
@@ -1704,7 +1774,7 @@ pub mod fd {
         } else {
             topdir.unwrap_or_else(|| PathBuf::from("/")).join(recorded)
         };
-        let original = PathBuf::from(norm(&original));
+        let original = normalize(&original);
         let original_s = original.to_string_lossy().into_owned();
         let file = info
             .file_name()
