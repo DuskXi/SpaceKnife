@@ -373,6 +373,22 @@ fn confirm_of(state: &Value) -> Value {
         .collect()
 }
 
+/// A basket state without what other disk activity changes between two reads of it: each
+/// volume's free space (it must be a size within the volume's, then it is left out). Everything
+/// else as it is: the items, their ids and revisions, the volumes and what the basket frees there.
+fn steady(state: &Value) -> Value {
+    let mut state = state.clone();
+    for v in state["volumes"].as_array_mut().expect("volumes") {
+        let (free, total) = (v["free"].as_i64(), v["total"].as_i64());
+        assert!(
+            matches!((free, total), (Some(f), Some(t)) if (0..=t).contains(&f)),
+            "{v}"
+        );
+        v["free"] = Value::Null;
+    }
+    state
+}
+
 /// `confirm` names each item as the dialog showed it (`rev`): those run, not what another session
 /// put beside them meanwhile.
 #[tokio::test]
@@ -518,7 +534,7 @@ async fn basket_changed_says_what_the_basket_holds_now() {
         .await;
     assert_eq!(e.code, -32014, "{e:?}");
     let told = e.data.as_ref().expect("the basket as it is now")["state"].clone();
-    assert_eq!(told, now, "{e:?}");
+    assert_eq!(steady(&told), steady(&now), "{e:?}"); // free space aside: the disk is shared
     assert_eq!(told["items"].as_array().unwrap().len(), 1);
     assert_eq!(told["items"][0]["name"], "sub");
     // confirmed as told, it runs
