@@ -233,7 +233,7 @@
    }
   },
   {
-   "i": 21,
+   "i": 22,
    "call": "system.info",
    "result": {
     "server": {
@@ -251,7 +251,7 @@
    }
   },
   {
-   "i": 22,
+   "i": 23,
    "call": "session.hello",
    "error": {
     "code": -32600,
@@ -259,7 +259,7 @@
    }
   },
   {
-   "i": 24,
+   "i": 25,
    "call": "visual.list",
    "result": {
     "visuals": [
@@ -303,7 +303,7 @@
    }
   },
   {
-   "i": 25,
+   "i": 26,
    "call": "system.info",
    "result": {
     "sessions": 2

@@ -44,26 +44,7 @@
        {
         "path": "$ROOT/small",
         "node": "@$ROOT/small",
-        "whole_volume": false,
-        "volume": {
-         "cluster_size": "number",
-         "device": "string",
-         "free": "number",
-         "fs_type": "string",
-         "is_remote": "bool",
-         "is_removable": "bool",
-         "is_system": "bool",
-         "label": "string",
-         "media": "string",
-         "mount_point": "string",
-         "note": "string",
-         "reason": "string",
-         "remote_path": "string",
-         "reserved": "number",
-         "serial": "string",
-         "total": "number",
-         "used": "number"
-        }
+        "whole_volume": false
        }
       ],
       "items": 8,
@@ -87,7 +68,6 @@
       "fallback": "",
       "mft_available": false,
       "paused": false,
-      "io": null,
       "monitor": {
        "state": "running",
        "detail": "",
@@ -174,26 +154,7 @@
        {
         "path": "$ROOT/small",
         "node": "@$ROOT/small",
-        "whole_volume": false,
-        "volume": {
-         "cluster_size": "number",
-         "device": "string",
-         "free": "number",
-         "fs_type": "string",
-         "is_remote": "bool",
-         "is_removable": "bool",
-         "is_system": "bool",
-         "label": "string",
-         "media": "string",
-         "mount_point": "string",
-         "note": "string",
-         "reason": "string",
-         "remote_path": "string",
-         "reserved": "number",
-         "serial": "string",
-         "total": "number",
-         "used": "number"
-        }
+        "whole_volume": false
        }
       ],
       "items": 28,
@@ -217,7 +178,6 @@
       "fallback": "",
       "mft_available": false,
       "paused": false,
-      "io": null,
       "monitor": {
        "state": "running",
        "detail": "",

@@ -24,6 +24,7 @@
     {"handshake": {"capabilities": ["subscriptions", "made-up.v9"]}},
     {"call": "system.ping", "params": {"payload": "parity"}},
     {"call": "system.ping", "params": {}},
+    {"sleep": 1, "note": "the raw connections above are gone before sessions are counted"},
     {"call": "system.info", "params": {}},
     {"call": "session.hello", "params": {"token": "parity-token-0123456789abcdef", "protocol": "1.1", "client": {"name": "again", "version": "0", "kind": "test"}, "capabilities": []}},
     {"connect": "old", "capabilities": ["subscriptions"]},

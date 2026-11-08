@@ -8,7 +8,7 @@
    "wait_scan": {
     "state": "done",
     "items": 319,
-    "snapshot": "$HOME/data/snapshots/tree-ca3739a7e7fd/<stamp>.sks",
+    "snapshot": "$HOME/data/snapshots/tree-7e8163c2cf4f/<stamp>.sks",
     "expected_items": null
    },
    "monotonic": true
@@ -19,7 +19,7 @@
    "result": {
     "snapshots": [
      {
-      "path": "$HOME/data/snapshots/tree-ca3739a7e7fd/<stamp>.sks",
+      "path": "$HOME/data/snapshots/tree-7e8163c2cf4f/<stamp>.sks",
       "created_at": "<time>",
       "roots": [
        "$ROOT/tree"
@@ -27,7 +27,7 @@
       "node_count": 320,
       "bytes_alloc": 1433600,
       "files": 307,
-      "file_bytes": 7028,
+      "file_bytes": 6811,
       "method": "hard"
      }
     ]
@@ -60,7 +60,7 @@
    "result": {
     "snapshots": [
      {
-      "path": "$HOME/data/snapshots/tree-ca3739a7e7fd/<stamp>.sks",
+      "path": "$HOME/data/snapshots/tree-7e8163c2cf4f/<stamp>.sks",
       "created_at": "<time>",
       "roots": [
        "$ROOT/tree"
@@ -68,7 +68,7 @@
       "node_count": 320,
       "bytes_alloc": 1433600,
       "files": 307,
-      "file_bytes": 7028,
+      "file_bytes": 6811,
       "method": "hard"
      }
     ],
@@ -103,7 +103,7 @@
       "scan_id": "<scan#2>",
       "base": {
        "kind": "snapshot",
-       "path": "$HOME/data/snapshots/tree-ca3739a7e7fd/<stamp>.sks",
+       "path": "$HOME/data/snapshots/tree-7e8163c2cf4f/<stamp>.sks",
        "created_at": "<time>",
        "bytes_alloc": 1433600,
        "node_count": 320
@@ -133,7 +133,7 @@
     "scan_id": "<scan#2>",
     "base": {
      "kind": "snapshot",
-     "path": "$HOME/data/snapshots/tree-ca3739a7e7fd/<stamp>.sks",
+     "path": "$HOME/data/snapshots/tree-7e8163c2cf4f/<stamp>.sks",
      "created_at": "<time>",
      "bytes_alloc": 1433600,
      "node_count": 320
@@ -6724,7 +6724,7 @@
     "whole": true,
     "base": {
      "kind": "snapshot",
-     "path": "$HOME/data/snapshots/tree-ca3739a7e7fd/<stamp>.sks",
+     "path": "$HOME/data/snapshots/tree-7e8163c2cf4f/<stamp>.sks",
      "created_at": "<time>",
      "bytes_alloc": 1433600,
      "node_count": 320
@@ -6799,7 +6799,7 @@
     "whole": true,
     "base": {
      "kind": "snapshot",
-     "path": "$HOME/data/snapshots/tree-ca3739a7e7fd/<stamp>.sks",
+     "path": "$HOME/data/snapshots/tree-7e8163c2cf4f/<stamp>.sks",
      "created_at": "<time>",
      "bytes_alloc": 1433600,
      "node_count": 320

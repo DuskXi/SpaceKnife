@@ -709,15 +709,16 @@ fn glob_match(pattern: &str, path: &str) -> bool {
 
 fn set_times(p: &Path, created: Option<f64>, accessed: f64, modified: f64) {
     let at = |t: f64| SystemTime::UNIX_EPOCH + Duration::from_secs_f64(t.max(0.0));
-    let mut times = std::fs::FileTimes::new()
+    let times = std::fs::FileTimes::new()
         .set_accessed(at(accessed))
         .set_modified(at(modified));
     #[cfg(windows)]
     {
         use std::os::windows::fs::{FileTimesExt, OpenOptionsExt};
-        if let Some(c) = created {
-            times = times.set_created(at(c));
-        }
+        let times = match created {
+            Some(c) => times.set_created(at(c)),
+            None => times,
+        };
         // FILE_WRITE_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS (folders too)
         let f = std::fs::OpenOptions::new()
             .access_mode(0x100)
@@ -1850,7 +1851,13 @@ impl<'a> Run<'a> {
                 }
             }
         }
+        // close and wait for the server's side of it (as websockets' close() does): the session
+        // is gone before the next step counts sessions
         let _ = sink.send(Message::Close(None)).await;
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(Ok(_)) = stream.next().await {}
+        })
+        .await;
         Value::Object(out)
     }
 }

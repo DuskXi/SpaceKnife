@@ -116,8 +116,10 @@ Step errors (timeouts, a closed connection, a missing saved field) are recorded 
 `normalize.json`, applied to every result and event (and in the replayer, rule for rule):
 
 - dropped keys: timing (`elapsed_s`, `rate`, `byte_rate`, `remaining_s`, `layout_ms`), `pid`,
-  `schema_hash`, `request_id`, `current_path`, the volume's `free`/`used`; inside `monitor` its
-  counters; in a server info (`name` + `platform` + `python`/`rust`) `python`, `rust`, `version`;
+  `schema_hash`, `request_id`, `current_path`, `free`/`used`, and `volume` and `io` (this
+  machine's disk and its load: a replay on another machine differs; the live-only `volume.list` /
+  `io.status` shapes cover them); inside `monitor` its counters; in a server info (`name` +
+  `platform` + `python`/`rust`) `python`, `rust`, `version`;
 - `time_keys` (and any string that is an ISO date-time): checked to be a time, then `<time>`;
 - ids by first appearance: `session_id`, `scan_id`, `view_id`, `sub`, `compare_id`, `task_id`,
   basket item ids → `<scan#1>` …; any string equal to a known id too (`view:<view#1>` streams);
@@ -126,7 +128,6 @@ Step errors (timeouts, a closed connection, a missing saved field) are recorded 
   `@small:` / `@more:` / `@free` / `@unknown` for synthetic blocks;
 - paths: the run's folders → `$ROOT`, `$HOME`, `$TMP` (also with `/`, JSON-escaped, and the WSL
   form `/mnt/c/…`), then `\` → `/` on Windows; snapshot time stamps → `<stamp>`;
-- `volume` and `io` objects (this machine's disks) → their shapes;
 - floats equal within a relative 1e-9 (`<f4` columns 1e-6).
 
 Binary frames are decoded to `{stream, layout, seq, final, count, columns: {name: {dtype, values}},

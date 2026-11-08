@@ -12,12 +12,14 @@
     "request_id",
     "current_path",
     "free",
-    "used"
+    "used",
+    "volume",
+    "io"
   ],
   "drop_in": {
     "monitor": ["events", "changes", "overflows", "pending", "last_apply_ms"]
   },
-  "shape_keys": ["volume", "io"],
+  "shape_keys": [],
   "server_info_drop": ["python", "rust", "version"],
   "server_info_marker": ["name", "platform"],
   "time_keys": [

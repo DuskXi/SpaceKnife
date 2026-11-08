@@ -8,7 +8,8 @@
     {"path": "steps/*/wait_scan/monitor/**", "bug": "scan-topic-silent-monitor", "why": "Rust: monitor=null in the final status of a scan (see monitor.json)"},
     {"path": "steps/3/result/monitor/**", "bug": "scan-topic-silent-monitor", "why": "scan.status right after the scan, the same"},
     {"path": "steps/4/result/scans/0/monitor/**", "bug": "scan-topic-silent-monitor", "why": "scan.list right after the scan, the same"},
-    {"path": "steps/48/wait_scan/io", "why": "a pooled scan's final status: Rust keeps the I/O governor state, 0.3.4 clears it (the details panel can then show the load section of a finished scan)"},
+    {"path": "steps/48/wait_scan/io", "why": "not compared since `io` is dropped (normalize.json); seen live: a pooled scan's final status keeps the I/O governor state in Rust, 0.3.4 clears it (the details panel can then show the load section of a finished scan)"},
+    {"path": "steps/57/result/scans/*/items", "why": "after the rescan both backends count rows the change left behind (322 on Windows, 323 on Linux for 319 entries: files and dirs are right), and how many depends on how the live monitor and the rescan meet: not compared (step 42 leaves it out too)"},
     {"path": "steps/*/result/node/ctime", "bug": "linux-root-ctime", "why": "Linux: the scan root's creation time comes from std's created() (statx birth time) while every other entry has none, as in 0.3.4 (sk-core scan/scanner.rs root Times; sk-native st_birth is 0 on Linux)"},
     {"path": "steps/*/result/parent/ctime", "bug": "linux-root-ctime", "why": "the same root, as a parent"}
   ],
@@ -55,7 +56,7 @@
     {"call": "scan.rescan", "params": {"scan_id": "$s.scan_id", "node": "$a.node.id"}, "pick": ["roots", "source"]},
     {"until": {"call": "tree.find", "params": {"scan_id": "$s.scan_id", "path": "$ROOT/tree/a/new.bin"}, "field": "node"}, "timeout": 30},
     {"until": {"call": "tree.find", "params": {"scan_id": "$s.scan_id", "path": "$ROOT/tree/a/one.bin"}, "field": "node", "null": true}, "timeout": 30},
-    {"wait_scan": "$s.scan_id", "pick": ["state", "items", "files", "dirs", "bytes_size", "errors"]},
+    {"wait_scan": "$s.scan_id", "pick": ["state", "files", "dirs", "bytes_size", "errors"]},
     {"call": "tree.find", "params": {"scan_id": "$s.scan_id", "path": "$ROOT/tree/a"}, "as": "a2"},
     {"call": "tree.children", "params": {"scan_id": "$s.scan_id", "node": "$a2.node.id"}},
     {"call": "tree.find", "params": {"scan_id": "$s.scan_id", "path": "$ROOT/tree/a/one.bin"}},

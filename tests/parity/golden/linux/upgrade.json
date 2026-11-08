@@ -746,7 +746,7 @@
    "result": {
     "snapshots": [
      {
-      "path": "$HOME/data/snapshots/tree-42322b905451/<stamp>.sks",
+      "path": "$HOME/data/snapshots/tree-eb738cc9f01b/<stamp>.sks",
       "created_at": "<time>",
       "roots": [
        "$ROOT/tree"
@@ -754,7 +754,7 @@
       "node_count": 320,
       "bytes_alloc": 1433600,
       "files": 307,
-      "file_bytes": 7018,
+      "file_bytes": 6724,
       "method": "hard"
      }
     ]
@@ -6943,7 +6943,7 @@
     "cache_dir": "$HOME/cache",
     "cache_bytes": 0,
     "snapshots_dir": "$HOME/data/snapshots",
-    "snapshots_bytes": 7018,
+    "snapshots_bytes": 6724,
     "snapshot_count": 1,
     "saved_tags": 1
    }
@@ -6954,7 +6954,7 @@
    "result": {
     "snapshots": [
      {
-      "path": "$HOME/data/snapshots/tree-42322b905451/<stamp>.sks",
+      "path": "$HOME/data/snapshots/tree-eb738cc9f01b/<stamp>.sks",
       "created_at": "<time>",
       "roots": [
        "$ROOT/tree"
@@ -6962,7 +6962,7 @@
       "node_count": 320,
       "bytes_alloc": 1433600,
       "files": 307,
-      "file_bytes": 7018,
+      "file_bytes": 6724,
       "method": "hard"
      }
     ],
@@ -6987,26 +6987,7 @@
      {
       "path": "$ROOT/tree",
       "node": "@$ROOT/tree",
-      "whole_volume": false,
-      "volume": {
-       "cluster_size": "number",
-       "device": "string",
-       "free": "number",
-       "fs_type": "string",
-       "is_remote": "bool",
-       "is_removable": "bool",
-       "is_system": "bool",
-       "label": "string",
-       "media": "string",
-       "mount_point": "string",
-       "note": "string",
-       "reason": "string",
-       "remote_path": "string",
-       "reserved": "number",
-       "serial": "string",
-       "total": "number",
-       "used": "number"
-      }
+      "whole_volume": false
      }
     ]
    }

@@ -1,7 +1,7 @@
 {
  "version": 1,
  "feed": "{json:$FEED}",
- "checked_at": "2026-11-08T03:40:22.173350Z",
+ "checked_at": "2026-11-08T04:01:39.487495Z",
  "failed_at": null,
  "etag": "\"parity-1\"",
  "releases": [
