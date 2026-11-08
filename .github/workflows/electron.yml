@@ -3,26 +3,36 @@ name: Electron shell build
 # The Electron shell's installers (docs/packaging.md; the shell is apps/electron-shell): the Windows
 # installer (electron-builder's NSIS, the same appId, uninstall entry, folder and shortcuts as 0.3.4,
 # so that 0.3.4's silent update and both per-user and all-users installs carry on), and for Linux
-# the AppImage and the rpm (RHEL 9 has no WebKitGTK 4.1 for the Tauri app). All under 0.3.4's file
+# the AppImage and the rpm (RHEL 9 has no WebKitGTK 4.1 for the Tauri app) and the portable copies
+# for x64 and arm64 (what every 0.3.4 portable copy on Linux updates to, RHEL 9 ones included; the
+# Tauri app's own Linux portable copy has a name of its own, portable.yml). All under 0.3.4's file
 # names, the update check's contract (crates/sk-core update asset_templates, Shell::Electron):
 #
-#   SpaceKnife-<v>-Setup-x64.exe, SpaceKnife-<v>-x86_64.AppImage (+ .zsync), spaceknife-<v>.x86_64.rpm
+#   SpaceKnife-<v>-Setup-x64.exe, SpaceKnife-<v>-x86_64.AppImage (+ .zsync), spaceknife-<v>.x86_64.rpm,
+#   SpaceKnife-<v>-linux-<x64|arm64>-portable.tar.gz (+ SHA256SUMS-portable-linux-<arch>.txt)
 #
 # What the shell's own build has to leave, by contract with this workflow: `pnpm run package` in
-# apps/electron-shell (after the interface and spaceknife-cli are built, below) puts those files in
-# target/electron-shell/dist/ (electron-builder.yml directories.output); the app it packs starts its spaceknife-cli serve with SPACEKNIFE_SHELL=electron
+# apps/electron-shell (after the interface and spaceknife-cli are built, below; on the ARM runner
+# `scripts/package.mjs --linux dir --arm64`, the unpacked app only) puts those files in
+# target/electron-shell/dist/ (electron-builder.yml directories.output; no publish target, so no
+# update information whatever token the job has), and `pnpm run package:portable` packs the
+# unpacked Linux app as the portable copy in target/electron-shell/portable/ (with the swap helper
+# resources/backend/spaceknife-backend and a data folder); the app it packs starts its spaceknife-cli serve with SPACEKNIFE_SHELL=electron
 # (the backend then picks the Electron shell's files) and, when SPACEKNIFE_READY_FILE is set (the
 # tests), with --ready-file "$SPACEKNIFE_READY_FILE"; the rpm carries
 # apps/electron-shell/build/linux/rpm-posttrans.sh as its %posttrans (electron-builder rpm.fpm: --rpm-posttrans),
 # which puts back the /usr/bin/spaceknife link 0.3.4's %postun takes away on an upgrade.
 # This workflow then writes the AppImage's update information and .zsync (tools/appimage.mjs),
 # checks the files (no build-machine home folder; glibc ≤ 2.34 for every ELF file on Linux),
-# installs, runs and uninstalls the Windows installer (packaging/nsis-e2e.mjs), and tests the update
-# from the real 0.3.4 files end to end (packaging/update-from-034.mjs): the Windows installer
-# per user and for all users, the AppImage, and the rpm in rockylinux:9. The files and their
+# installs, runs and uninstalls the Windows installer (packaging/nsis-e2e.mjs), smoke-tests the
+# portable copy (portable mode, headless mode both ways), tests its 「无缝更新」 to the next version
+# (packaging/update-e2e.mjs) and the update from the real 0.3.4 files end to end
+# (packaging/update-from-034.mjs): the Windows installer per user and for all users, the AppImage,
+# the Linux portable copy of each architecture, and the rpm in rockylinux:9. The files and their
 # checksums (SHA256SUMS-installers-electron-<target>.txt, merged into SHA256SUMS.txt by
-# tools/release.mjs) go to the run's artifacts. Started by hand, and by the Release workflow
-# (release.yml) for a release: the tag's commit and a build provenance attestation for every file.
+# tools/release.mjs; SHA256SUMS-portable-linux-<arch>.txt) go to the run's artifacts. Started by
+# hand, and by the Release workflow (release.yml) for a release: the tag's commit and a build
+# provenance attestation for every file.
 on:
   workflow_dispatch:
   workflow_call:
@@ -60,6 +70,9 @@ jobs:
             runner: windows-latest
           - target: linux-x64
             runner: ubuntu-22.04 # glibc 2.35 build host; every ELF file may need at most 2.34 (checked)
+          # the portable copy only (the installers are x64 only), built on a runner of its architecture
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
     permissions:
       contents: read
       id-token: write
@@ -84,20 +97,27 @@ jobs:
         with:
           node-version: 24
 
+      # the ARM runner may come without Rust: rustup first (as portable.yml)
       - name: Set up Rust
-        run: rustup update stable --no-self-update && rustup default stable
+        run: |
+          if command -v rustup >/dev/null; then
+            rustup update stable --no-self-update && rustup default stable
+          else
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
 
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: electron-${{ matrix.target }}
 
       # electron-builder's rpm target needs rpmbuild; zsyncmake makes the .zsync; xvfb and libfuse2
-      # run the AppImage without a display
+      # run the AppImage (and xvfb the portable copy) without a display
       - name: Install the packaging tools
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm zsync xvfb libfuse2 file
+          sudo apt-get install -y rpm zsync xvfb libfuse2 file jq
 
       # the interface (one Nuxt build for both shells) and spaceknife-cli, build paths remapped
       - name: Build the interface and spaceknife-cli
@@ -110,7 +130,25 @@ jobs:
         working-directory: apps/electron-shell
         run: |
           pnpm install --frozen-lockfile
-          pnpm run package
+          if [ "${{ matrix.target }}" = linux-arm64 ]; then
+            node scripts/package.mjs --linux dir --arm64 # the unpacked app, for the portable copy
+          else
+            pnpm run package
+          fi
+
+      # electron-builder's unpacked app (dist/linux[-arm64]-unpacked) with the swap helper and a data
+      # folder, under 0.3.4's name (scripts/portable.mjs)
+      - name: Build the portable copy
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          (cd apps/electron-shell && pnpm run package:portable)
+          mkdir -p target/electron-portable
+          version=$(jq -r .version apps/electron-shell/package.json)
+          name="SpaceKnife-$version-${{ matrix.target }}-portable.tar.gz"
+          cp "target/electron-shell/portable/$name" target/electron-portable/
+          echo "portable=target/electron-portable/$name" >> "$GITHUB_ENV"
+          ls -l target/electron-portable
 
       - name: Collect the files
         run: |
@@ -122,10 +160,12 @@ jobs:
           mkdir -p target/electron
           if [ "$RUNNER_OS" = Windows ]; then
             want=("SpaceKnife-$version-Setup-x64.exe")
-          else
+          elif [ "${{ matrix.target }}" = linux-x64 ]; then
             want=("SpaceKnife-$version-x86_64.AppImage" "spaceknife-${version/-/\~}.x86_64.rpm")
+          else
+            want=() # ARM: the portable copy only
           fi
-          for f in "${want[@]}"; do
+          for f in "${want[@]+"${want[@]}"}"; do
             [ -f "target/electron-shell/dist/$f" ] || { echo "::error::the shell's build left no target/electron-shell/dist/$f: $(ls target/electron-shell/dist)"; exit 1; }
             cp "target/electron-shell/dist/$f" target/electron/
           done
@@ -135,17 +175,24 @@ jobs:
       # AppImageUpdate reads the update information from the runtime; the .zsync is made from the
       # finished file (both before the checksum)
       - name: The AppImage's update information and .zsync
-        if: runner.os == 'Linux'
+        if: matrix.target == 'linux-x64'
         run: |
           node tools/appimage.mjs finish "target/electron/SpaceKnife-$version-x86_64.AppImage"
           node tools/appimage.mjs show "target/electron/SpaceKnife-$version-x86_64.AppImage"
 
       - name: Checksums
+        if: matrix.target != 'linux-arm64'
         working-directory: target/electron
         run: |
           set -euo pipefail
           shopt -s nullglob
           sha256sum *.exe *.AppImage *.rpm | tee "SHA256SUMS-installers-electron-${{ matrix.target }}.txt"
+
+      # the list 0.3.4 reads first for the portable copy (its words are all in the file's name)
+      - name: Checksum of the portable copy
+        if: runner.os == 'Linux'
+        working-directory: target/electron-portable
+        run: sha256sum "$(basename "$portable")" | tee "SHA256SUMS-portable-${{ matrix.target }}.txt"
 
       # what the installers install: the NSIS installer unpacked with 7-Zip, the rpm through
       # rpm2cpio, the AppImage through its own --appimage-extract. On Windows no program the
@@ -175,10 +222,39 @@ jobs:
             sudo apt-get install -y rpm2cpio cpio
             for f in target/electron/*.rpm; do mkdir -p "$u/rpm" && (cd "$u/rpm" && rpm2cpio "$root/$f" | cpio -idm --quiet); done
             for f in target/electron/*.AppImage; do (cd "$u" && "$root/$f" --appimage-extract > /dev/null && mv squashfs-root appimage); done
+            # the portable copy: its members (names, owners) and, unpacked, every ELF file in it
+            node tools/package_checks.mjs paths "$portable"
+            mkdir -p "$u/portable" && tar -xzf "$portable" -C "$u/portable"
             node tools/package_checks.mjs paths "$u"
             node tools/package_checks.mjs glibc "$u"
-            rpm -qp --qf '%{NAME} %{VERSION}\n' target/electron/*.rpm | grep -qx "spaceknife ${version/-/\~}" || { echo "::error::the rpm is not package spaceknife"; exit 1; }
+            if [ "${{ matrix.target }}" = linux-x64 ]; then
+              rpm -qp --qf '%{NAME} %{VERSION}\n' target/electron/*.rpm | grep -qx "spaceknife ${version/-/\~}" || { echo "::error::the rpm is not package spaceknife"; exit 1; }
+            fi
           fi
+
+      # what 0.3.x copies need of the portable copy: spaceknife at the top, the swap helper (a copy
+      # of spaceknife-cli) at resources/backend answering --apply-update, and the program answering
+      # the helper's --startup-check as the helper asks it (every symbol bound at once,
+      # LD_BIND_NOW; under xvfb, as in a desktop session)
+      - name: The layout 0.3.x copies update to
+        if: runner.os == 'Linux'
+        run: |
+          shopt -s nullglob
+          dir=(target/electron-unpacked/portable/*/)
+          ls "${dir[0]}" | grep -qx spaceknife || { echo "::error::no spaceknife (exactly that name) in the portable copy"; exit 1; }
+          helper=resources/backend/spaceknife-backend
+          [ -x "${dir[0]}$helper" ] || { echo "::error::no executable $helper in the portable copy"; exit 1; }
+          set +e
+          said=$("${dir[0]}$helper" --apply-update); code=$?
+          set -e
+          echo "$helper --apply-update: $said (exit $code)"
+          [ "$code" = 2 ] && echo "$said" | grep -q '"ok":false' || { echo "::error::the swap helper does not take --apply-update"; exit 1; }
+          set +e
+          said=$(LD_BIND_NOW=1 xvfb-run -a "${dir[0]}spaceknife" --startup-check); code=$?
+          set -e
+          echo "spaceknife --startup-check: $said (exit $code)"
+          [ "$code" = 0 ] && echo "$said" | grep -q '"ok":true' || { echo "::error::spaceknife does not answer the swap helper's --startup-check"; exit 1; }
+          echo "unpacked=${dir[0]}" >> "$GITHUB_ENV"
 
       - name: Install, run and uninstall (Windows installer)
         if: runner.os == 'Windows'
@@ -200,11 +276,44 @@ jobs:
           node packaging/update-from-034.mjs nsis "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" target/electron/*-Setup-x64.exe --allusers
 
       - name: Run the AppImage
-        if: runner.os == 'Linux'
+        if: matrix.target == 'linux-x64'
         run: xvfb-run -a node packaging/smoke-app.mjs --kind appimage target/electron/*.AppImage
 
-      - name: Update from 0.3.4 (AppImage)
+      # the portable copy as a user runs it: a window (minimized) that keeps its data next to it;
+      # headless mode, spaceknife-cli's and 0.3.4's `spaceknife --headless`, without a display
+      - name: Smoke test of the portable copy
         if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          xvfb-run -a node packaging/smoke-app.mjs --portable "${unpacked}spaceknife"
+          node packaging/smoke-headless.mjs "${unpacked}spaceknife-cli"
+          node packaging/smoke-headless.mjs --app-form "${unpacked}spaceknife"
+
+      # a release list on 127.0.0.1 offers the next version (this build again, and the Tauri app's
+      # copy under its name, which this one must not take); the backend finds, downloads and
+      # verifies it, the new version's spaceknife-cli --apply-update swaps the files
+      - name: Update end to end (the portable copy to the next version)
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        run: xvfb-run -a node packaging/update-e2e.mjs "$portable"
+
+      # the real 0.3.4 portable copy of this architecture (checked against the v0.3.4 release's own
+      # checksums and its build provenance), its own 「无缝更新」, to this one
+      - name: Update from 0.3.4 (portable)
+        if: runner.os == 'Linux'
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          old="SpaceKnife-0.3.4-${{ matrix.target }}-portable.tar.gz"
+          mkdir -p "$RUNNER_TEMP/v034"
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir "$RUNNER_TEMP/v034" --pattern "$old" --pattern "SHA256SUMS-portable-${{ matrix.target }}.txt" --clobber
+          (cd "$RUNNER_TEMP/v034" && sha256sum -c "SHA256SUMS-portable-${{ matrix.target }}.txt")
+          gh attestation verify "$RUNNER_TEMP/v034/$old" --repo DuskXi/SpaceKnife
+          machine=$([[ "${{ matrix.target }}" == *arm64 ]] && echo arm64 || echo x64)
+          xvfb-run -a node packaging/update-from-034.mjs portable "$RUNNER_TEMP/v034/$old" "$portable" --expect-machine "$machine"
+
+      - name: Update from 0.3.4 (AppImage)
+        if: matrix.target == 'linux-x64'
         timeout-minutes: 25
         run: |
           set -euo pipefail
@@ -215,7 +324,7 @@ jobs:
           xvfb-run -a node packaging/update-from-034.mjs appimage "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-x86_64.AppImage" target/electron/*.AppImage
 
       - name: Attest the files
-        if: inputs.attest
+        if: inputs.attest && matrix.target != 'linux-arm64'
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -224,7 +333,14 @@ jobs:
             target/electron/*.AppImage.zsync
             target/electron/*.rpm
 
+      - name: Attest the portable copy
+        if: inputs.attest && runner.os == 'Linux'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: target/electron-portable/*-portable.tar.gz
+
       - uses: actions/upload-artifact@v7
+        if: matrix.target != 'linux-arm64'
         with:
           name: SpaceKnife-electron-${{ matrix.target }}
           path: |
@@ -233,6 +349,16 @@ jobs:
             target/electron/*.AppImage.zsync
             target/electron/*.rpm
             target/electron/SHA256SUMS-installers-electron-*.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Linux'
+        with:
+          name: SpaceKnife-electron-portable-${{ matrix.target }}
+          path: |
+            target/electron-portable/*-portable.tar.gz
+            target/electron-portable/SHA256SUMS-portable-*.txt
           if-no-files-found: error
           retention-days: 14
 

@@ -3,8 +3,9 @@ name: Release
 # Publishes a release from CI: no file goes through anyone's computer (docs/packaging.md「发布」).
 # A signed tag vX.Y.Z on GitHub (signed locally: CI never holds the key) builds every file from that
 # tag with the Portable, macOS and Electron shell build workflows (the Tauri app's portable archives,
-# deb and disk images; the Electron shell's Windows installer, AppImage and rpm), each attesting
-# where its files were built and testing their update from the real 0.3.4 files; tools/release.mjs
+# deb and disk images; the Electron shell's Windows installer, AppImage, rpm and the Linux portable
+# copies under 0.3.4's name), each attesting where its files were built and testing their update
+# from the real 0.3.4 files; tools/release.mjs
 # then checks every checksum and that exactly the release's files are there (0.3.4's names, which
 # crates/sk-core/src/update asset_templates looks for), merges the installer checksums into
 # SHA256SUMS.txt, and fills the notes in release-notes/X.Y.Z.md (sizes, links to the build runs);

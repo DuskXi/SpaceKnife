@@ -6,14 +6,19 @@ name: Portable build
 # arm64, each built on a runner of its architecture (apps/desktop `pnpm bundle --no-bundle`, build
 # paths remapped, then `pnpm bundle:portable`) — and, with "installers", the deb (`pnpm bundle
 # --bundles deb`, repacked under 0.3.4's package name spaceknife by tools/deb.mjs). The Windows
-# installer, the AppImage and the rpm are the Electron shell's (electron.yml). Each archive is
-# checked (no build-machine home folder in any file, glibc ≤ 2.34 on Linux:
-# tools/package_checks.mjs), unpacked again and smoke-tested in portable mode and in headless mode,
-# and its 「无缝更新」 is tested end to end twice: from this build to the next version
-# (packaging/update-e2e.mjs) and from the real 0.3.4 portable copy of the same target, which clicks
-# its update card (packaging/update-from-034.mjs; on Windows on ARM also 0.3.4's x64 copy, which must
-# move to the arm64 build). The deb is upgraded from 0.3.4's real deb the same way. The files and
-# their checksums go to the run's artifacts, and the Release workflow publishes them (release.yml).
+# installer, the AppImage and the rpm are the Electron shell's (electron.yml), and so is the Linux
+# portable copy under 0.3.4's name (SpaceKnife-<v>-linux-<arch>-portable.tar.gz, what 0.3.4's
+# Linux copies update to, RHEL 9 ones included): the Tauri app's Linux archive is
+# SpaceKnife-<v>-linux-<arch>-tauri.tar.gz, a name 0.3.4 never takes, with its own
+# SHA256SUMS-tauri-linux-<arch>.txt. Each archive is checked (no build-machine home folder in any
+# file, glibc ≤ 2.34 on Linux: tools/package_checks.mjs), unpacked again and smoke-tested in
+# portable mode and in headless mode, and its 「无缝更新」 is tested end to end: from this build to
+# the next version (packaging/update-e2e.mjs; on Linux the release there has the Electron shell's
+# copy too, which this one must not take) and, on Windows, from the real 0.3.4 portable copy of the
+# same target, which clicks its update card (packaging/update-from-034.mjs; on Windows on ARM also
+# 0.3.4's x64 copy, which must move to the arm64 build; 0.3.4's Linux copies are electron.yml's).
+# The deb is upgraded from 0.3.4's real deb the same way. The files and their checksums go to the
+# run's artifacts, and the Release workflow publishes them (release.yml).
 # Started by hand (Actions › Portable build › Run workflow), and on dev whenever the packaging
 # changes, so it is checked before it reaches main.
 # The Release workflow (release.yml) calls it for a release: installers on, the tag's commit, and
@@ -167,7 +172,7 @@ jobs:
       - name: Unpack it again
         run: |
           shopt -s nullglob
-          archive=(target/portable/*-portable.zip target/portable/*-portable.tar.gz)
+          archive=(target/portable/*-portable.zip target/portable/*-tauri.tar.gz)
           echo "archive=${archive[0]}" >> "$GITHUB_ENV"
           mkdir -p target/portable-test
           if [ "$RUNNER_OS" = Windows ]; then
@@ -250,8 +255,11 @@ jobs:
           fi
 
       # the real 0.3.4 portable copy of this target (checked against the v0.3.4 release's own
-      # checksums and its build provenance), its own 「无缝更新」, to this build
+      # checksums and its build provenance), its own 「无缝更新」, to this build. Windows only: on
+      # Linux 0.3.4's copies update to the Electron shell's portable copy (electron.yml), never to
+      # this one (tools/compat034.mjs checks that no 0.3.4 install takes its name)
       - name: Update from 0.3.4 (portable)
+        if: runner.os == 'Windows'
         timeout-minutes: 25
         run: |
           set -euo pipefail
@@ -261,11 +269,7 @@ jobs:
           (cd "$RUNNER_TEMP/v034" && sha256sum -c "SHA256SUMS-portable-${{ matrix.target }}.txt")
           gh attestation verify "$RUNNER_TEMP/v034/$old" --repo DuskXi/SpaceKnife
           machine=$([[ "${{ matrix.target }}" == *arm64 ]] && echo arm64 || echo x64)
-          if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a node packaging/update-from-034.mjs portable "$RUNNER_TEMP/v034/$old" "$archive" --expect-machine "$machine"
-          else
-            node packaging/update-from-034.mjs portable "$RUNNER_TEMP/v034/$old" "$archive" --expect-machine "$machine"
-          fi
+          node packaging/update-from-034.mjs portable "$RUNNER_TEMP/v034/$old" "$archive" --expect-machine "$machine"
 
       # Windows on ARM: 0.3.4's x64 copy (run emulated) takes the arm64 build, as its update.py
       # asset_templates says, and runs native afterwards
@@ -279,9 +283,13 @@ jobs:
           (cd "$RUNNER_TEMP/v034" && sha256sum -c SHA256SUMS-portable-win-x64.txt)
           node packaging/update-from-034.mjs portable "$RUNNER_TEMP/v034/$old" "$archive" --expect-machine arm64
 
+      # the list the release publishes it in (tools/release.mjs expected): the Tauri app's Linux
+      # archive has its own, whose words ("tauri") are in no 0.3.4 file name
       - name: Checksum
         working-directory: target/portable
-        run: sha256sum "$(basename "$archive")" | tee "SHA256SUMS-portable-${{ matrix.target }}.txt"
+        run: |
+          kind=$([ "$RUNNER_OS" = Linux ] && echo tauri || echo portable)
+          sha256sum "$(basename "$archive")" | tee "SHA256SUMS-$kind-${{ matrix.target }}.txt"
 
       # Tauri names the package space-knife; the release's is 0.3.4's spaceknife (tools/deb.mjs)
       - name: The deb under 0.3.4's name
@@ -327,7 +335,7 @@ jobs:
         with:
           subject-path: |
             target/portable/*-portable.zip
-            target/portable/*-portable.tar.gz
+            target/portable/*-tauri.tar.gz
 
       - name: Attest the deb
         if: inputs.attest && inputs.installers && matrix.installer
@@ -350,7 +358,8 @@ jobs:
           name: SpaceKnife-portable-${{ matrix.target }}
           path: |
             target/portable/*-portable.zip
-            target/portable/*-portable.tar.gz
+            target/portable/*-tauri.tar.gz
             target/portable/SHA256SUMS-portable-*.txt
+            target/portable/SHA256SUMS-tauri-*.txt
           if-no-files-found: error
           retention-days: 14
