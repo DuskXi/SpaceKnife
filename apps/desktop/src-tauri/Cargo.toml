@@ -33,6 +33,8 @@ percent-encoding = "2"
 sk-server = { workspace = true }
 sk-core = { workspace = true }
 tracing = { workspace = true }
+# 0.3.4's headless launch forms run spaceknife-cli's own command line (cli.rs)
+clap = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

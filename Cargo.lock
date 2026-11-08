@@ -4057,6 +4057,7 @@ dependencies = [
 name = "spaceknife-desktop"
 version = "0.3.5"
 dependencies = [
+ "clap",
  "percent-encoding",
  "serde",
  "serde_json",

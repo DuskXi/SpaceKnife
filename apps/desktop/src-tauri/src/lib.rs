@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 pub mod backend;
+pub mod cli;
 pub mod commands;
 pub mod events;
 pub mod files;
@@ -27,10 +28,17 @@ pub fn portable_dir() -> Option<&'static Path> {
     PORTABLE.get().map(PathBuf::as_path)
 }
 
+/// SPACEKNIFE_SHELL: which shell runs the backend (its update checks pick that shell's release files;
+/// the Electron shell passes `electron`).
+pub const SHELL: &str = "tauri";
+
 /// A portable copy keeps its data next to the executable (on macOS next to the app bundle, also
 /// when macOS runs a translocated copy of it): SPACEKNIFE_HOME points there for the whole process
-/// (the backend included). Call first thing in main, before any thread starts.
+/// (the backend included). The backend in this process learns the shell from SPACEKNIFE_SHELL.
+/// Call first thing in main, before any thread starts.
 pub fn prepare_environment() {
+    // SAFETY: called from main before the runtime or any other thread exists
+    unsafe { std::env::set_var("SPACEKNIFE_SHELL", SHELL) };
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
