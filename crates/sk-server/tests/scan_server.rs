@@ -129,7 +129,14 @@ async fn snapshot_list_and_load() {
     let again = c
         .ok("scan.start", json!({"roots": [facts.root], "workers": 0}))
         .await;
-    assert_eq!(again["expected_items"], status["items"]);
+    // the items of the tree the snapshot holds, not the status' `items` (the store's rows: live
+    // monitoring may list the new folders again right after the scan, see
+    // expected_items_ignore_partial_snapshots)
+    assert_eq!(
+        again["expected_items"],
+        facts.files + facts.dirs + 1,
+        "{status}"
+    );
     let done = wait_final(&c, again["scan_id"].as_str().unwrap(), true).await;
     assert_eq!(done["progress"], 1.0);
     assert!(done["rate"].as_f64().unwrap() > 0.0);
