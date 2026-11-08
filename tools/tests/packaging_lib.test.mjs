@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { alternativesGroup, isElectron, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, uiIn, watchSwap } from "../../packaging/lib.mjs";
+import { alternativesGroup, isElectron, notOwned, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, treeOf, uiIn, watchSwap } from "../../packaging/lib.mjs";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "sk-packaging-lib-"));
 const line = (msg) => `2026-11-08 10:00:00 ${msg}\n`;
@@ -107,6 +107,36 @@ test("links are compared by their target", (t) => {
     symlinkSync(target, join(d, root, "Current"));
   }
   assert.deepEqual(treeDiff(join(d, "a"), join(d, "b")).different, ["Current (link to Versions/B, want Versions/A)"]);
+});
+
+test("what a package does not own in its folder is found: the folders its removal leaves, files made later", () => {
+  const d = tmp();
+  try {
+    const root = join(d, "SpaceKnife");
+    const ui = join(root, "resources", "ui");
+    mkdirSync(ui, { recursive: true });
+    writeFileSync(join(root, "spaceknife"), "x");
+    writeFileSync(join(ui, "index.html"), "x");
+    // a package that lists its files only (0.3.4's rpm): its folders stay after a removal
+    const files = new Set([join(root, "spaceknife"), join(ui, "index.html")]);
+    assert.deepEqual(notOwned(root, files), [`dir ${root}`, `dir ${join(root, "resources")}`, `dir ${ui}`]);
+    // one that owns its folders: nothing, until a file is made there or another's folder is left
+    const all = new Set([...files, root, join(root, "resources"), ui]);
+    assert.deepEqual(notOwned(root, all), []);
+    mkdirSync(join(root, "resources", "backend", "_internal"), { recursive: true });
+    writeFileSync(join(root, "core"), "x");
+    if (process.platform !== "win32") symlinkSync("/etc", join(root, "etc")); // not followed
+    assert.deepEqual(notOwned(root, all), [
+      `file ${join(root, "core")}`,
+      ...(process.platform !== "win32" ? [`link ${join(root, "etc")}`] : []),
+      `dir ${join(root, "resources", "backend")}`,
+      `dir ${join(root, "resources", "backend", "_internal")}`,
+    ]);
+    assert.deepEqual(treeOf(join(d, "nothing")), []);
+    assert.deepEqual(notOwned(join(d, "nothing"), all), []);
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
 });
 
 test("the interface and the shell are found wherever a kind of portable copy keeps them", () => {

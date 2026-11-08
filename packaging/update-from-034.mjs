@@ -30,8 +30,10 @@
 // candidate has — SpaceKnife.com on Windows, the Electron shell's own files in its Linux portable
 // copy — is the candidate's), nsis (one uninstall entry, the same folder, the shortcuts, data kept
 // on uninstall), appimage (the file is the candidate, no .new), deb / rpm (one package, the old
-// /opt/SpaceKnife gone, /usr/bin/spaceknife is the new program, one desktop entry, a clean
-// removal), dmg (bundle id, version, executable, signature).
+// /opt/SpaceKnife gone, /usr/bin/spaceknife is the new program, one desktop entry; the rpm: all
+// that is in /opt/SpaceKnife is the package's, its folders too, after each transaction and while
+// the app runs; the app quit as a user quits it, then a clean removal, whatever is left listed),
+// dmg (bundle id, version, executable, signature).
 //
 // On a failure or a timeout it prints what there is to know (the swap's log as last read, its
 // plan, the updates and app folders, the processes still running from the test's folders, the new
@@ -51,9 +53,11 @@ import http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { MAC, WIN, alternativesGroup, appProcessOf, fail, hello, helperIn, isElectron, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, uiIn, unpack, until, watchSwap } from "./lib.mjs";
+import { MAC, WIN, alternativesGroup, appProcessOf, fail, hello, helperIn, isElectron, notOwned, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, treeOf, uiIn, unpack, until, watchSwap } from "./lib.mjs";
 
 const OLD = "0.3.4";
+/** Where the deb and the rpm put the program (0.3.4's and the new ones). */
+const PACKAGE_ROOTS = ["/opt/SpaceKnife", "/usr/bin/spaceknife", "/usr/lib/spaceknife"];
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
 const option = (name) => {
@@ -604,7 +608,7 @@ async function packaged(kind) {
   };
   const tool = kind === "deb" ? ["apt-get", "install", "-y"] : ["dnf", "install", "-y"];
   step(`install 0.3.4's ${kind}`);
-  for (const r of ["/opt/SpaceKnife", "/usr/bin/spaceknife", "/usr/lib/spaceknife"]) roots.add(r);
+  for (const r of PACKAGE_ROOTS) roots.add(r);
   sh([...sudo, ...tool, oldPath], `installing 0.3.4's ${kind}`);
   const query = () =>
     kind === "deb"
@@ -632,6 +636,7 @@ async function packaged(kind) {
     if (alt) throw new Error(`the alternatives group spaceknife is left:\n${alt}`);
   } else {
     expectRpmLinks("after the upgrade");
+    expectRpmOwnsAll("after the upgrade");
   }
   const desktops = readdirSync("/usr/share/applications").filter((n) => /spaceknife/i.test(n));
   if (desktops.length !== 1 || desktops[0] !== "spaceknife.desktop") throw new Error(`desktop entries: ${desktops.join(", ")}`);
@@ -660,7 +665,9 @@ async function packaged(kind) {
     if (status.current !== NEW_VERSION || status.install_kind !== kind) throw new Error(`it says ${status.current}, ${status.install_kind}`);
     console.log(`${NEW_VERSION} runs as a ${kind} install`);
     s.close();
-    stop(info.pid, true);
+    // nothing the running app made in its folder
+    if (kind === "rpm") expectRpmOwnsAll("while it runs");
+    await quitApp(app);
   } finally {
     server.close();
   }
@@ -670,7 +677,8 @@ async function packaged(kind) {
     sh([...sudo, ...(kind === "deb" ? ["apt-get", "remove", "-y", "spaceknife"] : ["dnf", "remove", "-y", "spaceknife"])], "removing");
     for (const p of [bin, "/usr/bin/spaceknife-cli"]) if (existsSync(p) || lstatSafe(p)) throw new Error(`${p} is left after the removal`);
     if (alternatives()) throw new Error("an alternatives group spaceknife is left");
-    if (existsSync("/opt/SpaceKnife")) throw new Error("/opt/SpaceKnife is left after the removal");
+    const left = treeOf("/opt/SpaceKnife").map((e) => `${e.kind} ${e.path}`);
+    if (left.length) throw new Error(`/opt/SpaceKnife is left after the removal:\n${shown(left)}`);
     expectSeeded(seeded);
   };
   remove();
@@ -681,9 +689,11 @@ async function packaged(kind) {
     step(`install ${basename(newPath)} afresh`);
     sh([...sudo, "dnf", "install", "-y", newPath], "installing afresh");
     expectRpmLinks("after a fresh install");
+    expectRpmOwnsAll("after a fresh install");
     step(`install ${basename(newPath)} over itself`);
     sh([...sudo, "dnf", "reinstall", "-y", newPath], "installing over itself");
     expectRpmLinks(`after ${NEW_VERSION} over ${NEW_VERSION}`);
+    expectRpmOwnsAll(`after ${NEW_VERSION} over ${NEW_VERSION}`);
     remove();
   }
   console.log(`\n${kind} ${OLD} -> ${NEW_VERSION}: ok`);
@@ -704,6 +714,40 @@ function expectRpmLinks(when) {
   const cli = "/usr/bin/spaceknife-cli";
   if (!lstatSafe(cli) || readlinkSync(cli) !== "/opt/SpaceKnife/spaceknife-cli") throw new Error(`${when}: ${cli}: ${lstatSafe(cli) ? readlinkSync(cli) : "missing"}`);
   console.log(`${when}: ${bin} -> /etc/alternatives/spaceknife -> ${real}; ${cli}; the alternatives group:\n${alt.trim()}`);
+}
+
+/** Everything in /opt/SpaceKnife is the installed rpm's (rpm -ql): its folders as well, which rpm
+ * removes with the package only when it owns them (0.3.4's rpm owned none: its removal, and the
+ * upgrade from it, left them behind empty); none of 0.3.4's (its Python backend's folders, which
+ * the new package's %posttrans removes: apps/electron-shell/build/linux/rpm-posttrans.sh); no file
+ * the app or a script made. */
+function expectRpmOwnsAll(when) {
+  const r = spawnSync("rpm", ["-ql", "spaceknife"], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`${when}: rpm -ql spaceknife: exit ${r.status} ${r.stderr ?? ""}`);
+  const strays = notOwned("/opt/SpaceKnife", new Set(r.stdout.split("\n").filter(Boolean)));
+  if (strays.length) throw new Error(`${when}: in /opt/SpaceKnife but not the package's (${strays.length}):\n${shown(strays)}`);
+  console.log(`${when}: everything in /opt/SpaceKnife is the package's (${treeOf("/opt/SpaceKnife").length} paths)`);
+}
+
+/** Quit the app as a user does before removing its package: SIGTERM (Electron quits as from its
+ * window, stopping its backend first; the Tauri app ends, and its backend with it), then nothing
+ * may run from the package's folders any more (zombies aside: a container's first process reaps
+ * none of the processes left to it). */
+async function quitApp(app) {
+  stop(app.pid);
+  await until(`${NEW_VERSION} to quit on SIGTERM`, () => app.exited, 60_000);
+  const left = () => processesUnder(PACKAGE_ROOTS).filter((p) => !p.cmd.startsWith("[Z]"));
+  await until("nothing to run from the package's folders", () => left().length === 0, 30_000).catch((e) => {
+    throw new Error(`${e.message}, after the app quit: ${left().map((p) => `${p.pid} ${p.cmd}`).join("; ")}`);
+  });
+  console.log(`${NEW_VERSION} quit (${JSON.stringify(app.exited)}); nothing runs from ${PACKAGE_ROOTS.join(", ")}`);
+}
+
+/** A listing, at most `max` lines of it (and how many more), indented. */
+function shown(lines, max = 80) {
+  const out = lines.slice(0, max);
+  if (lines.length > max) out.push(`… ${lines.length - max} more`);
+  return out.map((l) => `  ${l}`).join("\n");
 }
 
 /** The alternatives group spaceknife as the system shows it, or null when there is none (Debian:

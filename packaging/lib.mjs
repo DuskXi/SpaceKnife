@@ -251,6 +251,34 @@ export function treeDiff(want, have, skip = []) {
   return out;
 }
 
+/** The folder `dir` and everything under it, itself first, each as `{ path, kind }` (kind "dir",
+ * "link" or "file"; a link is not followed), names in order; [] when there is no such folder. */
+export function treeOf(dir) {
+  const out = [];
+  const walk = (path) => {
+    let s;
+    try {
+      s = lstatSync(path);
+    } catch {
+      return;
+    }
+    const kind = s.isSymbolicLink() ? "link" : s.isDirectory() ? "dir" : "file";
+    out.push({ path, kind });
+    if (kind === "dir") for (const n of readdirSync(path).sort()) walk(join(path, n));
+  };
+  walk(dir);
+  return out;
+}
+
+/** What is in the folder `dir` (treeOf) that a package does not list (`owned`: the paths `rpm -ql`
+ * prints): folders it does not own, which its removal leaves behind; files the app or a script
+ * made. As lines "<kind> <path>". */
+export function notOwned(dir, owned) {
+  return treeOf(dir)
+    .filter((e) => !owned.has(e.path))
+    .map((e) => `${e.kind} ${e.path}`);
+}
+
 /** The built interface in an unpacked portable folder, wherever its kind keeps it: next to the
  * program (the Tauri app on Windows and Linux), in resources/ (the Electron shell) or in the app
  * bundle (macOS); null when there is none. */
