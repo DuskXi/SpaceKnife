@@ -1,0 +1,20 @@
+{
+ "version": 1,
+ "tags": [
+  {
+   "root": 0,
+   "path": "code",
+   "color": "blue"
+  },
+  {
+   "root": 0,
+   "path": "docs/報告.docx",
+   "color": "yellow"
+  },
+  {
+   "root": 0,
+   "path": "photos",
+   "color": "red"
+  }
+ ]
+}

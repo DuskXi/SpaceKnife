@@ -1,0 +1,13 @@
+{
+ "version": 1,
+ "folders": [
+  {
+   "path": "/home/lenny/sk-fixture/plain/code",
+   "class": ""
+  },
+  {
+   "path": "/home/lenny/sk-fixture/plain/photos",
+   "class": "video"
+  }
+ ]
+}

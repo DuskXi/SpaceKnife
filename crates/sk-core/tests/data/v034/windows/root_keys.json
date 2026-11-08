@@ -1,0 +1,263 @@
+[
+ {
+  "roots": [
+   "C:\\"
+  ],
+  "key": "C-59d75dd6f267"
+ },
+ {
+  "roots": [
+   "c:\\"
+  ],
+  "key": "c-59d75dd6f267"
+ },
+ {
+  "roots": [
+   "C:"
+  ],
+  "key": "C-a8a3bd982a92"
+ },
+ {
+  "roots": [
+   "C:/"
+  ],
+  "key": "C-59d75dd6f267"
+ },
+ {
+  "roots": [
+   "D:\\Data"
+  ],
+  "key": "Data-801432a65c37"
+ },
+ {
+  "roots": [
+   "d:/data/"
+  ],
+  "key": "data-801432a65c37"
+ },
+ {
+  "roots": [
+   "D:\\data\\\\sub\\.\\x\\..\\y"
+  ],
+  "key": "y-b7007a3180a9"
+ },
+ {
+  "roots": [
+   "C:\\Users\\lenny"
+  ],
+  "key": "lenny-dc6339ba5037"
+ },
+ {
+  "roots": [
+   "C:\\Users\\lenny",
+   "D:\\"
+  ],
+  "key": "lenny-9b04f4bddc26"
+ },
+ {
+  "roots": [
+   "D:\\",
+   "C:\\Users\\lenny"
+  ],
+  "key": "D-9b04f4bddc26"
+ },
+ {
+  "roots": [
+   "\\\\server\\share"
+  ],
+  "key": "server_share-fe11c69712a9"
+ },
+ {
+  "roots": [
+   "\\\\server\\share\\"
+  ],
+  "key": "server_share-6f9365d12235"
+ },
+ {
+  "roots": [
+   "\\\\server\\share\\dir\\sub"
+  ],
+  "key": "sub-93cb28a6cad5"
+ },
+ {
+  "roots": [
+   "//server/share/dir"
+  ],
+  "key": "dir-242e036bf49f"
+ },
+ {
+  "roots": [
+   "\\\\?\\C:\\"
+  ],
+  "key": "C-750b6b895afd"
+ },
+ {
+  "roots": [
+   "\\\\?\\UNC\\server\\share\\x"
+  ],
+  "key": "x-02c1f725b696"
+ },
+ {
+  "roots": [
+   "\\\\.\\PhysicalDrive0"
+  ],
+  "key": "PhysicalDrive0-3e92c11e9e5f"
+ },
+ {
+  "roots": [
+   "C:foo"
+  ],
+  "key": "foo-e836025c4825"
+ },
+ {
+  "roots": [
+   "\\rooted"
+  ],
+  "key": "rooted-fae263339605"
+ },
+ {
+  "roots": [
+   "C:\\\u00c4\u00d6\u00dc\\Stra\u00dfe"
+  ],
+  "key": "Stra\u00dfe-22253ebed98c"
+ },
+ {
+  "roots": [
+   "C:\\STRASSE \u1e9e"
+  ],
+  "key": "STRASSE_\u1e9e-66f2ee648caf"
+ },
+ {
+  "roots": [
+   "C:\\\u0130stanbul"
+  ],
+  "key": "\u0130stanbul-cc2f642650de"
+ },
+ {
+  "roots": [
+   "C:\\\u039f\u0394\u03a5\u03a3\u03a3\u0395\u03a5\u03a3"
+  ],
+  "key": "\u039f\u0394\u03a5\u03a3\u03a3\u0395\u03a5\u03a3-fd0f3b744e16"
+ },
+ {
+  "roots": [
+   "C:\\\u01c5emal"
+  ],
+  "key": "\u01c5emal-5fc1272829e0"
+ },
+ {
+  "roots": [
+   "C:\\\u13a0 Cherokee"
+  ],
+  "key": "\u13a0_Cherokee-4aeb1b8a50c2"
+ },
+ {
+  "roots": [
+   "C:\\\u1c90 Mtavruli"
+  ],
+  "key": "\u1c90_Mtavruli-d26553e0ce2b"
+ },
+ {
+  "roots": [
+   "C:\\\uff21\uff22\uff23"
+  ],
+  "key": "\uff21\uff22\uff23-8d96613e3b88"
+ },
+ {
+  "roots": [
+   "C:\\\u216b roman"
+  ],
+  "key": "\u216b_roman-03c8b5e7c9b9"
+ },
+ {
+  "roots": [
+   "C:\\\u24b6 circled"
+  ],
+  "key": "circled-3eb6a0ca38f7"
+ },
+ {
+  "roots": [
+   "C:\\\u0939\u093f\u0902\u0926\u0940"
+  ],
+  "key": "\u0939__\u0926-b6418e6c1d38"
+ },
+ {
+  "roots": [
+   "C:\\cafe\u0301"
+  ],
+  "key": "cafe-82dd98c3f501"
+ },
+ {
+  "roots": [
+   "C:\\\u4e0b\u8f7d\\\u89c6\u9891"
+  ],
+  "key": "\u89c6\u9891-99309bc3b452"
+ },
+ {
+  "roots": [
+   "C:\\emoji \ud83d\ude42 x"
+  ],
+  "key": "emoji___x-ea5dcae8a44c"
+ },
+ {
+  "roots": [
+   "C:\\\u0663\u0664 digits"
+  ],
+  "key": "\u0663\u0664_digits-8c5b23f107f5"
+ },
+ {
+  "roots": [
+   "C:\\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "key": "aaaaaaaaaaaaaaaaaaaaaaaa-2ccdcd154254"
+ },
+ {
+  "roots": [
+   "C:\\___"
+  ],
+  "key": "root-43123b5fbd0d"
+ },
+ {
+  "roots": [
+   "C:\\..."
+  ],
+  "key": "root-edc39e0531ab"
+ },
+ {
+  "roots": [
+   "C:\\a b-c.d_e"
+  ],
+  "key": "a_b_c_d_e-384de80ec844"
+ },
+ {
+  "roots": [
+   "C:\\\ud835\udc00\ud835\udc01 math"
+  ],
+  "key": "\ud835\udc00\ud835\udc01_math-9a90a6a93e81"
+ },
+ {
+  "roots": [
+   "C:\\data",
+   "c:\\DATA"
+  ],
+  "key": "data-c75f66559568"
+ },
+ {
+  "roots": [
+   "C:\\x\\..\\.."
+  ],
+  "key": "root-59d75dd6f267"
+ },
+ {
+  "roots": [
+   "."
+  ],
+  "key": "root-3a52ce780950"
+ },
+ {
+  "roots": [
+   "relative\\path"
+  ],
+  "key": "path-e21f2b7cdcf0"
+ }
+]
