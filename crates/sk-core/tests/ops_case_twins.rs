@@ -23,13 +23,16 @@ use sk_store::{NodeId, Store};
 
 const WIN: bool = cfg!(windows);
 
-/// One SpaceKnife home (and on Linux one XDG data home) for this binary; the tests change a
-/// process-wide seam, so they run one at a time.
+mod exit_cleanup;
+
+/// One SpaceKnife home (and on Linux one XDG data home) for this binary, removed when it exits;
+/// the tests change a process-wide seam, so they run one at a time.
 fn setup() -> MutexGuard<'static, ()> {
     static BASE: OnceLock<PathBuf> = OnceLock::new();
     static LOCK: Mutex<()> = Mutex::new(());
     BASE.get_or_init(|| {
         let dir = tempfile::tempdir().unwrap().keep();
+        exit_cleanup::remove_at_exit(dir.clone());
         // SAFETY: set once, before the tests of this binary read the environment
         unsafe {
             std::env::set_var("SPACEKNIFE_HOME", dir.join("skhome"));

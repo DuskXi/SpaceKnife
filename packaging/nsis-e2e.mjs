@@ -121,6 +121,8 @@ if (smoke.status !== 0) fail("the installed app's smoke test failed");
   writeFileSync(mine, "the user's\n");
   writeFileSync(mineInUi, "the user's\n");
   const scratch = mkdtempSync(join(tmpdir(), "sk-nsis-e2e-"));
+  // also when a check fails: fail ends the process
+  process.once("exit", () => rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
   const ready = join(scratch, "ready.json");
   const env = { ...process.env, SPACEKNIFE_READY_FILE: ready, SPACEKNIFE_START_MINIMIZED: "1", SPACEKNIFE_HOME: join(scratch, "home") };
   run(setup, UPDATE_ARGS, "updating in place", env);

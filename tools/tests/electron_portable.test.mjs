@@ -4,14 +4,16 @@
 //   node --test "tools/tests/*.test.mjs"
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
 import { CLI, HELPER, NOTE, PROGRAM, layout, pack, portableName, unpackedDir } from "../../apps/electron-shell/scripts/portable.mjs";
 import { pattern034, portableLayoutProblems } from "../compat034.mjs";
 import { archiveEntries } from "../package_checks.mjs";
+import { tempFolders } from "./temp.mjs";
+
+const tmpFolder = tempFolders("sk-eportable-");
 
 const POSIX = process.platform !== "win32";
 
@@ -44,7 +46,7 @@ test("the name is 0.3.4's for the Linux portable copy, of either architecture", 
 });
 
 test("the folder holds the app, the swap helper 0.3.4 runs, and a data folder", () => {
-  const t = mkdtempSync(join(tmpdir(), "sk-eportable-"));
+  const t = tmpFolder();
   const folder = layout(unpacked(join(t, "linux-unpacked")), join(t, "work", portableName("0.3.5", "x64")));
   // the helper is spaceknife-cli under the name 0.3.4 looks for
   assert.equal(readFileSync(join(folder, HELPER), "utf8"), "cli");
@@ -57,7 +59,7 @@ test("the folder holds the app, the swap helper 0.3.4 runs, and a data folder", 
 
 test("the archive is what 0.3.4's 「无缝更新」 takes", (t) => {
   if (process.platform !== "linux") return t.skip("packed with GNU tar on Linux only");
-  const tmp = mkdtempSync(join(tmpdir(), "sk-eportable-"));
+  const tmp = tmpFolder();
   const name = portableName("0.3.5", "arm64");
   layout(unpacked(join(tmp, "linux-arm64-unpacked")), join(tmp, "work", name));
   const archive = pack(join(tmp, "work"), name, join(tmp, `${name}.tar.gz`));

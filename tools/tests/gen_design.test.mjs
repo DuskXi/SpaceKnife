@@ -2,14 +2,14 @@
 //   node --test "tools/tests/*.test.mjs"
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 
 import * as g from "../gen_design.mjs";
+import { tempFolders } from "./temp.mjs";
 
-const tmp = () => mkdtempSync(join(tmpdir(), "sk-gen-design-"));
+const tmp = tempFolders("sk-gen-design-");
 const write = (dir, name, data) => writeFileSync(join(dir, name), JSON.stringify(data));
 const byPath = (tokens) => Object.fromEntries(tokens.map((t) => [t.dotted, t]));
 const values = (tokens) => Object.fromEntries(tokens.map((t) => [t.dotted, t.value]));

@@ -42,7 +42,7 @@ function body(text, name) {
 const at = (lines, what) => lines.findIndex((l) => l.includes(what));
 
 test("nothing deletes a folder as a whole but the uninstaller's data and cache folders", () => {
-  const allowed = /^"\$(LOCALAPPDATA|APPDATA)\\(\$\{SK_DATA\}|\$\{BUNDLEID\}|spaceknife-electron|spaceknife-electron-updater)(\\(electron|Cache|updates))?"$/;
+  const allowed = /^"\$\{SK_(LOCALAPPDATA|APPDATA)\}\\(\$\{SK_DATA\}|\$\{BUNDLEID\}|spaceknife-electron|spaceknife-electron-updater)(\\(electron|Cache|updates))?"$/;
   const found = [];
   for (const name of readdirSync(windows).filter((n) => /\.(nsi|nsh)$/.test(n))) {
     for (const { line, inside } of codeLines(read(name))) {
@@ -51,6 +51,50 @@ test("nothing deletes a folder as a whole but the uninstaller's data and cache f
     }
   }
   assert.deepEqual(found, [], "a recursive delete outside SpaceKnife's own data folders");
+});
+
+test("the uninstaller removes SpaceKnife's own folders by 0.3.4's rules", () => {
+  // the user's own folders in the installer; only the logic test points them elsewhere
+  assert.match(helpers, /^!ifndef SK_LOCALAPPDATA\n {2}!define SK_LOCALAPPDATA "\$LOCALAPPDATA"\n!endif$/m);
+  assert.match(helpers, /^!ifndef SK_APPDATA\n {2}!define SK_APPDATA "\$APPDATA"\n!endif$/m);
+  assert.doesNotMatch(installer, /SK_(LOCAL)?APPDATA/);
+  const remove = body(helpers, "un.SkRemoveData");
+  assert.deepEqual(remove.filter((l) => /\$(LOCALAPPDATA|APPDATA)\b/.test(l)), [], "un.SkRemoveData names the shell's folders itself");
+  // electron-builder's copy of its installer goes in an update too, nothing else does
+  const update = at(remove, "${If} $UpdateMode = 1");
+  assert.ok(at(remove, 'RMDir /r "${SK_LOCALAPPDATA}\\spaceknife-electron-updater"') < update);
+  assert.equal(remove[update + 2], "Return");
+  assert.equal(remove.findIndex((l, i) => i < update && /^RMDir/.test(l) && !l.includes("spaceknife-electron-updater")), -1);
+  // %APPDATA%\SpaceKnife: when empty, and as a whole only with --delete-app-data (not the box)
+  assert.ok(at(remove, 'RMDir "${SK_APPDATA}\\${SK_DATA}"') > update);
+  const whole = remove.filter((l) => l === 'RMDir /r "${SK_APPDATA}\\${SK_DATA}"');
+  assert.equal(whole.length, 1);
+  const flag = at(remove, "${If} $SkDeleteAppData = 1");
+  assert.ok(flag > at(remove, "${If} $SkDeleteData = 1") && at(remove, 'RMDir /r "${SK_APPDATA}\\${SK_DATA}"') > flag);
+  assert.ok(at(remove, 'RMDir /r "${SK_LOCALAPPDATA}\\${SK_DATA}"') < flag);
+  // the box is $SkDeleteData only; --delete-app-data sets both, an update neither
+  assert.equal(at(body(installer, "un.SkDataPageLeave"), "SkDeleteAppData"), -1);
+  assert.equal(at(body(installer, "un.SkDataPage"), "SkDeleteAppData"), -1);
+});
+
+test("the shell's folder waits for its WebView2 processes, and only those are ended", () => {
+  const remove = body(helpers, "un.SkRemoveData");
+  const shell = 'RMDir /r "${SK_LOCALAPPDATA}\\${BUNDLEID}"';
+  const end = at(remove, "Call un.SkEndWebView2In");
+  assert.ok(at(remove, shell) >= 0 && at(remove, shell) < end, "the WebView2 processes are looked for before the folder is tried once");
+  assert.ok(remove.slice(end).includes(shell), "the folder is not tried again after them");
+  const wait = body(helpers, "un.SkEndWebView2In");
+  assert.ok(at(wait, "Sleep") >= 0 && at(wait, "StrCpy $R2 1") > at(wait, "Sleep"), "they are ended without being waited for");
+  // by name and by --user-data-dir: the folder itself or one in it, never another program's
+  const wv2 = body(helpers, "un.SkWebView2In");
+  const name = at(wv2, '${If} $4 == "msedgewebview2.exe"');
+  const dir = at(wv2, '"--user-data-dir="');
+  const inside = at(wv2, '${OrIf} $R4 == "inside"');
+  const kill = at(wv2, "TerminateProcess");
+  assert.ok(name >= 0 && name < dir && dir < inside && inside < kill);
+  assert.equal(wv2[inside - 1], '${If} $R4 == "same"');
+  assert.equal(wv2.filter((l) => l.includes("TerminateProcess")).length, 1);
+  assert.ok(at(wv2, "${If} $8 = 1") < kill && at(wv2, "${If} $8 = 1") > inside, "ended without being asked to");
 });
 
 test("the files go by name: the list an installation wrote, the next update and the uninstaller read", () => {

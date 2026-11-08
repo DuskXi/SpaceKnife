@@ -52,6 +52,7 @@ Var SkRun            ; 1: --force-run or /R: start the app after a silent instal
 Var SkRunArgs        ; /ARGS …
 Var SkKeepShortcuts  ; uninstaller: --keep-shortcuts / --updated / /UPDATE
 Var SkDeleteData     ; uninstaller: --delete-app-data or the 「你的数据」 box
+Var SkDeleteAppData  ; uninstaller: --delete-app-data itself, whatever the box says
 Var SkIsAdmin        ; 1: elevated
 Var SkOldDir         ; electron-builder (0.3.4) or forked install found in this scope
 Var SkOldKind        ; "eb" (0.3.4) | "fork" (0.3.5+) | ""
@@ -212,6 +213,7 @@ Function ${UN}SkParseFlags
   StrCpy $SkInner 0
   StrCpy $SkKeepShortcuts 0
   StrCpy $SkDeleteData 0
+  StrCpy $SkDeleteAppData 0
   ${GetParameters} $R9
   ClearErrors
   ${GetOptions} $R9 "/P" $R8
@@ -279,11 +281,13 @@ Function ${UN}SkParseFlags
   ${GetOptions} $R9 "--delete-app-data" $R8
   ${IfNot} ${Errors}
     StrCpy $SkDeleteData 1
+    StrCpy $SkDeleteAppData 1
   ${EndIf}
   ; an update keeps the shortcuts (and the data) whatever else is said
   ${If} $UpdateMode = 1
     StrCpy $SkKeepShortcuts 1
     StrCpy $SkDeleteData 0
+    StrCpy $SkDeleteAppData 0
   ${EndIf}
   ; the app starts with --updated after an update (0.3.4's StartApp did; 0.3.5 passes /ARGS)
   ${If} $UpdateMode = 1
@@ -1316,41 +1320,254 @@ Function un.SkDetectScope
   Call un.SkRestoreContext
 FunctionEnd
 
-; What SpaceKnife keeps for itself only: always gone after an uninstall (not after an update).
-; With $SkDeleteData = 1 the snapshots, settings and logs go too. The uninstalling user's folders,
-; also for a per-machine installation (installer.nsh of 0.3.4 did the same).
+; The shell's folders un.SkRemoveData works in: the uninstalling user's own (the logic test,
+; packaging/nsis-logic/logic-test.nsi, points them into its sandbox).
+!ifndef SK_LOCALAPPDATA
+  !define SK_LOCALAPPDATA "$LOCALAPPDATA"
+!endif
+!ifndef SK_APPDATA
+  !define SK_APPDATA "$APPDATA"
+!endif
+
+; PROCESSENTRY32W as an x86 NSIS reads it (dwSize; th32ProcessID at 8, szExeFile at 36)
+!if ${NSIS_PTR_SIZE} != 4
+  !error "un.SkWebView2In reads PROCESSENTRY32W as laid out in a 32-bit process"
+!endif
+!define SK_PE32W_SIZE 556
+
+; $R0 = a folder, $R2 = 1: end them -> $R1 = how many WebView2 processes (msedgewebview2.exe) run
+; with their --user-data-dir in that folder (another program's WebView2 has its own folder: never
+; touched). Registers but $R1 are kept.
+Function un.SkWebView2In
+  Push $R0
+  Push $R2
+  Push $R3
+  Push $R4
+  Push $R5
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  Push $7
+  Push $8
+  Push $9
+  StrCpy $8 $R2
+  Call un.SkNormalize
+  StrCpy $9 $R0
+  StrCpy $R8 0
+  System::Call 'kernel32::CreateToolhelp32Snapshot(i 2, i 0) p .r0' ; TH32CS_SNAPPROCESS
+  ${If} $0 P<> -1
+  ${AndIf} $9 != ""
+    System::Alloc ${SK_PE32W_SIZE}
+    Pop $1
+    System::Call '*$1(i ${SK_PE32W_SIZE})'
+    System::Call 'kernel32::Process32FirstW(p r0, p r1) i .r2'
+    ${DoWhile} $2 <> 0
+      System::Call '*$1(i, i, i .r3, p, i, i, i, i, i, &w260 .r4)'
+      ${If} $4 == "msedgewebview2.exe"
+        ; PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, else only the first
+        System::Call 'kernel32::OpenProcess(i 0x101001, i 0, i r3) p .r6'
+        ${If} $6 P= 0
+          System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i r3) p .r6'
+        ${EndIf}
+        ${If} $6 P<> 0
+          ; its command line (ProcessCommandLineInformation: a UNICODE_STRING, then the text)
+          System::Alloc 65552
+          Pop $7
+          System::Call 'ntdll::NtQueryInformationProcess(p r6, i 60, p r7, i 65536, p 0) i .r2'
+          StrCpy $5 ""
+          ${If} $2 = 0
+            System::Call '*$7(&i2 .r2, &i2, p .r5)'
+            IntPtrOp $2 $5 + $2
+            System::Call '*$2(&i2 0)'
+            System::Call 'shlwapi::StrStrIW(p r5, w "--user-data-dir=") p .r2'
+            StrCpy $5 ""
+            ${If} $2 P<> 0
+              System::Call 'kernel32::lstrcpynW(w .r5, p r2, i ${NSIS_MAX_STRLEN}) p'
+              StrCpy $5 $5 "" 16
+              ; the value: quoted, or up to the next space
+              StrCpy $2 $5 1
+              ${If} $2 == '"'
+                StrCpy $5 $5 "" 1
+                ${WordFind} "$5" '"' "+1" $5
+              ${Else}
+                ${WordFind} "$5" " " "+1" $5
+              ${EndIf}
+            ${EndIf}
+          ${EndIf}
+          System::Free $7
+          ${If} $5 != ""
+            StrCpy $R0 $5
+            Call un.SkNormalize
+            StrCpy $R2 $R0
+            StrCpy $R3 $9
+            Call un.SkRelation
+            ${If} $R4 == "same"
+            ${OrIf} $R4 == "inside"
+              IntOp $R8 $R8 + 1
+              ${If} $8 = 1
+                System::Call 'kernel32::TerminateProcess(p r6, i 1) i .r2'
+                System::Call 'kernel32::WaitForSingleObject(p r6, i 2000)'
+                ${un.SkLog} "ended msedgewebview2.exe $3 (--user-data-dir $R2): $2"
+              ${EndIf}
+            ${EndIf}
+          ${EndIf}
+          System::Call 'kernel32::CloseHandle(p r6)'
+        ${EndIf}
+      ${EndIf}
+      System::Call 'kernel32::Process32NextW(p r0, p r1) i .r2'
+    ${Loop}
+    System::Free $1
+  ${EndIf}
+  ${If} $0 P<> -1
+    System::Call 'kernel32::CloseHandle(p r0)'
+  ${EndIf}
+  StrCpy $R1 $R8
+  Pop $9
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+  Pop $R8
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R0
+FunctionEnd
+
+; WebView2 keeps the window's profile in the shell's folder ($R0: %LOCALAPPDATA%\<identifier>,
+; EBWebView), and its processes go a moment after the window that used them: up to 3 s for them
+; to go by themselves, then they are ended (un.SkWebView2In: those of this folder only). Registers
+; are kept.
+Function un.SkEndWebView2In
+  Push $R1
+  Push $R2
+  Push $R9
+  StrCpy $R9 0
+  ${Do}
+    StrCpy $R2 0
+    Call un.SkWebView2In
+    ${If} $R1 = 0
+    ${OrIf} $R9 >= 12
+      ${ExitDo}
+    ${EndIf}
+    Sleep 250
+    IntOp $R9 $R9 + 1
+  ${Loop}
+  ${If} $R1 > 0
+    StrCpy $R2 1
+    Call un.SkWebView2In
+  ${EndIf}
+  Pop $R9
+  Pop $R2
+  Pop $R1
+FunctionEnd
+
+; a line in the log for a folder un.SkRemoveData should have removed and could not
+!macro SK_UN_LOG_LEFT DIR
+  ${If} ${FileExists} "${DIR}\*.*"
+    ${un.SkLog} "un.SkRemoveData: still there: ${DIR}"
+  ${EndIf}
+!macroend
+
+; $R4 = how $INSTDIR and DIR are related (un.SkRelation: "" when neither holds the other)
+!macro SK_UN_INSTDIR_RELATION DIR
+  StrCpy $R0 $INSTDIR
+  Call un.SkNormalize
+  StrCpy $R2 $R0
+  StrCpy $R0 "${DIR}"
+  Call un.SkNormalize
+  StrCpy $R3 $R0
+  Call un.SkRelation
+!macroend
+
+; What SpaceKnife keeps for itself only, by 0.3.4's rules (its installer.nsh customUnInstall and
+; electron-builder's own --delete-app-data part). The uninstalling user's folders, also for a
+; per-machine installation (0.3.4 did the same).
+;   - always, also in an update: electron-builder's copy of its installer (0.3.4);
+;   - not in an update: 0.3.4's Chromium profile, the shell's own folders of 0.3.5+ (WebView2
+;     profile, theme.json: once the WebView2 processes of that profile are gone or ended), the
+;     backend's cache and downloaded updates; %APPDATA%\SpaceKnife itself only when nothing else
+;     is in it;
+;   - $SkDeleteData = 1 (the 「你的数据」 box, or --delete-app-data): the snapshots, settings and
+;     logs too, %LOCALAPPDATA%\SpaceKnife as a whole;
+;   - $SkDeleteAppData = 1 (--delete-app-data, whatever the box says): %APPDATA%\SpaceKnife as a
+;     whole too.
+; Never a folder the program itself is in (a pathological 0.3.4 folder choice).
 Function un.SkRemoveData
+  SetShellVarContext current
+  ${If} ${SK_LOCALAPPDATA} != ""
+    RMDir /r "${SK_LOCALAPPDATA}\spaceknife-electron-updater"
+  ${EndIf}
   ${If} $UpdateMode = 1
+    Call un.SkRestoreContext
     Return
   ${EndIf}
-  SetShellVarContext current
-  ; electron-builder's copy of its installer (0.3.4), 0.3.4's Chromium profile, the shell's own
-  ; folder of 0.3.5+ (WebView2 profile, theme.json), the backend's cache and downloaded updates
-  RMDir /r "$LOCALAPPDATA\spaceknife-electron-updater"
-  ${If} $APPDATA != ""
-    RMDir /r "$APPDATA\${SK_DATA}\electron"
-    RMDir "$APPDATA\${SK_DATA}"
-    RMDir /r "$APPDATA\spaceknife-electron"
-    RMDir /r "$APPDATA\${BUNDLEID}"
+  ${If} ${SK_APPDATA} != ""
+    RMDir /r "${SK_APPDATA}\${SK_DATA}\electron"
+    RMDir "${SK_APPDATA}\${SK_DATA}"
+    RMDir /r "${SK_APPDATA}\spaceknife-electron"
+    RMDir /r "${SK_APPDATA}\${BUNDLEID}"
   ${EndIf}
-  ${If} $LOCALAPPDATA != ""
-    RMDir /r "$LOCALAPPDATA\${BUNDLEID}"
-    RMDir /r "$LOCALAPPDATA\${SK_DATA}\Cache"
-    RMDir /r "$LOCALAPPDATA\${SK_DATA}\updates"
+  ${If} ${SK_LOCALAPPDATA} != ""
+    ; the shell's own folder: the WebView2 processes of the window that just quit can hold it a
+    ; moment longer (un.SkCloseIn waits for the app only), then up to 5 s more for the removal
+    RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
+    ${If} ${FileExists} "${SK_LOCALAPPDATA}\${BUNDLEID}\*.*"
+      StrCpy $R0 "${SK_LOCALAPPDATA}\${BUNDLEID}"
+      Call un.SkEndWebView2In
+      StrCpy $R9 0
+      ${Do}
+        RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
+        ${IfNot} ${FileExists} "${SK_LOCALAPPDATA}\${BUNDLEID}\*.*"
+        ${OrIf} $R9 >= 10
+          ${ExitDo}
+        ${EndIf}
+        Sleep 500
+        IntOp $R9 $R9 + 1
+      ${Loop}
+    ${EndIf}
+    RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\Cache"
+    RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\updates"
     ${If} $SkDeleteData = 1
-      ; never when the program itself is in there (a pathological 0.3.4 folder choice)
-      StrCpy $R0 $INSTDIR
-      Call un.SkNormalize
-      StrCpy $R2 $R0
-      StrCpy $R0 "$LOCALAPPDATA\${SK_DATA}"
-      Call un.SkNormalize
-      StrCpy $R3 $R0
-      Call un.SkRelation
+      !insertmacro SK_UN_INSTDIR_RELATION "${SK_LOCALAPPDATA}\${SK_DATA}"
       ${If} $R4 == ""
-        RMDir /r "$LOCALAPPDATA\${SK_DATA}"
-        RMDir /r "$APPDATA\${SK_DATA}"
+        RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}"
       ${EndIf}
     ${EndIf}
+  ${EndIf}
+  ${If} $SkDeleteAppData = 1
+  ${AndIf} ${SK_APPDATA} != ""
+    !insertmacro SK_UN_INSTDIR_RELATION "${SK_APPDATA}\${SK_DATA}"
+    ${If} $R4 == ""
+      RMDir /r "${SK_APPDATA}\${SK_DATA}"
+    ${EndIf}
+  ${EndIf}
+  ; what is still there of what always goes (the log: %TEMP%\SpaceKnife-install.log)
+  ${If} ${SK_LOCALAPPDATA} != ""
+    !insertmacro SK_UN_LOG_LEFT "${SK_LOCALAPPDATA}\spaceknife-electron-updater"
+    !insertmacro SK_UN_LOG_LEFT "${SK_LOCALAPPDATA}\${BUNDLEID}"
+    !insertmacro SK_UN_LOG_LEFT "${SK_LOCALAPPDATA}\${SK_DATA}\Cache"
+    !insertmacro SK_UN_LOG_LEFT "${SK_LOCALAPPDATA}\${SK_DATA}\updates"
+  ${EndIf}
+  ${If} ${SK_APPDATA} != ""
+    !insertmacro SK_UN_LOG_LEFT "${SK_APPDATA}\${SK_DATA}\electron"
+    !insertmacro SK_UN_LOG_LEFT "${SK_APPDATA}\spaceknife-electron"
+    !insertmacro SK_UN_LOG_LEFT "${SK_APPDATA}\${BUNDLEID}"
   ${EndIf}
   Call un.SkRestoreContext
 FunctionEnd

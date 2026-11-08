@@ -13,9 +13,14 @@
 // nothing outside the folder), 0.3.4's own files (SkRemove034Files) and when its uninstaller may
 // run (SkOldUninstallerUse), the WebView2 minimum (SkWebView2Minimum, with stand-ins for reading
 // and updating the runtime), shortcuts (.lnk files in the sandbox: SkMigrateShortcut's target and
-// AppUserModelID) — and that the app the installer starts gets its environment (cmd.exe stands in
-// for it: on your own desktop run this from packaging/hidden-desktop.ps1, so its console window
-// stays out of sight). Windows only; it writes in a temporary folder only, never the registry.
+// AppUserModelID), what the uninstaller removes of SpaceKnife's own folders (un.SkRemoveData, in
+// the test program's own uninstaller, with a Local and a Roaming folder in the sandbox: 0.3.4's
+// rules for an update, the 「你的数据」 box and --delete-app-data; WebView2's processes that still
+// hold the shell's folder, copies of cmd.exe under msedgewebview2.exe's name, waited for or ended,
+// another program's left alone) — and that the app the installer
+// starts gets its environment (cmd.exe stands in for it: on your own desktop run this from
+// packaging/hidden-desktop.ps1, so its console window stays out of sight). Windows only; it writes
+// in a temporary folder only, never the registry.
 //
 //   node packaging/nsis-logic.mjs [--makensis PATH] [--utils PATH] [--helpers PATH]
 //
@@ -23,8 +28,8 @@
 // %LOCALAPPDATA%\tauri\NSIS. utils.nsh: --utils, else the one `pnpm bundle` wrote next to the
 // rendered installer (target/release/nsis/x64). Exit status 1 when a case says something else.
 
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { closeSync, constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,6 +72,8 @@ function fail(message) {
 const sandbox = realpathSync.native(mkdtempSync(join(tmpdir(), "sk-nsis-logic-")));
 const exe = join(sandbox, "logic-test.exe");
 let failures = 0;
+/** Stand-ins for WebView2's processes (the "removedata" cases): ended before the sandbox goes. */
+const fakes = [];
 try {
   // ------------------------------------------------------------------ compile
   const env = { ...process.env };
@@ -80,12 +87,14 @@ try {
   const temp = join(sandbox, "temp");
   mkdirSync(temp);
   let n = 0;
-  /** One run: the case, its command line (as the process gets it, verbatim) -> Map key -> value. */
-  function run(kind, cmdline = "", extra = {}) {
+  /** One run: the case, its command line (as the process gets it, verbatim) -> Map key -> value.
+   *  `prepare(box)` runs once the case's sandbox folder is there, before the program starts. */
+  function run(kind, cmdline = "", extra = {}, program = exe, prepare = () => {}) {
     const out = join(sandbox, `out-${++n}.txt`);
     const box = join(sandbox, `box-${n}`);
     mkdirSync(box);
-    const r = spawnSync(exe, cmdline ? [cmdline] : [], {
+    prepare(box);
+    const r = spawnSync(program, cmdline ? [cmdline] : [], {
       windowsVerbatimArguments: true,
       encoding: "utf8",
       timeout: 60_000,
@@ -113,7 +122,7 @@ try {
 
   // 0.3.4's flags (v0.3.4 update.ts nsisUpdateArgs, its uninstaller's) and Tauri's; the elevated
   // copy gets the same ones, its own flag and the scope, /D= last
-  const none = { passive: "0", update: "0", noshortcut: "0", run: "0", runargs: "", scope: "", forced: "0", inner: "0", keepshortcuts: "0", deletedata: "0" };
+  const none = { passive: "0", update: "0", noshortcut: "0", run: "0", runargs: "", scope: "", forced: "0", inner: "0", keepshortcuts: "0", deletedata: "0", deleteappdata: "0" };
   const flags = [
     ["--updated /S --force-run /currentuser", { update: "1", run: "1", runargs: "--updated", scope: "user", forced: "1", keepshortcuts: "1", flag: "/currentuser", elevated: "--updated /S --force-run /currentuser --sk-elevated /currentuser" }],
     ["--updated /S --force-run /allusers", { update: "1", run: "1", runargs: "--updated", scope: "machine", forced: "1", keepshortcuts: "1", flag: "/allusers", elevated: "--updated /S --force-run /allusers --sk-elevated /allusers" }],
@@ -122,7 +131,7 @@ try {
     ["/S /R /ARGS --minimized", { run: "1", runargs: "--minimized" }],
     ["/S /P /NS", { passive: "1", noshortcut: "1" }],
     ["/S /KEEP_APP_DATA /currentuser --keep-shortcuts --updated _?=C:\\Program Files\\Space Knife", { update: "1", runargs: "--updated", scope: "user", forced: "1", keepshortcuts: "1", flag: "/currentuser" }],
-    ["/S --delete-app-data", { deletedata: "1" }],
+    ["/S --delete-app-data", { deletedata: "1", deleteappdata: "1" }],
     ["/S --updated --delete-app-data", { update: "1", runargs: "--updated", keepshortcuts: "1", deletedata: "0" }],
     ["/S /R --updated --no-desktop-shortcut", { update: "1", noshortcut: "1", run: "1", runargs: "--updated", keepshortcuts: "1" }],
     ["/s --UPDATED /r /AllUsers /D=C:\\Some Dir\\SpaceKnife", { update: "1", run: "1", runargs: "--updated", scope: "machine", forced: "1", keepshortcuts: "1", elevated: "/s --UPDATED /r /AllUsers --sk-elevated /allusers /D=C:\\Some Dir\\SpaceKnife" }],
@@ -292,6 +301,111 @@ try {
     expect("SkDropStage leaves a folder it did not make", got, { kept: "1" });
   }
   {
+    // What the uninstaller removes of SpaceKnife's own folders (un.SkRemoveData), by the rules of
+    // 0.3.4's uninstaller (v0.3.4 apps/electron/build/installer.nsh, and electron-builder's own
+    // --delete-app-data part): run in this program's uninstaller, in the sandbox's Local and
+    // Roaming folders. It deletes folders, so only with a helpers file whose un.SkRemoveData names
+    // no folder of the user's: SK_LOCALAPPDATA and SK_APPDATA, which logic-test.nsi points here.
+    const source = readFileSync(helpers, "utf8");
+    const fn = /^Function un\.SkRemoveData\r?\n([\s\S]*?)^FunctionEnd/m.exec(source);
+    const code = fn ? fn[1].split(/\r?\n/).filter((l) => !/^\s*;/.test(l)).join("\n") : "";
+    if (!fn || /\$(LOCALAPPDATA|APPDATA|PROFILE|TEMP)\b/i.test(code) || !/^!ifndef SK_LOCALAPPDATA$/m.test(source) || !/^!ifndef SK_APPDATA$/m.test(source)) {
+      throw new Error(`${helpers}: un.SkRemoveData does not work in SK_LOCALAPPDATA and SK_APPDATA only; not run (it would delete the user's own folders)`);
+    }
+    const uninstaller = join(sandbox, "logic-un.exe");
+    const { got: written } = run("uninstaller", "", { SK_LOGIC_UNINSTALLER: uninstaller });
+    if (written.get("written") !== "1" || !existsSync(uninstaller)) throw new Error("the test program wrote no uninstaller");
+    const kept = { updater: "1", cache: "1", updates: "1", snapshots: "1", settings: "1", local: "1", shell_local: "1", electron: "1", roaming: "1", roaming_other: "1", electron_old: "1", shell_roaming: "1", neighbours: "1", neighbours_roaming: "1" };
+    // an uninstall: electron-builder's copy of its installer, 0.3.4's Chromium profiles, the
+    // shell's folders, the backend's cache and updates; %APPDATA%\SpaceKnife only when empty
+    const caches = { ...kept, updater: "0", cache: "0", updates: "0", shell_local: "0", electron: "0", electron_old: "0", shell_roaming: "0" };
+    const data = { snapshots: "0", settings: "0", local: "0" };
+    const roaming = { roaming: "0", roaming_other: "0" };
+    for (const [what, cmdline, env, want] of [
+      ["an update: electron-builder's copy of its installer goes, nothing else", "/S /KEEP_APP_DATA /currentuser --keep-shortcuts --updated", { SK_LOGIC_ROAMING_OTHER: "1" }, { ...kept, updater: "0" }],
+      ["an update with --delete-app-data: the same, the data stays", "/S --updated --delete-app-data", { SK_LOGIC_ROAMING_OTHER: "1" }, { ...kept, updater: "0" }],
+      ["an uninstall: the caches go, %APPDATA%\\SpaceKnife with something else in it stays", "/S", { SK_LOGIC_ROAMING_OTHER: "1" }, caches],
+      ["an uninstall: an empty %APPDATA%\\SpaceKnife goes", "/S", {}, { ...caches, ...roaming }],
+      ["the box: the data goes, %APPDATA%\\SpaceKnife with something else in it stays", "/S", { SK_LOGIC_BOX: "1", SK_LOGIC_ROAMING_OTHER: "1" }, { ...caches, ...data }],
+      ["the box: an empty %APPDATA%\\SpaceKnife goes", "/S", { SK_LOGIC_BOX: "1" }, { ...caches, ...data, ...roaming }],
+      ["--delete-app-data: the data and %APPDATA%\\SpaceKnife as a whole", "/S --delete-app-data", { SK_LOGIC_ROAMING_OTHER: "1" }, { ...caches, ...data, ...roaming }],
+      ["--delete-app-data with the box unticked: %APPDATA%\\SpaceKnife as a whole, the data stays", "--delete-app-data", { SK_LOGIC_BOX: "0", SK_LOGIC_ROAMING_OTHER: "1" }, { ...caches, ...roaming }],
+      ["--delete-app-data, the program in the data folder: that stays", "/S --delete-app-data", { SK_LOGIC_ROAMING_OTHER: "1", SK_LOGIC_INSTDIR: "Local\\SpaceKnife\\app" }, { ...caches, ...roaming, instdir_user: "1" }],
+      ["--delete-app-data, the program in %APPDATA%\\SpaceKnife: that stays", "/S --delete-app-data", { SK_LOGIC_INSTDIR: "Roaming\\SpaceKnife\\app" }, { ...caches, ...data, roaming_other: "0", instdir_user: "1" }],
+    ]) {
+      const { got } = run("removedata", `${cmdline} _?=${sandbox}\\Programs\\SpaceKnife`, env, uninstaller);
+      expect(`un.SkRemoveData: ${what}`, got, want, ["error", "update", "deletedata", "deleteappdata"]);
+    }
+
+    // WebView2's processes of the window that just quit hold the shell's folder a moment longer:
+    // stand-ins (cmd.exe under msedgewebview2.exe's name, started with a --user-data-dir as
+    // WebView2 is) hold their folder's lockfile, opened without sharing as Chromium does. Those of
+    // the shell's folder go by themselves or are ended; another program's, and one of a folder
+    // whose name only begins like the shell's, are never touched.
+    const wv2 = join(sandbox, "wv2", "msedgewebview2.exe");
+    mkdirSync(dirname(wv2));
+    copyFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"), wv2);
+    /** A stand-in with its --user-data-dir: `/k` stays (until its stdin ends), else `/c <command> &`. */
+    const webview2 = (userData, how) => {
+      mkdirSync(userData, { recursive: true });
+      const fd = openSync(join(userData, "lockfile"), constants.O_WRONLY | constants.O_CREAT | 0x10000000); // UV_FS_O_EXLOCK: no sharing
+      try {
+        const child = spawn(wv2, [`/d ${how} rem --user-data-dir="${userData}"`], { windowsVerbatimArguments: true, windowsHide: true, stdio: ["pipe", fd, "ignore"] });
+        child.on("error", () => {});
+        fakes.push(child);
+        return child;
+      } finally {
+        closeSync(fd);
+      }
+    };
+    const alive = (child) => {
+      try {
+        process.kill(child.pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const exitCode = (child) =>
+      child.exitCode !== null ? child.exitCode : new Promise((done) => (child.once("exit", (code) => done(code)), setTimeout(() => done("running"), 5000)));
+    const flagsOf = (got, extra) => new Map([...got, ...Object.entries(extra)]);
+    {
+      let own, other, alike;
+      const { got, box } = run("removedata", `/S _?=${sandbox}\\Programs\\SpaceKnife`, { SK_LOGIC_ROAMING_OTHER: "1" }, uninstaller, (box) => {
+        own = webview2(join(box, "Local", "io.github.duskxi.spaceknife", "EBWebView"), "/k");
+        other = webview2(join(box, "Local", "Another.App", "EBWebView"), "/k");
+        alike = webview2(join(box, "Local", "io.github.duskxi.spaceknife-beta", "EBWebView"), "/k");
+      });
+      const state = {
+        own_ended: alive(own) ? "0" : "1",
+        other_running: alive(other) ? "1" : "0",
+        alike_running: alive(alike) ? "1" : "0",
+        other_folder: existsSync(join(box, "Local", "Another.App", "EBWebView", "lockfile")) ? "1" : "0",
+        alike_folder: existsSync(join(box, "Local", "io.github.duskxi.spaceknife-beta", "EBWebView", "lockfile")) ? "1" : "0",
+      };
+      expect("un.SkRemoveData: WebView2 still holds the shell's folder: its processes are ended, another program's never", flagsOf(got, state), {
+        ...caches,
+        own_ended: "1",
+        other_running: "1",
+        alike_running: "1",
+        other_folder: "1",
+        alike_folder: "1",
+      });
+      for (const child of [other, alike]) child.stdin.end();
+      await Promise.all([other, alike].map(exitCode));
+    }
+    {
+      // ends by itself after about 2 s (ping, whose output goes nowhere; the lockfile stays held
+      // until then): waited for, not ended (an ended one exits with 1)
+      let own;
+      const { got } = run("removedata", `/S _?=${sandbox}\\Programs\\SpaceKnife`, { SK_LOGIC_ROAMING_OTHER: "1" }, uninstaller, (box) => {
+        own = webview2(join(box, "Local", "io.github.duskxi.spaceknife", "EBWebView"), "/c ping -n 3 127.0.0.1 >nul &");
+      });
+      const code = await exitCode(own);
+      expect("un.SkRemoveData: WebView2 that goes by itself is waited for", flagsOf(got, { own_exit: String(code) }), { ...caches, own_exit: "0" });
+    }
+  }
+  {
     // the app the installer starts after an update gets the installer's environment (0.3.4's
     // update test passes its ready file and release list so), unless the installer runs elevated
     // through UAC: then it starts as the desktop user, with that user's own environment
@@ -304,6 +418,7 @@ try {
   failures++;
   console.log(`not ok - ${e.message}`);
 } finally {
+  for (const child of fakes) if (child.exitCode === null && child.signalCode === null) child.kill();
   rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 }
 console.log(failures ? `\nthe installer's logic: ${failures} case(s) failed` : "\nthe installer's logic: ok");

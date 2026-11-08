@@ -52,6 +52,7 @@ async function smoke(home) {
   for (const s of [proc.stdout, proc.stderr]) s.on("data", (d) => output.push(...String(d).split(/\r?\n/).filter(Boolean)));
   let exited = null;
   proc.on("exit", (code, signal) => (exited = { code, signal }));
+  let failure = null;
   try {
     const info = await until("the backend's ready file", () => {
       if (exited) throw new Error(`the app exited early: ${JSON.stringify(exited)}`);
@@ -88,12 +89,14 @@ async function smoke(home) {
     await until("the backend's address to close", async () => !(await portOpen(port)) && !pidAlive(info.pid), 15_000);
     console.log("the backend stopped with the app");
   } catch (e) {
-    fail(e.message, output);
+    failure = e;
   } finally {
     if (!exited) stop(proc.pid, true);
     await sleep(300);
-    rmSync(scratch, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   }
+  // once the scratch folder is gone (fail ends the process, which skips a finally)
+  if (failure) fail(failure.message, output);
 }
 
 if (portable) {
@@ -107,7 +110,8 @@ if (portable) {
   if (!stored.includes("desktop") && !stored.includes("electron")) fail("the app did not keep its data in the portable folder");
 } else {
   const home = mkdtempSync(join(tmpdir(), "sk-app-home-"));
+  // also when the smoke test fails: fail ends the process
+  process.once("exit", () => rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
   await smoke(home);
-  rmSync(home, { recursive: true, force: true });
 }
 console.log("packaged app: ok");

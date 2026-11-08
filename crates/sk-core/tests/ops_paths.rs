@@ -10,11 +10,14 @@ use sk_core::ops::paths::{
     System, match_rules, path_forms, path_forms_bytes, platform_rules, protected_key, reason_text,
 };
 
-/// One SpaceKnife home for this test binary (set before anything reads it).
+mod exit_cleanup;
+
+/// One SpaceKnife home for this test binary (set before anything reads it), removed when it exits.
 fn sk_home() -> &'static Path {
     static HOME: OnceLock<PathBuf> = OnceLock::new();
     HOME.get_or_init(|| {
         let dir = tempfile::tempdir().unwrap().keep();
+        exit_cleanup::remove_at_exit(dir.clone());
         let home = dir.join("skhome");
         // SAFETY: set once, before any test of this binary reads the environment
         unsafe { std::env::set_var("SPACEKNIFE_HOME", &home) };

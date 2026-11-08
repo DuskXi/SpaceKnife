@@ -5,14 +5,14 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
 
 import { alternativesGroup, isElectron, notOwned, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, treeOf, uiIn, untilUninstalled, watchSwap } from "../../packaging/lib.mjs";
+import { tempFolders } from "./temp.mjs";
 
-const tmp = () => mkdtempSync(join(tmpdir(), "sk-packaging-lib-"));
+const tmp = tempFolders("sk-packaging-lib-");
 const line = (msg) => `2026-11-08 10:00:00 ${msg}\n`;
 
 test("every way the swap's log can end is recognised", () => {

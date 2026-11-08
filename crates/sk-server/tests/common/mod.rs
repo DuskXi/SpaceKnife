@@ -19,10 +19,14 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 
+#[path = "../../../sk-core/tests/exit_cleanup/mod.rs"]
+mod exit_cleanup;
+
 pub const TOKEN: &str = "test-token-0123456789abcdef";
 
-/// A private SPACEKNIFE_HOME for this test binary (never the real user's data), Chinese source
-/// texts, and a tracing subscriber feeding the global log bus.
+/// A private SPACEKNIFE_HOME for this test binary (never the real user's data), removed when the
+/// binary exits (`exit_cleanup`), Chinese source texts, and a tracing subscriber feeding the global
+/// log bus.
 pub fn init() -> PathBuf {
     static HOME: OnceLock<PathBuf> = OnceLock::new();
     static LOG: Once = Once::new();
@@ -33,6 +37,7 @@ pub fn init() -> PathBuf {
                 .tempdir()
                 .expect("temp dir")
                 .keep();
+            exit_cleanup::remove_at_exit(dir.clone());
             // SAFETY: set once, before any server of this test binary starts
             unsafe {
                 std::env::set_var("SPACEKNIFE_HOME", &dir);

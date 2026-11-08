@@ -62,6 +62,7 @@ function get(url, headers = {}) {
   });
 }
 
+let failure = null;
 try {
   const m = await until("the address it prints", () => {
     if (exited) throw new Error(`spaceknife-cli exited with ${JSON.stringify(exited)} before printing its address`);
@@ -103,7 +104,7 @@ try {
   await until("the address to close", async () => !(await portOpen(port)), 10_000);
   console.log(`stopped (${JSON.stringify(exited)}); headless smoke test passed`);
 } catch (e) {
-  fail(e.message, output);
+  failure = e;
 } finally {
   if (!exited) stop(proc.pid, true);
   for (let i = 0; i < 10; i++) {
@@ -115,3 +116,5 @@ try {
     }
   }
 }
+// once the home is gone (fail ends the process, which skips a finally)
+if (failure) fail(failure.message, output);

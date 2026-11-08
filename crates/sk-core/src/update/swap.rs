@@ -2372,11 +2372,21 @@ mod tests {
         let plan = tree(tmp.path());
         let program = fake_new_program(&plan, "held");
         let started = Instant::now();
-        assert_eq!(check(&program), Ok("webview fake 1.0".into()));
+        let answer = check(&program);
+        let elapsed = started.elapsed();
+        // the process it left runs from the folder for 5 s: Windows deletes no program that runs,
+        // and TempDir's drop tries once
+        let end = Instant::now() + Duration::from_secs(15);
+        while std::fs::remove_dir_all(tmp.path()).is_err()
+            && tmp.path().exists()
+            && Instant::now() < end
+        {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        assert_eq!(answer, Ok("webview fake 1.0".into()));
         assert!(
-            started.elapsed() < Duration::from_secs(4),
-            "it waited for the process that holds the output: {:?}",
-            started.elapsed()
+            elapsed < Duration::from_secs(4),
+            "it waited for the process that holds the output: {elapsed:?}"
         );
     }
 

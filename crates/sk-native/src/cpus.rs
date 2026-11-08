@@ -193,8 +193,11 @@ mod tests {
 
     #[test]
     fn the_smallest_quota_along_the_path_counts() {
-        let base = std::env::temp_dir().join(format!("sk-cgroup-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let tmp = tempfile::Builder::new()
+            .prefix("sk-cgroup-")
+            .tempdir()
+            .unwrap();
+        let base = tmp.path();
         let put = |p: &str, s: &str| {
             let f = base.join(p);
             std::fs::create_dir_all(f.parent().unwrap()).unwrap();
@@ -209,11 +212,11 @@ mod tests {
         put("sys/fs/cgroup/a/cpu.max", "300000 100000\n");
         put("sys/fs/cgroup/a/b/cpu.max", "max 100000\n");
         put("sys/fs/cgroup/a/b/c/cpu.max", "550000 100000\n");
-        assert_eq!(quota(&base), Some(3)); // a's 3 CPUs, though c alone would allow 6
+        assert_eq!(quota(base), Some(3)); // a's 3 CPUs, though c alone would allow 6
         put("sys/fs/cgroup/a/cpu.max", "max 100000\n");
-        assert_eq!(quota(&base), Some(6));
+        assert_eq!(quota(base), Some(6));
         put("sys/fs/cgroup/a/b/c/cpu.max", "max 100000\n");
-        assert_eq!(quota(&base), None);
+        assert_eq!(quota(base), None);
         // a namespaced mount: the cgroup's path is below the mount's root
         put(
             "proc/self/mountinfo",
@@ -221,10 +224,9 @@ mod tests {
         );
         put("proc/self/cgroup", "0::/a/b\n");
         put("sys/fs/cgroup/b/cpu.max", "120000 100000\n");
-        assert_eq!(quota(&base), Some(2));
+        assert_eq!(quota(base), Some(2));
         // no cgroup v2 at all
         put("proc/self/cgroup", "4:cpu:/x\n");
-        assert_eq!(quota(&base), None);
-        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(quota(base), None);
     }
 }
