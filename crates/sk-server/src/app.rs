@@ -28,9 +28,10 @@ use crate::updates::UpdateService;
 use crate::views::ViewManager;
 use crate::volume_summaries::VolumeSummaries;
 
-/// Origins every server accepts besides those of [`ServeOptions::allow_origins`]: the app's own
-/// window (Tauri) and the Electron-era app scheme. A request without `Origin` (a native client)
-/// is accepted too.
+/// Origins a server on a loopback address accepts besides those of [`ServeOptions::allow_origins`]:
+/// the app's own window (Tauri) and the Electron shell's app scheme. A server on any other address
+/// doesn't take them (they would be another computer's app). A request without `Origin` (a native
+/// client) is accepted too, except in headless mode ([`crate::http::ws_origin_ok`]).
 pub const DEFAULT_ORIGINS: [&str; 4] = [
     "tauri://localhost",
     "http://tauri.localhost",
@@ -95,6 +96,12 @@ pub struct Tuning {
     pub settings_file: Option<PathBuf>,
     /// the log bus the `log` topic reads (None: [`LogBus::global`])
     pub log_bus: Option<Arc<LogBus>>,
+    /// what a server reachable from elsewhere allows each client (headless mode, an address other
+    /// than loopback: [`crate::http::serve_guarded`])
+    pub limits: crate::http::Limits,
+    /// told when a browser's WebSocket opens and closes (headless mode prints it); only for the
+    /// connections [`crate::http::serve_guarded`] serves, which know their remote address
+    pub on_socket: Option<crate::http::SocketHook>,
 }
 
 impl Default for Tuning {
@@ -109,6 +116,8 @@ impl Default for Tuning {
             routes: None,
             settings_file: None,
             log_bus: None,
+            limits: crate::http::Limits::default(),
+            on_socket: None,
         }
     }
 }
@@ -140,6 +149,7 @@ pub struct Config {
     pub install_kind: Option<String>,
     pub static_dir: Option<PathBuf>,
     pub secure: bool,
+    pub on_socket: Option<crate::http::SocketHook>,
 }
 
 /// Everything the sessions share.
@@ -330,8 +340,10 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
     let listener = tokio::net::TcpListener::bind(SocketAddr::new(opts.host, opts.port)).await?;
     let port = listener.local_addr()?.port();
 
-    let mut origins: Vec<String> = DEFAULT_ORIGINS.iter().map(|s| (*s).to_owned()).collect();
-    origins.extend(opts.allow_origins.iter().cloned());
+    let origins = allowed_origins(opts.host, &opts.allow_origins);
+    // reachable from elsewhere, or a browser's page: guarded as 0.3.4's headless server was
+    let guarded = guarded(&opts, tls.is_some());
+    let limits = tuning.limits;
     let config = Config {
         token: opts.token.clone(),
         host: opts.host,
@@ -346,6 +358,7 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
         install_kind: opts.install_kind.clone(),
         static_dir: opts.static_dir.clone(),
         secure: tls.is_some(),
+        on_socket: tuning.on_socket,
     };
     let server = build(config, tuning.routes, tuning.settings_file, tuning.log_bus);
     server.port.store(port, Ordering::SeqCst);
@@ -356,18 +369,12 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
     let task = tokio::spawn(async move {
         let stop = srv.clone();
         let shutdown = async move { stop.wait_shutdown().await };
-        let served = match tls {
-            Some(acceptor) => {
-                let l = crate::http::TlsListener::new(listener, acceptor);
-                axum::serve(l, app).with_graceful_shutdown(shutdown).await
-            }
-            None => {
-                axum::serve(listener, app)
-                    .with_graceful_shutdown(shutdown)
-                    .await
-            }
-        };
-        if let Err(e) = served {
+        if guarded {
+            crate::http::serve_guarded(listener, app, tls, limits, shutdown).await;
+        } else if let Err(e) = axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown)
+            .await
+        {
             tracing::error!("serving stopped: {e}");
         }
         srv.close().await;
@@ -381,6 +388,25 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
         server,
         task,
     })
+}
+
+/// The WebSocket origins a server on `host` lets in by name: the app's own windows only on a
+/// loopback address, and those the launcher names.
+pub fn allowed_origins(host: IpAddr, extra: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = if host.to_canonical().is_loopback() {
+        DEFAULT_ORIGINS.iter().map(|s| (*s).to_owned()).collect()
+    } else {
+        Vec::new()
+    };
+    out.extend(extra.iter().cloned());
+    out
+}
+
+/// Whether a server is served by [`crate::http::serve_guarded`]: headless mode (a browser's page,
+/// HTTPS) or an address other computers reach. The app's own backend on loopback keeps axum's
+/// server.
+pub fn guarded(opts: &ServeOptions, tls: bool) -> bool {
+    opts.static_dir.is_some() || tls || !opts.host.to_canonical().is_loopback()
 }
 
 fn build(
@@ -473,5 +499,47 @@ pub fn platform_name() -> &'static str {
         "darwin"
     } else {
         "linux"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// The app's own windows (tauri://, app://) are this computer's: not on a network address,
+    /// where they would be any other computer's app.
+    #[test]
+    fn the_apps_origins_only_on_loopback() {
+        let dev = vec!["http://localhost:3000".to_owned()];
+        for host in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {
+            let all = allowed_origins(ip(host), &dev);
+            assert!(all.iter().any(|o| o == "tauri://localhost"), "{host}");
+            assert!(all.iter().any(|o| o == "app://spaceknife"), "{host}");
+            assert!(all.contains(&dev[0]), "{host}");
+        }
+        for host in ["0.0.0.0", "::", "192.168.1.20", "fd00::5"] {
+            assert_eq!(allowed_origins(ip(host), &dev), dev, "{host}");
+        }
+    }
+
+    #[test]
+    fn what_is_guarded() {
+        let at = |host: &str, ui: bool| ServeOptions {
+            host: ip(host),
+            static_dir: ui.then(|| PathBuf::from("ui")),
+            ..ServeOptions::default()
+        };
+        // the app's backend on this computer: as before
+        assert!(!guarded(&at("127.0.0.1", false), false));
+        assert!(!guarded(&at("::1", false), false));
+        // a browser's page, HTTPS, an address others reach
+        assert!(guarded(&at("127.0.0.1", true), false));
+        assert!(guarded(&at("127.0.0.1", false), true));
+        assert!(guarded(&at("0.0.0.0", false), false));
+        assert!(guarded(&at("192.168.1.20", false), false));
     }
 }
