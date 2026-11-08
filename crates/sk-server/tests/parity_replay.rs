@@ -2162,10 +2162,10 @@ scenarios!(
     views,
 );
 
-/// 0.3.4 writes, 0.3.5 reads back: tags, palette jumps and snapshots are lost until the data
-/// migration (plan 5.5) restores 0.3.4's SHA-1 root keys and reads format-2 snapshots.
+/// 0.3.4 writes, 0.3.5 reads back (plan 5.5: 0.3.4's SHA-1 root keys, the format-2 snapshot
+/// reader): settings, classes, tags, palette jumps and update choices come back as 0.3.4 read them.
+/// The steps on 0.3.4's snapshot files are live only (parity.py run).
 #[test]
-#[ignore = "bug: 0.3.4 data is not migrated yet (plan 5.5; review #4 root key; format-2 snapshots)"]
 fn upgrade() {
     check("upgrade");
 }

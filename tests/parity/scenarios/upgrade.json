@@ -1,7 +1,6 @@
 {
   "name": "upgrade",
   "description": "0.3.4 writes, 0.3.5 reads back (plan 5.5): the reference backend sets settings, file classes, a folder class, tags, palette jumps and filters, update choices and an auto-saved snapshot in one data folder; then each backend starts on a copy of that folder and reads everything back. The reference's own read-back is the expectation.",
-  "xfail": "data migration (plan 5.5) not landed: tags, palette jumps and snapshot folders are filed by root key (SHA-1 in 0.3.4, FNV-1a now, review #4) and 0.3.4's format-2 snapshots are not read",
   "fixtures": {"tree": "standard"},
   "template_roots": [["$ROOT/tree"]],
   "setup": {

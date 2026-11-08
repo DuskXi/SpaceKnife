@@ -144,7 +144,6 @@ comparison (`steps/<step index>/…`; `*` within a segment, `**` any segments) w
 | `scan-topic-silent-monitor` | `monitor`, `scan_tree` | the final status of a scan has `monitor: null`, and applied monitor changes never push `scan.progress`: the status bar (which reads only these pushes) says live monitoring is off |
 | `import-change-order` | `settings_classes` | `settings.import` lists changes A→Z by key instead of the settings' own order |
 | `io-topic-before-registry` | `system` | an `io` subscription made right after start never delivers `io.load` |
-| `review-4-root-key` | `compare` | snapshot folders are named by an FNV-1a root key, 0.3.4 used SHA-1 (review #4) |
 | `linux-root-ctime` | `scan_tree`, `system` | Linux: the scan root gets a creation time (std's `created()`, statx) while every other entry has none, as in 0.3.4 |
 
 The others are accepted differences (texts, a sort direction nobody calls, the empty `loc` of
@@ -155,13 +154,12 @@ Rust's parameter errors).
 `upgrade` has a `setup`: the reference writes a data folder (settings, file classes, a folder class,
 tags, palette jumps and filters, update choices, an auto-saved snapshot); then the reference and
 the candidate each start on a copy of it and read everything back, and the reference's read-back is
-the expectation. It is `xfail` until the data migration (plan 5.5: SHA-1 root keys, a format-2
-snapshot reader) lands; today tags, jumps and the 0.3.4 snapshots are lost.
+the expectation. It passes since the data migration (plan 5.5: SHA-1 root keys, a format-2
+snapshot reader) landed; before it, tags, jumps and the 0.3.4 snapshots were lost.
 
 `record` also stores the data folder as `golden/<platform>/upgrade.home/`: its text files with the
 run's folders, the feed URL and the root keys (`{key:N}`, 0.3.4's SHA-1 key of the scenario's
 `template_roots`) as placeholders, so the replayer can rebuild it for any temp folder. 0.3.4's
 snapshot files are binary and name their machine's paths, so they are not stored: the steps that
-need them (snapshot list, load, expected items) are `live_only`. In the replayer the
-scenario is `#[ignore]`d with the bug named; `cargo test -p sk-server --test parity_replay --
---include-ignored upgrade` shows what is still lost.
+need them (snapshot list, load, expected items) are `live_only`: only `parity.py run` checks them,
+the replayer (`cargo test -p sk-server --test parity_replay upgrade`) checks the rest.

@@ -4,9 +4,9 @@
   "fixtures": {"tree": "standard"},
   "known_diffs": [
     {"path": "**/snapshots/*/file_bytes", "why": "snapshot format 3 (Rust) compresses differently from format 2 (0.3.4)"},
-    {"path": "steps/1/wait_scan/snapshot", "bug": "review-4-root-key", "why": "the auto-snapshot folder is named by the root key: SHA-1 in 0.3.4, FNV-1a in Rust (review #4; the data-migration workstream restores SHA-1)"},
-    {"path": "**/snapshots/*/path", "bug": "review-4-root-key", "why": "the same folder name"},
-    {"path": "**/base/path", "bug": "review-4-root-key", "why": "the same folder name, as the comparison's base"}
+    {"path": "steps/1/wait_scan/snapshot", "why": "the auto-snapshot folder is named by 0.3.4's root key (SHA-1 of the root's absolute path, restored in Rust: review #4), and the replayer's temporary root is not the one the golden was recorded on. The keys themselves are checked by sk-store's 0.3.4 fixture keys (tests/v034.rs) and the upgrade scenario"},
+    {"path": "**/snapshots/*/path", "why": "the same folder name"},
+    {"path": "**/base/path", "why": "the same folder name, as the comparison's base"}
   ],
   "normalize": {"drop_keys": ["span_s", "daily", "days_to_full"]},
   "steps": [
