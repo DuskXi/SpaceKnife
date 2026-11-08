@@ -641,13 +641,16 @@ struct Sink<'a> {
     /// the caller's callbacks: None once our reference is gone, so an engine that holds the sink
     /// longer reaches none of them
     cancel: Option<&'a (dyn Fn() -> bool + Sync)>,
-    on_item: Option<&'a mut (dyn FnMut(usize, &Recycled) + Send)>,
+    on_item: Option<OnItem<'a>>,
     cancelled: bool,
     items: Vec<Recycled>,
     index: HashMap<String, usize>,
     refused_other: Vec<String>,
     unmatched: Vec<(String, Option<String>)>,
 }
+
+/// What [`recycle`] calls right after each item was recycled.
+type OnItem<'a> = &'a mut (dyn FnMut(usize, &Recycled) + Send);
 
 type P = *mut c_void;
 type W = *const u16;
@@ -725,7 +728,7 @@ struct SinkRef<'a>(std::ptr::NonNull<Sink<'a>>);
 impl<'a> SinkRef<'a> {
     fn new(
         cancel: Option<&'a (dyn Fn() -> bool + Sync)>,
-        on_item: &'a mut (dyn FnMut(usize, &Recycled) + Send),
+        on_item: OnItem<'a>,
         items: Vec<Recycled>,
         index: HashMap<String, usize>,
     ) -> Self {
