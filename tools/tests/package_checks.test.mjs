@@ -4,19 +4,19 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import zlib from "node:zlib";
 
 import * as checks from "../package_checks.mjs";
+import { tempFolders } from "./temp.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../package_checks.mjs", import.meta.url));
 const WIN_HOME = "C:\\Users\\lenny";
 const HOME = "/home/lenny";
-const tmp = () => mkdtempSync(join(tmpdir(), "sk-checks-"));
+const tmp = tempFolders("sk-checks-");
 
 function put(folder, name, data) {
   mkdirSync(join(folder, name, ".."), { recursive: true });

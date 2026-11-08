@@ -3,13 +3,16 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { crc32, gzipSync } from "node:zlib";
 
 import * as fork from "../nsis_fork.mjs";
+import { tempFolders } from "./temp.mjs";
+
+const forkTmp = tempFolders("sk-nsis-fork-");
+const toolsTmp = tempFolders("sk-nsis-tools-");
 
 /** A tar archive (ustar headers; `long` names as a GNU long-name entry, `pax` ones as a pax path). */
 function tar(entries) {
@@ -154,7 +157,7 @@ test("the CLI's program must embed the pinned files (LF or CRLF)", () => {
 });
 
 test("check: crates.io's crate, checked against the index, against the pin", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "sk-nsis-fork-"));
+  const dir = forkTmp();
   const forkDir = join(dir, "windows");
   cpSync(fork.FORK, forkDir, { recursive: true });
   cpSync(join(fork.DESKTOP, "package.json"), join(dir, "package.json"));
@@ -276,7 +279,7 @@ test("the NSIS the bundler downloads is pinned with the SHA-1s it checks", () =>
 });
 
 test("the bundler's NSIS is laid out as it would do it, fetched with retries once, then kept", async () => {
-  const tools = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+  const tools = join(toolsTmp(), ".tauri");
   const release = nsisRelease();
   const { fetcher, asked } = releaseFetcher(release, { fails: 2 });
   assert.equal(await fork.prepareTools(tools, { pin: release.pin, fetcher, ...quietly }), "fetched");
@@ -311,7 +314,7 @@ test("a download that is not the pinned one, or that names a path outside, leave
     ["another zip", { ...release, archive: zip({ "nsis-3.13/NSIS.exe": "other" }) }, []],
     ["another plugin", { ...release, dll: Buffer.from("MZ other") }, ["nsis-3.13.zip"]],
   ]) {
-    const tools = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+    const tools = join(toolsTmp(), ".tauri");
     const { fetcher } = releaseFetcher(bad);
     await assert.rejects(fork.prepareTools(tools, { pin: release.pin, fetcher, ...quietly }), /SHA-1/, what);
     assert.ok(!existsSync(join(tools, "NSIS")), what);
@@ -320,19 +323,19 @@ test("a download that is not the pinned one, or that names a path outside, leave
     assert.deepEqual(existsSync(downloads) ? readdirSync(downloads) : [], kept, what);
   }
   const climbing = nsisRelease({ "../../outside.txt": "x" });
-  const tools = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+  const tools = join(toolsTmp(), ".tauri");
   await assert.rejects(fork.prepareTools(tools, { pin: climbing.pin, fetcher: releaseFetcher(climbing).fetcher, ...quietly }), /outside/);
   assert.ok(!existsSync(join(tools, "NSIS")));
   assert.ok(!existsSync(join(tools, "..", "outside.txt")));
   // too many failures: the last error, nothing left
-  const down = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+  const down = join(toolsTmp(), ".tauri");
   await assert.rejects(fork.prepareTools(down, { pin: release.pin, fetcher: releaseFetcher(release, { fails: 9 }).fetcher, tries: 3, ...quietly }), /HTTP 504/);
   assert.ok(!existsSync(join(down, "NSIS")));
 });
 
 test("WebView2's bootstrapper is fetched fresh, an older copy kept when that fails", async () => {
   const release = nsisRelease();
-  const tools = join(mkdtempSync(join(tmpdir(), "sk-nsis-tools-")), ".tauri");
+  const tools = join(toolsTmp(), ".tauri");
   const down = { webview2: null };
   // none there, none to be had: an error (NSIS itself is in place)
   await assert.rejects(fork.prepareTools(tools, { pin: release.pin, fetcher: releaseFetcher(release, down).fetcher, ...quietly }), /HTTP 503/);

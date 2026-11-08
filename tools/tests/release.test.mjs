@@ -4,17 +4,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import * as release from "../release.mjs";
+import { tempFolders } from "./temp.mjs";
 
 const V = "0.3.5";
 const SCRIPT = fileURLToPath(new URL("../release.mjs", import.meta.url));
-const tmp = () => mkdtempSync(join(tmpdir(), "sk-release-"));
+const tmp = tempFolders("sk-release-");
 
 function put(folder, name, data) {
   mkdirSync(folder, { recursive: true });
