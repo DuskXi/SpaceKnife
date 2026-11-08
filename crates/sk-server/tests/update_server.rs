@@ -13,7 +13,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use common::*;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sk_core::update::{Asset, Fetched, Release, UpdateError};
+use sk_core::update::{Asset, Fetched, Release, Shell, UpdateError};
 use sk_protocol::ErrorCode;
 use sk_protocol::update::InstallKind;
 use sk_server::ServerHandle;
@@ -52,7 +52,9 @@ fn fake(srv: &ServerHandle) -> FakeGh {
                 etag: Some(format!("\"{}\"", g.calls)),
             })
         }));
+    // the Windows installer comes from the Electron shell (0.3.4's name, the update contract)
     srv.server.updates.set_install_kind(InstallKind::Nsis);
+    srv.server.updates.set_shell(Shell::Electron);
     gh
 }
 
@@ -70,7 +72,7 @@ fn rel(version: &str, assets: Vec<Asset>, prerelease: bool, notes: &str) -> Rele
 }
 
 fn installer(version: &str) -> Asset {
-    let name = format!("SpaceKnife_{version}_x64-setup.exe");
+    let name = format!("SpaceKnife-{version}-Setup-x64.exe");
     Asset {
         url: format!("{PAGE}/download/v{version}/{name}"),
         name,
@@ -244,7 +246,7 @@ async fn check_levels_events_and_dismiss() {
     assert_eq!(st["latest"]["url"], format!("{PAGE}/tag/v0.3.1"));
     assert_eq!(
         st["latest"]["asset"]["name"],
-        "SpaceKnife_0.3.1_x64-setup.exe"
+        "SpaceKnife-0.3.1-Setup-x64.exe"
     );
     assert!(!st["checked_at"].is_null() && st["error"].is_null() && st["dismissed"] == false);
     {
@@ -352,7 +354,7 @@ async fn download_over_the_server() {
     let digest = hex(&payload);
     let gh = fake(&srv);
     let feed = Feed::start().await;
-    let exe = "SpaceKnife_0.4.0_x64-setup.exe";
+    let exe = "SpaceKnife-0.4.0-Setup-x64.exe";
     let sums = feed.file("/SHA256SUMS.txt", format!("{digest}  {exe}\n").as_bytes());
     gh.lock().unwrap().releases = vec![rel(
         "0.4.0",
@@ -400,8 +402,118 @@ async fn download_over_the_server() {
     stop(srv).await;
 }
 
+#[tokio::test]
+async fn a_release_without_a_checksum_for_the_file_is_not_downloaded() {
+    // review issue 10: no SHA256SUMS line for the file, nothing to check it against; the file is
+    // never fetched, so nothing unverified can be installed
+    let _s = SERIAL.lock().await;
+    let (srv, dir) = setup().await;
+    let payload = b"installer bytes ".repeat(1000);
+    let gh = fake(&srv);
+    let feed = Feed::start().await;
+    let exe = "SpaceKnife-0.4.0-Setup-x64.exe";
+    let ui = Client::open(&srv.url).await;
+    for sums in [
+        None, // no checksum file at all
+        Some(format!(
+            "{}  SpaceKnife-0.4.0-win-x64-portable.zip\n",
+            "a".repeat(64)
+        )), // not for it
+    ] {
+        let mut assets = vec![Asset {
+            name: exe.into(),
+            size: payload.len() as u64,
+            url: feed.file(&format!("/{exe}"), &payload),
+        }];
+        if let Some(text) = &sums {
+            assets.push(Asset {
+                name: "SHA256SUMS.txt".into(),
+                size: 100,
+                url: feed.file("/SHA256SUMS.txt", text.as_bytes()),
+            });
+        }
+        gh.lock().unwrap().releases = vec![rel("0.4.0", assets, false, "")];
+        ui.ok("update.check", json!({})).await;
+        ui.ok("update.download", json!({"version": "0.4.0"})).await;
+        let failed = update_event(&ui, |s| s["download"]["state"] == "failed").await;
+        assert_eq!(
+            failed["download"]["error"],
+            "这个版本的发布没有列出这个文件的 SHA-256 校验值，没有下载"
+        );
+        assert!(failed["download"]["path"].is_null());
+        assert_eq!(feed.hits(&format!("/{exe}")), 0, "{sums:?}");
+        assert!(listing(&dir.path().join("updates")).is_empty());
+    }
+    stop(srv).await;
+}
+
+#[tokio::test]
+async fn each_shell_takes_the_file_built_for_it() {
+    // the rpm and the AppImage are the Electron shell's, the deb and the portable copies Tauri's;
+    // an install never moves to a file of the other shell (SPACEKNIFE_SHELL)
+    let _s = SERIAL.lock().await;
+    let (srv, _dir) = setup().await;
+    let gh = fake(&srv);
+    let asset = |name: &str| Asset {
+        name: name.into(),
+        size: 10,
+        url: format!("{PAGE}/download/v0.4.0/{name}"),
+    };
+    gh.lock().unwrap().releases = vec![rel(
+        "0.4.0",
+        vec![
+            asset("spaceknife-0.4.0.x86_64.rpm"),
+            asset("spaceknife_0.4.0_amd64.deb"),
+            asset("SpaceKnife-0.4.0-x86_64.AppImage"),
+            asset("SpaceKnife-0.4.0-Setup-x64.exe"),
+        ],
+        false,
+        "",
+    )];
+    let ui = Client::open(&srv.url).await;
+    let updates = &srv.server.updates;
+    updates.set_platform(Some("linux".into()), Some("x86_64".into())); // the x64 packages
+    for (kind, shell, want) in [
+        (
+            InstallKind::Rpm,
+            Shell::Electron,
+            Some("spaceknife-0.4.0.x86_64.rpm"),
+        ),
+        (InstallKind::Rpm, Shell::Tauri, None),
+        (
+            InstallKind::Appimage,
+            Shell::Electron,
+            Some("SpaceKnife-0.4.0-x86_64.AppImage"),
+        ),
+        (InstallKind::Appimage, Shell::Tauri, None),
+        (
+            InstallKind::Deb,
+            Shell::Tauri,
+            Some("spaceknife_0.4.0_amd64.deb"),
+        ),
+        (InstallKind::Deb, Shell::Electron, None),
+        (
+            InstallKind::Nsis,
+            Shell::Electron,
+            Some("SpaceKnife-0.4.0-Setup-x64.exe"),
+        ),
+        (InstallKind::Nsis, Shell::Tauri, None),
+    ] {
+        updates.set_install_kind(kind);
+        updates.set_shell(shell);
+        let st = ui.ok("update.check", json!({})).await;
+        assert_eq!(st["latest"]["version"], "0.4.0");
+        assert_eq!(
+            st["latest"]["asset"]["name"].as_str(),
+            want,
+            "{kind:?} {shell:?}"
+        );
+    }
+    stop(srv).await;
+}
+
 fn published(feed: &Feed, version: &str, payload: &[u8], sums: &str) -> Release {
-    let exe = format!("SpaceKnife_{version}_x64-setup.exe");
+    let exe = format!("SpaceKnife-{version}-Setup-x64.exe");
     rel(
         version,
         vec![
@@ -435,7 +547,7 @@ async fn download_mismatch_and_cancel() {
         &feed,
         "0.4.0",
         &payload,
-        &format!("{}  SpaceKnife_0.4.0_x64-setup.exe", "0".repeat(64)),
+        &format!("{}  SpaceKnife-0.4.0-Setup-x64.exe", "0".repeat(64)),
     )];
     ui.ok("update.check", json!({})).await;
     ui.ok("update.download", json!({"version": "0.4.0"})).await;
@@ -448,8 +560,13 @@ async fn download_mismatch_and_cancel() {
     assert!(listing(&downloads).is_empty());
 
     // a download that stalls before its first byte, cancelled meanwhile
-    gh.lock().unwrap().releases = vec![published(&feed, "0.4.1", &payload, "")]; // no checksum for it
-    let exe = "/0.4.1/SpaceKnife_0.4.1_x64-setup.exe";
+    gh.lock().unwrap().releases = vec![published(
+        &feed,
+        "0.4.1",
+        &payload,
+        &format!("{}  SpaceKnife-0.4.1-Setup-x64.exe", hex(&payload)),
+    )];
+    let exe = "/0.4.1/SpaceKnife-0.4.1-Setup-x64.exe";
     let go_on = Arc::new(tokio::sync::Notify::new());
     feed.st.lock().unwrap().stall = Some((exe.to_owned(), go_on.clone()));
     let st = ui.ok("update.check", json!({})).await;
@@ -783,14 +900,26 @@ async fn downloads_by_itself_in_the_real_app() {
     let payload = b"new installer ".repeat(1000);
     let gh = fake(&srv);
     let feed = Feed::start().await;
-    let exe = "SpaceKnife_0.4.0_x64-setup.exe";
+    let exe = "SpaceKnife-0.4.0-Setup-x64.exe";
+    let sums = format!(
+        "{}  {exe}
+",
+        hex(&payload)
+    );
     gh.lock().unwrap().releases = vec![rel(
         "0.4.0",
-        vec![Asset {
-            name: exe.into(),
-            size: payload.len() as u64,
-            url: feed.file(&format!("/{exe}"), &payload),
-        }],
+        vec![
+            Asset {
+                name: exe.into(),
+                size: payload.len() as u64,
+                url: feed.file(&format!("/{exe}"), &payload),
+            },
+            Asset {
+                name: "SHA256SUMS.txt".into(),
+                size: sums.len() as u64,
+                url: feed.file("/SHA256SUMS.txt", sums.as_bytes()),
+            },
+        ],
         false,
         "",
     )];
@@ -811,7 +940,7 @@ async fn downloads_by_itself_in_the_real_app() {
         done.path.as_deref(),
         Some(dest.display().to_string().as_str())
     );
-    assert_eq!(done.verified, None);
+    assert_eq!(done.verified, Some(true));
     assert_eq!(std::fs::read(&dest).unwrap(), payload);
     // done for this version: another check does not fetch it again
     ui.ok("update.check", json!({})).await;

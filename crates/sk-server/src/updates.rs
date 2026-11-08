@@ -26,7 +26,7 @@ use chrono::{DateTime, Utc};
 use parking_lot::{Mutex, RwLock};
 use sk_core::settings::SettingsStore;
 use sk_core::tr;
-use sk_core::update::{self as update, Asset, Fetched, Release, UpdateError, UpdateState};
+use sk_core::update::{self as update, Asset, Fetched, Release, Shell, UpdateError, UpdateState};
 use sk_protocol::CAP_UPDATES;
 use sk_protocol::methods::UpdateChanged;
 use sk_protocol::update::{
@@ -58,6 +58,10 @@ struct Inner {
     file: PathBuf,
     updates_dir: PathBuf,
     kind: InstallKind,
+    /// the shell hosting the interface: with the kind, it decides the release file
+    shell: Shell,
+    /// (system, machine) the release file is for; None: this platform, this processor (tests set them)
+    platform: (Option<String>, Option<String>),
     app_version: Option<String>,
     /// downloads by itself (「自动下载更新」): the real app only (start)
     auto: bool,
@@ -138,6 +142,9 @@ impl UpdateCore {
                 file,
                 updates_dir: update::updates_dir(),
                 kind,
+                // SPACEKNIFE_SHELL from the Electron shell; unset in the Tauri app's own process
+                shell: update::shell(),
+                platform: (None, None),
                 app_version: config.app_version.clone().or_else(update::app_version),
                 auto: false,
                 error: None,
@@ -188,6 +195,15 @@ impl UpdateCore {
 
     pub fn set_install_kind(&self, kind: InstallKind) {
         self.inner.lock().kind = kind;
+    }
+
+    pub fn set_shell(&self, shell: Shell) {
+        self.inner.lock().shell = shell;
+    }
+
+    /// Pick the release files of another platform (`sys.platform` names) and processor.
+    pub fn set_platform(&self, system: Option<String>, machine: Option<String>) {
+        self.inner.lock().platform = (system, machine);
     }
 
     pub fn set_app_version(&self, v: Option<String>) {
@@ -305,7 +321,8 @@ impl UpdateCore {
         if update::level(current, Some(&release.version)) == UpdateLevel::None {
             return None;
         }
-        let asset = update::pick_asset(release, g.kind, None, None).cloned();
+        let (system, machine) = (g.platform.0.as_deref(), g.platform.1.as_deref());
+        let asset = update::pick_asset(release, g.kind, g.shell, system, machine).cloned();
         Some((release.clone(), asset))
     }
 
