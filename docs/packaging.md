@@ -1,6 +1,6 @@
 # 打包与发布（M8）
 
-Tauri 版（0.4.0 起）的安装包：Windows NSIS；Linux AppImage / deb / rpm；macOS app + dmg（Apple Silicon 与 Intel 各一个，ad-hoc 签名、未公证：Developer ID 签名与公证等 Apple 开发者账号下来再接上，见 [TODO.md](../TODO.md)）。后端（Rust，`crates/sk-server`）在应用进程里运行，不再有单独冻结的 Python 后端；命令行程序 `spaceknife-cli` 装在应用旁边。0.3.x 的 Electron 版及其打包方式见 git 历史与 [release-notes/0.3.4.md](../release-notes/0.3.4.md)。
+Tauri 版（0.3.5 起）的安装包：Windows NSIS；Linux AppImage / deb / rpm；macOS app + dmg（Apple Silicon 与 Intel 各一个，ad-hoc 签名、未公证：Developer ID 签名与公证等 Apple 开发者账号下来再接上，见 [TODO.md](../TODO.md)）。后端（Rust，`crates/sk-server`）在应用进程里运行，不再有单独冻结的 Python 后端；命令行程序 `spaceknife-cli` 装在应用旁边。0.3.x 的 Electron 版及其打包方式见 git 历史与 [release-notes/0.3.4.md](../release-notes/0.3.4.md)。
 
 | 产物 | 平台 | 大小 |
 |---|---|---|
@@ -14,7 +14,9 @@ Tauri 版（0.4.0 起）的安装包：Windows NSIS；Linux AppImage / deb / rpm
 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-linux-arm64-portable.tar.gz` | Linux 便携版 | — |
 | `SpaceKnife-<版本>-mac-arm64-portable.zip`、`SpaceKnife-<版本>-mac-x64-portable.zip` | macOS 便携版：`SpaceKnife.app` 旁边一个 `data` 文件夹 | — |
 
-<!-- TODO: confirm — 0.4.0 的各文件大小、macOS 最低版本（tauri.conf.json 写的是 minimumSystemVersion 11.0）在第一次 CI 构建后补上 -->
+macOS 的最低版本是 14（`tauri.conf.json` 的 `bundle.macOS.minimumSystemVersion`，与 0.3.x 相同）。
+
+<!-- TODO: confirm — 0.3.5 的各文件大小在第一次 CI 构建后补上 -->
 
 文件名是 Tauri 打包器的命名（便携包是 `apps/desktop/scripts/portable.mjs` 的），更新检查按这些名字找文件：唯一的来源是 `crates/sk-core/src/update/mod.rs` 的 `asset_templates`。
 
@@ -125,7 +127,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
   - **便携版**（Windows zip、Linux tar.gz、macOS zip）：
     - 「无缝更新」：换文件的是**新版本自己的可执行文件**（`spaceknife --apply-update <计划>`，`sk_core::update::swap`）。
       - 外壳把压缩包解到 `updates/staging-<版本>`，确认里面唯一的顶层文件夹带着可执行文件（macOS 上是 `SpaceKnife.app`）。
-      - 写出计划 `updates/update-<版本>.json`（版本 1：`v`、`pid`、`app`、`new`、`old`、`exe`、`log`、`keep: ["data"]`）。计划是和每个旧版本的约定：旧应用把它交给更新的版本，所以以后的版本要一直能读 `v: 1`。0.3.x 的计划交给的是新版本的 `resources/backend/spaceknife-backend`，0.4.0 的包里没有它（见下面「发布时的约定」）。
+      - 写出计划 `updates/update-<版本>.json`（版本 1：`v`、`pid`、`app`、`new`、`old`、`exe`、`log`、`keep: ["data"]`）。计划是和每个旧版本的约定：旧应用把它交给更新的版本，所以以后的版本要一直能读 `v: 1`。0.3.x 的计划交给的是新版本的 `resources/backend/spaceknife-backend`，0.3.5 的包里没有它（见下面「发布时的约定」）。
       - 以 detached 方式启动 `<staging>/spaceknife[.exe] --apply-update <计划>`（macOS 上是 `SpaceKnife.app/Contents/MacOS/spaceknife`），等它在 stdout 回一行 `{"ok": true}` 后退出。30 秒没回、回了别的或者它先退出了，应用就照旧运行并提示原因。
       - 助手先检查计划：路径都是绝对路径、`exe` 在 `app` 里、新版本的同一位置有可执行文件、`old` 是空的。不能用的计划什么都不动：日志写一行 `not started: …`，回 `{"ok": false, "error": …}`，应用保持打开并提示原因。
       - 等应用主进程退出（最多 60 秒）。
@@ -145,7 +147,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
   - `SpaceKnife_<版本>_x64-setup.exe`、`SpaceKnife_<版本>_amd64.AppImage`、`SpaceKnife_<版本>_amd64.deb`、`SpaceKnife-<版本>-1.x86_64.rpm`、`SpaceKnife_<版本>_aarch64.dmg`、`SpaceKnife_<版本>_x64.dmg`、`SpaceKnife-<版本>-win-x64-portable.zip`、`SpaceKnife-<版本>-win-arm64-portable.zip`、`SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-linux-arm64-portable.tar.gz`、`SpaceKnife-<版本>-mac-arm64-portable.zip`、`SpaceKnife-<版本>-mac-x64-portable.zip`；
   - `SHA256SUMS.txt`（安装包）、`SHA256SUMS-portable-<目标>.txt`（目标是 `win-x64`、`win-arm64`、`linux-x64`、`linux-arm64`）、`SHA256SUMS-mac-<架构>.txt`（dmg 和 macOS 便携 zip）。（`tools/release.mjs assemble` 检查并合并：两份 `SHA256SUMS-installers-<目标>.txt` 合成 `SHA256SUMS.txt`）
   - tag 是 `v<版本>`（语义化版本，可带预发布段）。改名之前先改 `crates/sk-core/src/update/mod.rs` 的 `asset_templates` 和外壳的 `install_refusal`。
-  - 0.4.0 改了安装包的文件名：0.3.x（Electron 版）的更新检查按旧名字找文件，找不到 0.4.0 的安装包，0.3.x 的用户要手动下载 0.4.0。<!-- TODO: confirm -->
+  - 0.3.5 改了安装包的文件名：0.3.x（Electron 版）的更新检查按旧名字找文件，找不到 0.3.5 的安装包，0.3.x 的用户要手动下载 0.3.5。<!-- TODO: confirm -->
 - **累积更新**：还没发布的更改随做随记在仓库根目录的 [UNRELEASED.md](../UNRELEASED.md)（中英双语，「新功能」「修复」两节，和发布说明同一个结构）。两份 README 的顶部导航里固定链接到它。
   - 发布时，它就是发布说明的正文：再补上下载表和已知限制。
   - 发布之后，在 dev 上把它清空：只留标题、语言切换、开头那句说明（版本号改成下一版），以及每节下面的「（暂无）」/「(nothing yet)」。
@@ -171,7 +173,7 @@ rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用
 | 缓存 | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
 | 窗口外壳（主题、WebView 配置） | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife` | `~/Library/Application Support/io.github.duskxi.spaceknife` |
 
-设了 `SPACEKNIFE_HOME` 时，窗口外壳的文件在 `<SPACEKNIFE_HOME>/desktop`。0.3.x 的 Electron 配置目录（`%APPDATA%\SpaceKnife\electron` 等）0.4.0 不再使用。
+设了 `SPACEKNIFE_HOME` 时，窗口外壳的文件在 `<SPACEKNIFE_HOME>/desktop`。0.3.x 的 Electron 配置目录（`%APPDATA%\SpaceKnife\electron` 等）0.3.5 不再使用。
 
 ## 5. 测试
 
@@ -202,5 +204,5 @@ node packaging/update-e2e.mjs target/portable/SpaceKnife-<v>-<目标>-portable.<
 - 未签名（Windows 代码签名证书待定）；macOS 只有 ad-hoc 签名、没有公证（等 Apple 开发者账号），也还没进 Homebrew（官方 cask 要求通过 Gatekeeper）。
 - 项目主页：`https://github.com/DuskXi/SpaceKnife`。
 - 「仅当前用户」安装在用户可写的目录里；需要管理员权限的 MFT 快扫会从这里启动提权助手。
-- 0.3.x（Electron 版）不能自动更新到 0.4.0：它的更新检查按旧的文件名找，找不到 Tauri 命名的安装包；要手动下载一次。<!-- TODO: confirm — 是否在 0.4.0 的发布里另放旧名字的文件来接住 0.3.x，由维护者决定 -->
+- 0.3.x（Electron 版）不能自动更新到 0.3.5：它的更新检查按旧的文件名找，找不到 Tauri 命名的安装包；要手动下载一次。<!-- TODO: confirm — 是否在 0.3.5 的发布里另放旧名字的文件来接住 0.3.x，由维护者决定 -->
 - 不会自动安装（有意如此）：有新版本时提示并在后台下载（见第 4 节「更新检查」），安装总要用户在更新卡片里点「无缝更新」或经典方式，以后也不会加自动安装的选项。

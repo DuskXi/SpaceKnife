@@ -10,8 +10,8 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 | 决定 | 结论 | 拍板时间 |
 |---|---|---|
-| 原生扩展 | 允许在 Python 3.12 后端里内嵌 Rust 扩展（PyO3 + maturin，abi3-py312，由 uv 管理），每条原生路径都保留纯 Python 回退（0.4.0 起被下一条取代） | 2026-10-15 |
-| 改写为 Rust + Tauri（0.4.0） | 后端整体改写为 Rust（`crates/sk-native`、`sk-protocol`、`sk-store`、`sk-core`、`sk-server`；命令行 `spaceknife-cli`），窗口改为 Tauri 2 + Nuxt 4 + Vue 3（`apps/desktop`），服务端在应用进程里运行；协议 v1 不变。Python 后端（`packages/`）与 Electron 应用（`apps/electron/`）只作移植参照，之后删除。Qt、WinUI3 前端不再计划 <!-- TODO: confirm --> | <!-- TODO: confirm 日期 --> |
+| 原生扩展 | 允许在 Python 3.12 后端里内嵌 Rust 扩展（PyO3 + maturin，abi3-py312，由 uv 管理），每条原生路径都保留纯 Python 回退（0.3.5 起被下一条取代） | 2026-10-15 |
+| 改写为 Rust + Tauri（0.3.5） | 后端整体改写为 Rust（`crates/sk-native`、`sk-protocol`、`sk-store`、`sk-core`、`sk-server`；命令行 `spaceknife-cli`），窗口改为 Tauri 2 + Nuxt 4 + Vue 3（`apps/desktop`），服务端在应用进程里运行；协议 v1 不变。Python 后端（`packages/`）与 Electron 应用（`apps/electron/`）只作移植参照，之后删除。Qt、WinUI3 前端不再计划 <!-- TODO: confirm --> | <!-- TODO: confirm 日期 --> |
 | 平台下限 | Windows 10+、RHEL 9+ / Ubuntu 22.04+（glibc 2.34）、macOS 14+；不支持 RHEL 8 / Ubuntu 20.04 | 2026-10-15 |
 | 视觉一致的口径 | 共享设计 token、同一套字体和图标、同样的布局；树图由同一份绘制列表渲染并做截图比对（像素接近）；标准控件高度相似即可，不要求逐像素 | 2026-10-15 |
 | 提权方式 | UI 和后端以普通权限运行；MFT/USN 快扫通过 UAC 单独拉起一个只读、带令牌鉴权的扫描助手进程；整个程序不提权 | 2026-10-15 |
@@ -19,13 +19,13 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 | UI 范围 | 线框 W1–W8、树图元素规范、主界面里出现的**全部功能和状态都保留，必须全部实现**，逐条列在 [UI-SPEC.md](UI-SPEC.md) | 2026-10-18 |
 | 可视化组件 | 图形区做成可替换的组件，为以后的插件预备：树图之外加火焰图和火焰-极坐标图，每个视图随时切换（扫描中也可以）。后端引擎、线上布局、前端组件三层分开，契约见 [visuals.md](visuals.md)。火焰图默认根在下；火焰图和火焰-极坐标图默认「顶层分支」配色，每种可视化记住自己的配色；分支色板 8 色 × 4 档，待设计评审与色盲检查 | 2026-10-19 |
 
-默认取舍（用户未反对，可随时改）：后端承担逻辑和布局，前端只负责显示；节点用列式存储，不为每个文件建对象；先做 Electron v1，再做 Qt 和 WinUI3（0.4.0 起窗口是 Tauri，见上表）；硬链接只计一次；删除默认进回收站；过滤语法合理兼容 SpaceSniffer（见 filter-syntax.md）；键位提供「现代」和「SpaceSniffer 经典」两套预设。需求里写的「QtSlide」按 PySide6 理解。
+默认取舍（用户未反对，可随时改）：后端承担逻辑和布局，前端只负责显示；节点用列式存储，不为每个文件建对象；先做 Electron v1，再做 Qt 和 WinUI3（0.3.5 起窗口是 Tauri，见上表）；硬链接只计一次；删除默认进回收站；过滤语法合理兼容 SpaceSniffer（见 filter-syntax.md）；键位提供「现代」和「SpaceSniffer 经典」两套预设。需求里写的「QtSlide」按 PySide6 理解。
 
 ---
 
 ## 2. 总体架构
 
-现状（0.4.0 起）：
+现状（0.3.5 起）：
 
 ```
  Tauri 2 窗口（Nuxt 4 + Vue 3 + WebGL2，系统 WebView）        浏览器（无头模式：spaceknife-cli headless）
@@ -115,7 +115,7 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 ## 5. 前端
 
-现状（0.4.0 起）：唯一的窗口是 `apps/desktop`（Tauri 2 + Nuxt 4 + Vue 3 + Pinia，界面跑在系统 WebView 里；绘制代码从 Electron 版原样移过来，仍是 WebGL2 + Canvas2D）。下表是 0.3.x 时的计划。
+现状（0.3.5 起）：唯一的窗口是 `apps/desktop`（Tauri 2 + Nuxt 4 + Vue 3 + Pinia，界面跑在系统 WebView 里；绘制代码从 Electron 版原样移过来，仍是 WebGL2 + Canvas2D）。下表是 0.3.x 时的计划。
 
 | 前端 | 技术 | 树图渲染 |
 |---|---|---|
@@ -152,7 +152,7 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 ## 7. 仓库结构
 
-现状（0.4.0 起）：
+现状（0.3.5 起）：
 
 ```
 Cargo.toml                     # Cargo workspace 根

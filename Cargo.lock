@@ -3884,7 +3884,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "sk-core"
-version = "0.4.0"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3913,7 +3913,7 @@ dependencies = [
 
 [[package]]
 name = "sk-native"
-version = "0.4.0"
+version = "0.3.5"
 dependencies = [
  "libc",
  "rayon",
@@ -3923,7 +3923,7 @@ dependencies = [
 
 [[package]]
 name = "sk-protocol"
-version = "0.4.0"
+version = "0.3.5"
 dependencies = [
  "chrono",
  "schemars 1.2.3",
@@ -3935,7 +3935,7 @@ dependencies = [
 
 [[package]]
 name = "sk-server"
-version = "0.4.0"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "axum",
@@ -3967,7 +3967,7 @@ dependencies = [
 
 [[package]]
 name = "sk-store"
-version = "0.4.0"
+version = "0.3.5"
 dependencies = [
  "libc",
  "memmap2",
@@ -4054,7 +4054,7 @@ dependencies = [
 
 [[package]]
 name = "spaceknife-desktop"
-version = "0.4.0"
+version = "0.3.5"
 dependencies = [
  "percent-encoding",
  "serde",

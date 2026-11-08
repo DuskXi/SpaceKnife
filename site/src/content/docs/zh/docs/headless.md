@@ -18,7 +18,7 @@ spaceknife-cli headless --listen 0.0.0.0:9000    # 所有网络接口，端口 9
 它会打印要在浏览器里打开的地址，末尾带一个令牌，然后一直运行，直到你按 <kbd>Ctrl</kbd>+<kbd>C</kbd>：
 
 ```text
-SpaceKnife 无头模式 · 0.4.0
+SpaceKnife 无头模式 · 0.3.5
 在浏览器里打开：
   http://192.168.1.20:8375/#token=n3Vq…
 按 Ctrl+C 停止。

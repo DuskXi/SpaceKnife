@@ -1,7 +1,7 @@
 //! Read a published release the way an installed SpaceKnife reads it (the Release and Release
 //! check workflows; was `tools/release.py check`):
 //!
-//!     cargo run -p sk-core --example release_check -- 0.4.0 [--sums DIR] [--download]
+//!     cargo run -p sk-core --example release_check -- 0.3.5 [--sums DIR] [--download]
 //!
 //! The release must be the newest of its channel (preview; stable too unless it is a pre-release),
 //! every kind of install must find its file with the app's own [`update::pick_asset`] under the

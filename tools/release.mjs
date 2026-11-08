@@ -2,7 +2,7 @@
 // Was tools/release.py assemble (`check` is now the Rust example
 // `cargo run -p sk-core --example release_check`, which reads a release with the app's own code).
 //
-//   node tools/release.mjs assemble 0.4.0 ARTIFACTS OUT --notes release-notes/0.4.0.md \
+//   node tools/release.mjs assemble 0.3.5 ARTIFACTS OUT --notes release-notes/0.3.5.md \
 //       --notes-out notes.md [--build-run URL …]
 //
 // `assemble` takes the build runs' artifacts (any folder layout: one folder per artifact, as

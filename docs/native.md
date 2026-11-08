@@ -2,7 +2,7 @@
 
 本文是 M4 各部分（Rust 扩展、提权扫描助手、IO 限速、扫描调度）之间的接口契约，内容与 M4 完成时的实现一致。改动接口时先改本文。
 
-> **现状（0.4.0 起）**：后端已整体改写为 Rust，原来的 PyO3 扩展 `spaceknife_native`（`packages/native`）现在是普通的 Rust 库 `crates/sk-native`（`sk_native`：`hardscan`、`mft`、`cpus`；没有 Python、没有 GIL），由 `crates/sk-core` 直接调用。下文 §2 的 Python 签名（`def scan_slice(...)`、`MftTable` 的 numpy 列、`py.allow_threads`、「纯 Python 回退」）记录的是 M4 时的接口；行为、选项名、环境变量和测量结论在 Rust 版里保持不变，对应的 Rust 接口见 [crates/sk-native/README.md](../crates/sk-native/README.md)。对应关系：
+> **现状（0.3.5 起）**：后端已整体改写为 Rust，原来的 PyO3 扩展 `spaceknife_native`（`packages/native`）现在是普通的 Rust 库 `crates/sk-native`（`sk_native`：`hardscan`、`mft`、`cpus`；没有 Python、没有 GIL），由 `crates/sk-core` 直接调用。下文 §2 的 Python 签名（`def scan_slice(...)`、`MftTable` 的 numpy 列、`py.allow_threads`、「纯 Python 回退」）记录的是 M4 时的接口；行为、选项名、环境变量和测量结论在 Rust 版里保持不变，对应的 Rust 接口见 [crates/sk-native/README.md](../crates/sk-native/README.md)。对应关系：
 >
 > | 本文写的（Python 时期） | 现在 |
 > |---|---|

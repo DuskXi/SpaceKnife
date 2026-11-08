@@ -136,7 +136,7 @@ chmod +x SpaceKnife_<version>_amd64.AppImage
 
 The AppImage needs FUSE 2 (on Ubuntu 22.04, the package `libfuse2`). Without it, start it with `--appimage-extract-and-run`.
 
-<!-- From 0.4.0 the release has no .AppImage.zsync (Tauri's AppImage carries no update information): SpaceKnife's own update check replaces the AppImage. -->
+<!-- From 0.3.5 the release has no .AppImage.zsync (Tauri's AppImage carries no update information): SpaceKnife's own update check replaces the AppImage. -->
 
 ### Portable tar.gz
 

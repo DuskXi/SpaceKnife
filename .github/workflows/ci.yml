@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev, dev-rust] # work happens on dev (dev-rust: the Rust rewrite); main changes by merging dev
+    branches: [main, dev] # work happens on dev; main changes by merging dev
   pull_request:
   workflow_dispatch: # a manual run tests everything
 
@@ -61,9 +61,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Platform floors from docs/PLAN.md: Windows 10+, Ubuntu 22.04+ / RHEL 9+ (glibc 2.34), macOS 14+
-        # (GitHub no longer runs macos-14; macos-15 as in macos.yml, the floor is the deployment target).
-        os: [windows-latest, ubuntu-22.04, macos-15]
+        # Platform floors from docs/PLAN.md: Windows 10+, Ubuntu 22.04+ / RHEL 9+ (glibc 2.34), macOS 14+.
+        os: [windows-latest, ubuntu-22.04, macos-14]
     defaults:
       run:
         shell: bash

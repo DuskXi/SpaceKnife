@@ -41,7 +41,7 @@ const FALLBACK: Release = {
   },
 };
 
-// Tauri's names from 0.4.0 (SpaceKnife_<v>_x64-setup.exe, SpaceKnife_<v>_aarch64.dmg, …), and the
+// Tauri's names from 0.3.5 (SpaceKnife_<v>_x64-setup.exe, SpaceKnife_<v>_aarch64.dmg, …), and the
 // Electron builds' before it (SpaceKnife-<v>-Setup-x64.exe, SpaceKnife-<v>-mac-arm64.dmg, …).
 function kindOf(name: string): AssetKind | null {
   if (/(?:-Setup-x64|_x64-setup)\.exe$/i.test(name)) return "windows";

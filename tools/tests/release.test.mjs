@@ -12,7 +12,7 @@ import { test } from "node:test";
 
 import * as release from "../release.mjs";
 
-const V = "0.4.0";
+const V = "0.3.5";
 const SCRIPT = fileURLToPath(new URL("../release.mjs", import.meta.url));
 const tmp = () => mkdtempSync(join(tmpdir(), "sk-release-"));
 

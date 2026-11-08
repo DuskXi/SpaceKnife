@@ -35,7 +35,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [dev, dev-rust]
+    branches: [dev]
     paths:
       - .github/workflows/portable.yml
       - packaging/**
