@@ -236,27 +236,27 @@ pub fn is_space(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }
 
-/// Python's `str.casefold` (full case folding for the characters where it differs from lower case).
+/// Python 3.12's `str.casefold`, the one 0.3.x compared class names and spellings with: full case
+/// folding as Unicode 15.0 defines it, code point by code point. Not Rust's `to_lowercase`, which
+/// follows a newer Unicode and lower-cases where folding does not (Cherokee folds to the capitals).
+/// The table is Python's own output (tools/gen_casefold.py).
 pub fn casefold(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        match c {
-            'ß' | 'ẞ' => out.push_str("ss"),
-            'ς' => out.push('σ'),
-            'ſ' => out.push('s'),
-            'µ' => out.push('μ'),
-            'ﬀ' => out.push_str("ff"),
-            'ﬁ' => out.push_str("fi"),
-            'ﬂ' => out.push_str("fl"),
-            'ﬃ' => out.push_str("ffi"),
-            'ﬄ' => out.push_str("ffl"),
-            'ﬅ' | 'ﬆ' => out.push_str("st"),
-            c if c.is_ascii() => out.push(c.to_ascii_lowercase()),
-            c => out.extend(c.to_lowercase()),
+        if c.is_ascii() {
+            out.push(c.to_ascii_lowercase());
+            continue;
+        }
+        match casefold_table::FOLDS.binary_search_by_key(&(c as u32), |&(cp, _)| cp) {
+            Ok(i) => out.push_str(casefold_table::FOLDS[i].1),
+            Err(_) => out.push(c),
         }
     }
     out
 }
+
+#[path = "casefold_table.rs"]
+mod casefold_table;
 
 fn lower(chars: &[char]) -> String {
     chars.iter().collect::<String>().to_lowercase()

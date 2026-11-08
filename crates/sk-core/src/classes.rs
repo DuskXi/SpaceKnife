@@ -846,4 +846,30 @@ mod tests {
         std::fs::write(&file, "{ broken").unwrap();
         assert_eq!(*load(&file), *ClassTable::builtin());
     }
+
+    /// Names 0.3.4 told apart with Python 3.12's `str.casefold` are two names here too: a saved
+    /// table that holds both is the user's, not replaced by the built-in one. U+A7CB has a lower
+    /// case only since Unicode 16 (Python 3.12: 15.0, a letter of its own); U+0149 folds to two
+    /// letters that are another class's name in Python, so that table stays refused.
+    #[test]
+    fn class_names_compare_as_python_312_folds_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("classes.json");
+        let table = |a: &str, b: &str| {
+            format!(
+                r##"{{"version": 2, "classes": [
+                    {{"id": "a", "name": "{a}", "aliases": [], "extensions": ["x"], "color": "#222222", "color_light": "#111111"}},
+                    {{"id": "b", "name": "{b}", "aliases": [], "extensions": ["y"], "color": "#444444", "color_light": "#333333"}},
+                    {{"id": "other", "name": "其他", "aliases": [], "extensions": [], "color": "#666666", "color_light": "#555555"}}]}}"##
+            )
+        };
+        std::fs::write(&file, table("\u{A7CB}x", "\u{264}x")).unwrap();
+        assert_eq!(
+            load(&file).ids(),
+            ["a", "b", OTHER],
+            "the saved table is kept"
+        );
+        std::fs::write(&file, table("\u{149}", "\u{2BC}n")).unwrap();
+        assert_eq!(load(&file).ids(), ClassTable::builtin().ids());
+    }
 }

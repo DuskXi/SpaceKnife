@@ -28,3 +28,15 @@ changing a type.
 - Literal unions are `str_enum!` enums (`as_str()`, `ALL`); tagged unions (`FilterCond`,
   `FrameGeometry`) are untagged enums of structs carrying a constant `kind`.
 - Timestamps are `chrono::DateTime<Utc>` (RFC 3339, `Z`).
+
+## Case folding
+
+`filter_syntax::casefold` (class names, aliases and spellings, export names) is Python 3.12's
+`str.casefold`, the one 0.3.x used: `src/casefold_table.rs` and the test data
+`tests/data/casefold_python312.txt` are generated from it, and `tests/casefold.rs` checks every code
+point against that data.
+
+```bash
+python3.12 -I tools/gen_casefold.py            # rewrite both
+python3.12 -I tools/gen_casefold.py --check    # exit 1 if stale
+```
