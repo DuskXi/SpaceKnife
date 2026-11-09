@@ -16,6 +16,9 @@
 //!
 //! `--hold <seconds>`: that process (sleeps, holding its standard output and error).
 //!
+//! `--startup-problem`: notes its process id in `fake-app-problem.txt` next to it and ends (the
+//! app's window that explains why it can't start).
+//!
 //! Started as the swap starts the new version (`--updated`), it runs as the file
 //! `fake-app-run.txt` next to it says (`ready` when there is none), and notes its process id in
 //! `fake-app-pid.txt` there first:
@@ -47,6 +50,11 @@ fn main() {
     match std::env::args().nth(1).as_deref() {
         Some("--startup-check") => startup_check(&mode("fake-app-mode.txt", "ok")),
         Some("--updated") => run(&mode("fake-app-run.txt", "ready")),
+        Some("--startup-problem") => {
+            if let Some(p) = beside("fake-app-problem.txt") {
+                let _ = std::fs::write(p, std::process::id().to_string());
+            }
+        }
         Some("--hold") => {
             let secs = std::env::args()
                 .nth(2)

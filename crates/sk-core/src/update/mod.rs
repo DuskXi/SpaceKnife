@@ -5,8 +5,9 @@
 //!
 //! - versions: semantic versions with an optional pre-release part and leading `v`; a tag that is
 //!   not one is ignored. [`level`] says how far behind the app is (the first part that differs);
-//! - the release to offer ([`choose`]): never a draft; pre-releases (GitHub's flag, or a version
-//!   like `0.4.0-beta.1`) only on the `preview` channel; the newest by version;
+//! - the release to offer ([`choose`]): never a draft; pre-releases (a version like
+//!   `0.4.0-beta.1`, or GitHub's flag from 1.0 on: every 0.x release carries it) only on the
+//!   `preview` channel; the newest by version;
 //! - the file for this kind of install ([`pick_asset`]) and its SHA-256 from the release's
 //!   `SHA256SUMS*.txt` ([`parse_checksums`]);
 //! - the state kept between runs (`update.json` in the data directory, [`UpdateState`]): the last
@@ -19,8 +20,10 @@
 //! through rustls with the operating system's certificate store; proxies come from the
 //! environment (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`).
 //!
-//! [`swap`] is the portable copy's `--apply-update` mode.
+//! [`swap`] is the portable copy's `--apply-update` mode; [`rollback`] the note it leaves when it
+//! kept the old version.
 
+pub mod rollback;
 pub mod swap;
 
 use std::cmp::Ordering as CmpOrdering;
@@ -379,9 +382,15 @@ impl Release {
         Version::parse(&self.version)
     }
 
-    /// Offered on the `preview` channel only: GitHub's flag or a pre-release version.
+    /// Offered on the `preview` channel only: a pre-release version (`0.4.0-beta.1`), or one GitHub
+    /// marks as a pre-release — except during 0.x, when every release is marked so (release.yml):
+    /// there a version without a pre-release part is on the `stable` channel too.
     pub fn preview(&self) -> bool {
-        self.prerelease || self.parsed().is_none_or(|v| !v.pre.is_empty())
+        match self.parsed() {
+            None => true,
+            Some(v) if !v.pre.is_empty() => true,
+            Some(v) => self.prerelease && v.major > 0,
+        }
     }
 }
 
@@ -992,6 +1001,8 @@ static UPDATE_NAMES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         "update-{v}.ps1",
         "update-{v}.sh",
         "update-{v}.log",
+        // the note of an update that was undone (rollback.rs): gone once that version runs
+        "rollback-{v}.json",
     ]
     .iter()
     .map(|n| template_regex(n, &format!("(?P<v>{V_SLOT})")))
@@ -1086,6 +1097,17 @@ fn clean_names(
             continue;
         }
         let path = entry.path();
+        // a replaced portable copy's files: removed only while they are SpaceKnife's own (the swap
+        // moves nothing else; one of another program, or an older one, may have)
+        if name.starts_with("previous-")
+            && let Some(other) = not_spaceknifes(&path, std::env::consts::OS)
+        {
+            tracing::warn!(
+                "{} holds what is not SpaceKnife's ({other}): left as it is",
+                path.display()
+            );
+            continue;
+        }
         match remove(&path) {
             Ok(()) => out.removed.push(name),
             Err(e) => {
@@ -1095,6 +1117,32 @@ fn clean_names(
         }
     }
     out
+}
+
+/// The first top-level name in a `previous-<v>` folder that is neither a name of SpaceKnife's own
+/// portable layouts on system `os` (swap::own_names) nor a system file, or None when everything
+/// there is SpaceKnife's (a folder that can't be read, or a file in its place: None, it goes).
+pub fn not_spaceknifes(folder: &Path, os: &str) -> Option<String> {
+    if !std::fs::symlink_metadata(folder).is_ok_and(|m| m.is_dir()) {
+        return None;
+    }
+    let fold = |s: &str| {
+        if os == "windows" {
+            s.to_lowercase()
+        } else {
+            s.to_owned()
+        }
+    };
+    let own: Vec<String> = swap::own_names(os).iter().map(|n| fold(n)).collect();
+    let mut names: Vec<String> = std::fs::read_dir(folder)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .find(|n| !own.contains(&fold(n)) && !swap::system_file(n))
 }
 
 // ---------------------------------------------------------------- persistent state
