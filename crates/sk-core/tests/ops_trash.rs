@@ -227,8 +227,11 @@ fn trash_and_restore() {
                 folder.parent().unwrap()
             };
             assert_eq!(name_of(bin).as_deref(), Some("$recycle.bin"), "{info:?}");
-            let root = sk_core::ops::win::volume_root(&s(&f)).unwrap();
-            assert_eq!(shared, !sk_core::ops::win::per_user_bin(&root));
+            #[cfg(windows)] // (`if WIN` is decided at run time: the rest compiles everywhere)
+            {
+                let root = sk_core::ops::win::volume_root(&s(&f)).unwrap();
+                assert_eq!(shared, !sk_core::ops::win::per_user_bin(&root));
+            }
             let (got_size, when, path) = parse_recycle_info(&std::fs::read(info).unwrap()).unwrap();
             let short = if size == 5 { s(&f) } else { s(&d) };
             assert!(
