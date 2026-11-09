@@ -7,7 +7,8 @@
 //!
 //! 1. says `{"ok": true}` on stdout once the plan is usable, the app folder holds nothing but
 //!    SpaceKnife's own entries, `data` and the system's files ([`sort_names`]: the names of every
-//!    published portable layout, [`own_names`], and the new version's), and the new version's
+//!    published portable layout, [`own_names`], and the new version's; a folder with a name others
+//!    use too, such as `resources`, only with SpaceKnife's contents, [`Plan::survey`]), and the new version's
 //!    program starts on this machine ([`startup_check`]: its libraries load, the web view's
 //!    runtime is there), and lets go of its stdio. Otherwise it says `{"ok": false, "error": …}`
 //!    in the user's language and nothing is touched: the app waits for this line, shows the error
@@ -196,17 +197,31 @@ impl Plan {
         self.survey_on(std::env::consts::OS)
     }
 
-    /// [`Plan::survey`] with the published layouts of system `os` (tests).
+    /// [`Plan::survey`] with the published layouts of system `os` (tests). A folder named as one
+    /// of SpaceKnife's that other programs and people use too ([`GENERIC_NAMES`]) is SpaceKnife's
+    /// only when it holds what SpaceKnife's does ([`holds_what_spaceknifes_does`]); else it is
+    /// foreign.
     pub fn survey_on(&self, os: &str) -> io::Result<Folder> {
         let exe_top = within(&self.app, &self.exe)
             .and_then(|rel| rel.iter().next().map(std::ffi::OsStr::to_owned));
-        Ok(sort_names(
+        let mut folder = sort_names(
             &names_in(&self.app)?,
             &self.kept(),
             &self.new_names()?,
             exe_top.as_deref(),
             os,
-        ))
+        );
+        let (own, other): (Vec<OsString>, Vec<OsString>) =
+            std::mem::take(&mut folder.own).into_iter().partition(|n| {
+                !generic_name(&n.to_string_lossy(), os)
+                    || holds_what_spaceknifes_does(&self.app.join(n), &self.new.join(n), n, os)
+            });
+        folder.own = own;
+        if !other.is_empty() {
+            folder.foreign.extend(other);
+            folder.foreign.sort();
+        }
+        Ok(folder)
     }
 }
 
@@ -321,6 +336,102 @@ pub fn own_names(os: &str) -> &'static [&'static str] {
         "macos" => MACOS_OWN,
         "linux" => LINUX_OWN,
         _ => &[],
+    }
+}
+
+/// The names of [`own_names`] that other programs and people use for folders of their own (a
+/// folder of the user's called `resources` or `ui` on the desktop next to the app): an entry so
+/// named is SpaceKnife's only when it holds what SpaceKnife's does ([`holds_what_spaceknifes_does`]).
+pub const GENERIC_NAMES: &[&str] = &["licenses", "locales", "resources", "ui"];
+
+/// What SpaceKnife's `resources` folder held in each published layout, read from the release
+/// archives: 0.3.1–0.3.4 `app.asar`, `backend` (the Python backend), `licenses` and on Windows
+/// `elevate.exe`; 0.3.5's Electron shell `app.asar`, `backend`, `ui`, `licenses`; the Tauri app's
+/// `backend` (the swap helper every 0.3.x copy runs, which every later layout keeps). Only grows.
+const RESOURCES_HELD: &[&str] = &[
+    "app.asar",
+    "app.asar.unpacked",
+    "backend",
+    "elevate.exe",
+    "licenses",
+    "ui",
+];
+/// What the Tauri app's `licenses` folder holds (apps/desktop/scripts/prepare-bundle.mjs). Only
+/// grows.
+const LICENSES_HELD: &[&str] = &["LICENSE.txt", "THIRD-PARTY-rust.txt", "THIRD-PARTY-ui.txt"];
+
+/// Whether `name` is one of [`GENERIC_NAMES`] (on Windows in any case).
+fn generic_name(name: &str, os: &str) -> bool {
+    GENERIC_NAMES.iter().any(|g| {
+        if os == "windows" {
+            g.eq_ignore_ascii_case(name)
+        } else {
+            *g == name
+        }
+    })
+}
+
+/// Whether `entry`, an entry of the app folder named `name` (one of [`GENERIC_NAMES`]), is
+/// SpaceKnife's own: a folder (not a link) that is empty or holds, besides the system's files,
+/// only what SpaceKnife's folder of that name holds — `locales`: Electron's `*.pak` files;
+/// `resources`: [`RESOURCES_HELD`]; `licenses`: [`LICENSES_HELD`]; for those two also whatever the
+/// new version's folder of that name (`new`) holds — and `ui` holds the generated interface
+/// (`index.html` with Nuxt's `_nuxt`, or `index.html` and another entry of the new version's
+/// `ui`). Anything else is the user's: a folder of their own with that name, or SpaceKnife's with
+/// their files merged into it. Only its own entries are looked at, not deeper.
+pub fn holds_what_spaceknifes_does(
+    entry: &Path,
+    new: &Path,
+    name: &std::ffi::OsStr,
+    os: &str,
+) -> bool {
+    let fold = |s: &str| {
+        if os == "windows" {
+            s.to_lowercase()
+        } else {
+            s.to_owned()
+        }
+    };
+    if !std::fs::symlink_metadata(entry).is_ok_and(|m| m.is_dir()) {
+        return false;
+    }
+    let Ok(inside) = names_in(entry) else {
+        return false;
+    };
+    let inside: Vec<(String, bool)> = inside
+        .iter()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !system_file(n))
+        .map(|n| {
+            let file = std::fs::symlink_metadata(entry.join(&n)).is_ok_and(|m| m.is_file());
+            (fold(&n), file)
+        })
+        .collect();
+    if inside.is_empty() {
+        return true; // nothing in it to lose
+    }
+    let theirs: Vec<String> = names_in(new)
+        .unwrap_or_default()
+        .iter()
+        .map(|n| fold(&n.to_string_lossy()))
+        .collect();
+    let held =
+        |list: &[&str], n: &str| list.iter().any(|k| fold(k) == n) || theirs.iter().any(|t| t == n);
+    let has = |n: &str| inside.iter().any(|(i, _)| *i == fold(n));
+    match fold(&name.to_string_lossy()).as_str() {
+        "locales" => inside
+            .iter()
+            .all(|(n, file)| *file && n.to_ascii_lowercase().ends_with(".pak")),
+        "resources" => inside.iter().all(|(n, _)| held(RESOURCES_HELD, n)),
+        "licenses" => inside.iter().all(|(n, _)| held(LICENSES_HELD, n)),
+        "ui" => {
+            has("index.html")
+                && (has("_nuxt")
+                    || inside
+                        .iter()
+                        .any(|(n, _)| *n != fold("index.html") && theirs.contains(n)))
+        }
+        _ => true,
     }
 }
 
@@ -1371,6 +1482,27 @@ pub fn run_with(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
             Folder::names(&stay, usize::MAX).join(", ")
         ));
     }
+    // one of them under a name of the new version (it turned up since the check): the new
+    // version can't come in without touching it, so nothing moves
+    let in_the_way: Vec<OsString> = stay
+        .iter()
+        .filter(|s| {
+            let s = name_case(&s.to_string_lossy());
+            new_names
+                .iter()
+                .any(|n| name_case(&n.to_string_lossy()) == s)
+        })
+        .cloned()
+        .collect();
+    if !in_the_way.is_empty() {
+        let detail = format!(
+            "in the way of the new version: {}",
+            Folder::names(&in_the_way, 20).join(", ")
+        );
+        log.say(&detail);
+        note_rollback(plan, log, rollback::WHY_PLACE, &detail);
+        return keep_old(plan, log, ops);
+    }
     if let Err(e) = move_these_with(
         &plan.app,
         &plan.old,
@@ -1383,15 +1515,27 @@ pub fn run_with(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
         note_rollback(plan, log, rollback::WHY_BUSY, &e.to_string());
         return keep_old(plan, log, ops);
     }
+    // what came in (whole or in part): only that is taken out again when a name can't come in. An
+    // entry already there under a new name stayed (it was not SpaceKnife's, or turned up since the
+    // check): it is in the way, and it is not touched
+    let mut came_in: Vec<OsString> = Vec::new();
     let placed = (|| {
         for name in &new_names {
-            (ops.place)(&plan.new.join(name), &plan.app.join(name))?;
+            let to = plan.app.join(name);
+            if std::fs::symlink_metadata(&to).is_ok() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{} is in the way", name.to_string_lossy()),
+                ));
+            }
+            came_in.push(name.clone());
+            (ops.place)(&plan.new.join(name), &to)?;
         }
         Ok::<(), io::Error>(())
     })();
     if let Err(e) = placed {
         log.say(&format!("could not move the new files in: {e}"));
-        clear(&plan.app, &new_names, log);
+        clear(&plan.app, &came_in, log);
         if let Err(back) = move_out(&plan.old, &plan.app, &[], log, BUSY_TIMEOUT) {
             log.say(&format!("could not restore the old files: {back}"));
         }
@@ -3282,6 +3426,169 @@ mod tests {
             assert!(f.foreign.is_empty(), "{os}: {:?}", f.foreign);
             assert_eq!(f.own.len(), layout.len(), "{os}");
         }
+    }
+
+    #[test]
+    fn a_folder_named_like_spaceknifes_is_its_own_only_with_its_contents() {
+        // a folder of the user's that happens to be called `resources` or `ui` next to the app,
+        // or SpaceKnife's with the user's files merged into it, is not SpaceKnife's: the swap
+        // would move it into previous-<version>, which the new version deletes
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let new = tmp.path().join("new");
+        let fresh = |name: &str, files: &[&str], dirs: &[&str]| {
+            let at = app.join(name);
+            let _ = std::fs::remove_dir_all(&at);
+            let _ = std::fs::remove_file(&at);
+            std::fs::create_dir_all(&at).unwrap();
+            for f in files {
+                write(&at.join(f), "x");
+            }
+            for d in dirs {
+                std::fs::create_dir_all(at.join(d)).unwrap();
+            }
+        };
+        let is_own = |name: &str, os: &str| {
+            holds_what_spaceknifes_does(
+                &app.join(name),
+                &new.join(name),
+                std::ffi::OsStr::new(name),
+                os,
+            )
+        };
+        // resources: what every published layout held (0.3.4 on Windows, the Tauri app's)
+        fresh(
+            "resources",
+            &["app.asar", "elevate.exe"],
+            &["backend", "licenses"],
+        );
+        assert!(is_own("resources", "linux"));
+        fresh("resources", &[], &["backend"]);
+        assert!(is_own("resources", "linux"));
+        // the system's files in it don't count; an empty one has nothing to lose
+        fresh("resources", &["desktop.ini", ".DS_Store"], &["backend"]);
+        assert!(is_own("resources", "linux"));
+        fresh("resources", &[], &[]);
+        assert!(is_own("resources", "linux"));
+        // the user's, alone or merged with SpaceKnife's
+        fresh("resources", &["budget.xlsx"], &[]);
+        assert!(!is_own("resources", "linux"));
+        fresh("resources", &["app.asar", "budget.xlsx"], &["backend"]);
+        assert!(!is_own("resources", "linux"));
+        // what the new version's folder of that name holds is SpaceKnife's too
+        write(&new.join("resources/added-later.dat"), "x");
+        fresh("resources", &["added-later.dat"], &["backend"]);
+        assert!(is_own("resources", "linux"));
+        // a file or a link under that name is never SpaceKnife's
+        std::fs::remove_dir_all(app.join("resources")).unwrap();
+        write(&app.join("resources"), "a file");
+        assert!(!is_own("resources", "linux"));
+        std::fs::remove_file(app.join("resources")).unwrap();
+        #[cfg(unix)]
+        {
+            fresh("elsewhere", &[], &["backend"]);
+            std::os::unix::fs::symlink(app.join("elsewhere"), app.join("resources")).unwrap();
+            assert!(!is_own("resources", "linux"));
+            std::fs::remove_file(app.join("resources")).unwrap();
+        }
+        // locales: Electron's .pak files and nothing else
+        fresh("locales", &["en-US.pak", "zh-CN.pak"], &[]);
+        assert!(is_own("locales", "linux"));
+        fresh("locales", &["en-US.pak", "en-US.json"], &[]);
+        assert!(!is_own("locales", "linux"));
+        fresh("locales", &[], &["fr.pak"]);
+        assert!(!is_own("locales", "linux"));
+        // licenses: the Tauri app's three files
+        fresh(
+            "licenses",
+            &["LICENSE.txt", "THIRD-PARTY-rust.txt", "THIRD-PARTY-ui.txt"],
+            &[],
+        );
+        assert!(is_own("licenses", "linux"));
+        fresh("licenses", &["LICENSE.txt", "putty-licence.txt"], &[]);
+        assert!(!is_own("licenses", "linux"));
+        // ui: the generated interface
+        fresh("ui", &["index.html", "200.html"], &["_nuxt"]);
+        assert!(is_own("ui", "linux"));
+        fresh("ui", &["mockup.png", "index.html"], &[]);
+        assert!(!is_own("ui", "linux"));
+        write(&new.join("ui/index.html"), "x");
+        write(&new.join("ui/200.html"), "x");
+        fresh("ui", &["index.html", "200.html"], &[]);
+        assert!(
+            is_own("ui", "linux"),
+            "an interface laid out as the new version's"
+        );
+        fresh("ui", &["mockup.png"], &[]);
+        assert!(!is_own("ui", "linux"));
+        // Windows names them in any case
+        fresh("Resources", &["App.asar"], &["Backend"]);
+        assert!(is_own("Resources", "windows"));
+        assert!(generic_name("Resources", "windows") && !generic_name("Resources", "linux"));
+        // the other names of the layouts are SpaceKnife's by their name alone
+        assert!(!generic_name("chrome_100_percent.pak", "windows"));
+    }
+
+    #[test]
+    fn a_users_folder_named_like_spaceknifes_stops_the_update() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        // the new version has an interface folder `ui`; the user keeps one of their own next to
+        // the app
+        write(&plan.new.join("ui/index.html"), "0.3.4");
+        std::fs::create_dir_all(plan.new.join("ui/_nuxt")).unwrap();
+        write(&plan.app.join("ui/mockup.png"), "the user's");
+        let file = write_plan(&plan, &tmp.path().join("update-0.3.4.json"), &[]);
+        let mut out = Vec::new();
+        let code = main_checked(
+            &[file.to_string_lossy().into_owned()],
+            &mut out,
+            false,
+            &|_| panic!("the folder is refused first"),
+        );
+        assert_eq!(code, 2);
+        let said: Value = serde_json::from_slice(&out).unwrap();
+        let foreign = [OsString::from("ui")];
+        assert_eq!(
+            said["error"],
+            Value::from(foreign_message(helper_language(&plan), &foreign))
+        );
+        assert_eq!(read(&plan.app.join("ui/mockup.png")), "the user's");
+        assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
+        assert!(!plan.old.exists());
+        // turned up after the check, while the app quit: it is in the way of the new version's
+        // `ui`, so nothing moves (taking out what came in would take it with it)
+        let started = RefCell::new(0);
+        let start = |_: &Path, _: &[&str]| {
+            *started.borrow_mut() += 1;
+            Ok(())
+        };
+        let code = run_with(
+            &plan,
+            &Log::new(&plan.log),
+            &Ops {
+                wait: &|_, _| true,
+                start: &start,
+                place: &place,
+                start_new: &not_watched,
+                ready: None,
+                ready_timeout: READY_TIMEOUT,
+            },
+        );
+        assert_eq!(code, 1);
+        assert_eq!(*started.borrow(), 1); // the old version again
+        assert_eq!(read(&plan.app.join("ui/mockup.png")), "the user's");
+        assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
+        assert_eq!(read(&plan.app.join("resources/app.asar")), "0.3.3");
+        assert!(plan.new.join("ui/index.html").is_file());
+        assert!(plan.new.join("E2E_NEW_BUILD.txt").is_file());
+        assert!(!plan.old.exists() || names(&plan.old).is_empty());
+        let lines = log_lines(&plan);
+        assert!(
+            lines.contains(&"in the way of the new version: ui".to_owned()),
+            "{lines:?}"
+        );
+        assert_eq!(noted(&plan), [("0.3.4".to_owned(), "place".to_owned())]);
     }
 
     #[test]
