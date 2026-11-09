@@ -26,7 +26,9 @@
 // and cache folders are still there, byte for byte; nothing of the update is left in the updates
 // folder. Then per kind: portable (first with a file and another app of the user's next to 0.3.4:
 // the new version's swap helper refuses the folder, nothing outside the data moves and 0.3.4 runs
-// on; then without them and with a file the system puts in folders, which stays where it is: the
+// on, and no .asar file is left in what it unpacked, which 0.3.4's Electron fs could not remove
+// before its next attempt; then without them and with a file the system puts in folders, which
+// stays where it is: 0.3.4 gets to the swap (its second attempt says nothing of a failure), the
 // swap's log says "updated", or the new version came back
 // before it could be read — it removes the log as it starts; the folder holds exactly the
 // candidate's files, byte for byte, and the data folder: nothing of 0.3.4 is left, and whatever the
@@ -58,7 +60,7 @@ import http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { MAC, WIN, alternativesGroup, appProcessOf, fail, hello, helperIn, isElectron, notOwned, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, treeOf, uiIn, unpack, until, untilUninstalled, watchSwap } from "./lib.mjs";
+import { MAC, WIN, alternativesGroup, appProcessOf, asarFilesIn, fail, hello, helperIn, isElectron, notOwned, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, treeOf, uiIn, unpack, until, untilUninstalled, watchSwap } from "./lib.mjs";
 
 const OLD = "0.3.4";
 /** Where the deb and the rpm put the program (0.3.4's and the new ones). */
@@ -445,14 +447,32 @@ async function portable() {
     if (changes.length || sha256(program) !== programBefore) throw new Error(`the refused swap changed the folder: ${changes.slice(0, 20).join(", ") || basename(program)}`);
     if (existsSync(join(updates, `previous-${OLD}`))) throw new Error(`previous-${OLD} was made although nothing was to move`);
     console.log("nothing moved, 0.3.4 runs on");
+    // 0.3.4 removes what it unpacked before it unpacks again, with Electron's fs, which takes an
+    // .asar file for a folder and can't remove one that holds it (the Electron shell's portable
+    // copy has resources/app.asar): the refusal took them out, and only them
+    // (sk_core::update::swap leave_removable), before it answered
+    const staging = join(updates, `staging-${NEW_VERSION}`);
+    const asarLeft = asarFilesIn(staging);
+    if (asarLeft.length) throw new Error(`the refused swap left ${asarLeft.join(", ")}: 0.3.4 can't remove ${staging} to try again`);
+    if (isElectron(candidate)) {
+      if (!refusal.includes("an Electron app can't remove a folder that holds one")) throw new Error(`the swap's log does not say it took the .asar files out of ${staging}`);
+      console.log(`the .asar files are out of ${staging}: 0.3.4 can remove it`);
+    }
 
     step(`without them: click 「无缝更新」 again; a file the system put there stays`);
     for (const f of foreign) rmSync(f, { recursive: true, force: true });
     const systemFile = join(folder, WIN ? "desktop.ini" : MAC ? ".DS_Store" : ".directory");
     writeFileSync(systemFile, "the system's\n");
     rmSync(log, { force: true }); // its last line says how the next attempt ends
+    const heard = output.length; // what 0.3.4 says from here on
     await clickSeamless(page);
-    await until("0.3.4 to quit", () => app.exited, 90_000);
+    await until("0.3.4 to quit", () => {
+      // 0.3.4 removes the staging folder, unpacks again and starts the swap: when it can't, it says
+      // so and runs on (v0.3.4 index.ts replacePortable, restartInto); no need to wait for the end
+      const failed = output.slice(heard).find((l) => /\[update\] (could not (unpack|start the update)|\S+ is not one folder with |\S+ has no )/.test(l));
+      if (failed) throw new Error(`0.3.4's second attempt did not get to the swap: ${failed}`);
+      return app.exited;
+    }, 90_000);
     console.log(`0.3.4 quit: ${JSON.stringify(app.exited)}`);
 
     step("the swap");

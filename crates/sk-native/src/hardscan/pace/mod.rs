@@ -740,15 +740,26 @@ mod tests {
         let (Some(a), t) = (cpu_mark(), Instant::now()) else {
             return; // no thread clock here (Windows on ARM)
         };
+        // busy until the thread's clock says 20 ms: how much of the wall time that takes is up to
+        // the scheduler and the machine (on a shared CI runner this thread once had 9.6 µs of
+        // 35 ms: a virtual processor taken away goes on in wall time), so the wall time is only a
+        // bound, for a clock that does not move
+        const WANT: u64 = 20_000_000;
+        const BOUND: Duration = Duration::from_secs(5);
         let mut x = 0u64;
-        while t.elapsed() < Duration::from_millis(30) {
-            x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
-        }
-        std::hint::black_box(x);
-        let wall = t.elapsed().as_nanos() as u64;
-        let busy = cpu_ns(a, cpu_mark().unwrap(), wall);
-        // this thread busy the whole time (other tests run at once: it may be preempted a little)
-        assert!(busy as f64 > 0.5 * wall as f64, "{busy} of {wall}");
+        let (busy, wall) = loop {
+            for _ in 0..10_000 {
+                x = x.wrapping_mul(6364136223846793005).wrapping_add(1);
+            }
+            std::hint::black_box(x);
+            let wall = t.elapsed().as_nanos() as u64;
+            let busy = cpu_ns(a, cpu_mark().unwrap(), wall);
+            if busy >= WANT || wall > BOUND.as_nanos() as u64 {
+                break (busy, wall);
+            }
+        };
+        assert!(busy >= WANT, "{busy} ns of processor time in {wall} ns");
+        // asleep the thread uses next to nothing: its clock is not the wall clock
         let (a, t) = (cpu_mark().unwrap(), Instant::now());
         std::thread::sleep(Duration::from_millis(30));
         let wall = t.elapsed().as_nanos() as u64;

@@ -17,7 +17,9 @@
 // and starts the new version's swap program with --apply-update (the Tauri app's own executable;
 // the Electron shell's spaceknife-cli). First with a file and another app of the user's next to the
 // program: the swap moves only SpaceKnife's own files, so it answers {"ok": false} naming them, and
-// nothing moves, the app runs on. Then without them, and with a file the system puts in folders
+// nothing moves, the app runs on; only the .asar files of the unpacked version are gone (an Electron
+// app, 0.3.4 among them, can't remove a folder holding one), and the next attempt unpacks it again,
+// as the shells do. Then without them, and with a file the system puts in folders
 // (desktop.ini, .DS_Store, .directory), which must stay where it is: it answers {"ok": true}; the app is closed, the new
 // program swaps the files (sk_core::update::swap) and starts the app again with --updated. The test
 // checks that the new files are in place, the data folder stayed, the app came back (a new backend)
@@ -36,7 +38,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { appProcessOf, cliIn, fail, hello, helperIn, isElectron, pack, pidAlive, programIn, sha256, sleep, stop, stopUnder, unpack, until } from "./lib.mjs";
+import { appProcessOf, asarFilesIn, cliIn, fail, hello, helperIn, isElectron, pack, pidAlive, programIn, sha256, sleep, stop, stopUnder, unpack, until } from "./lib.mjs";
 import { spawnSync } from "node:child_process";
 
 /** A portable archive's name: version, target, kind (`portable`: 0.3.4's name; `tauri`: the Tauri
@@ -224,6 +226,19 @@ try {
   if (!existsSync(foreign[0]) || !existsSync(join(foreign[1], "Contents", "Info.plist"))) throw new Error("the user's files next to the app did not stay");
   if (app.exited) throw new Error(`the app quit: ${JSON.stringify(app.exited)}`);
   console.log(`with the user's files next to it nothing moved: ${refusedSaid.error}`);
+  // the unpacked version is left so that any app can remove it before it tries again: the refusal
+  // took its .asar files out, and nothing else (sk_core::update::swap leave_removable) — Electron's
+  // fs takes one for a folder, and 0.3.4, an Electron app, removes its staging folder that way
+  const asarLeft = asarFilesIn(staging);
+  if (asarLeft.length) throw new Error(`the refused swap left ${asarLeft.join(", ")}: an Electron app can't remove ${staging}`);
+  if (electron && !refusedLog.includes("an Electron app can't remove a folder that holds one")) throw new Error(`the swap's log does not say it took the .asar files out:\n${refusedLog}`);
+  if (!existsSync(programIn(staged)) || !existsSync(join(staged, "NEW_BUILD.txt"))) throw new Error(`the refused swap took more than the .asar files out of ${staged}`);
+  if (electron) console.log(`the unpacked version's .asar files are gone (${staging} can be removed by an Electron app), the rest is there`);
+  // the next attempt starts over, as both shells and 0.3.4 do: the staging folder removed, the
+  // update unpacked again
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  unpack(done.path, staging);
   // without them it goes ahead; a file the system put there stays where it is
   for (const f of foreign) rmSync(f, { recursive: true, force: true });
   const systemFile = join(folder, process.platform === "win32" ? "desktop.ini" : process.platform === "darwin" ? ".DS_Store" : ".directory");

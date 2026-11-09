@@ -13,7 +13,9 @@
 //!    runtime is there), and lets go of its stdio. Otherwise it says `{"ok": false, "error": …}`
 //!    in the user's language and nothing is touched: the app waits for this line, shows the error
 //!    (「无法启动更新」) and goes on as it was. On Windows a new version that can't start explains
-//!    why in a window of its own first ([`STARTUP_PROBLEM`]);
+//!    why in a window of its own first ([`STARTUP_PROBLEM`]). Only the `.asar` files of the
+//!    unpacked new version go, before the answer, so that the app can remove it before its next
+//!    attempt ([`leave_removable`]; also whenever the old version stays after the answer);
 //! 2. waits for the app's main process to exit;
 //! 3. moves SpaceKnife's own entries of the app folder to the plan's `old` folder (never `data`,
 //!    never the system's files or anything else), trying again while files are still held (the
@@ -810,6 +812,220 @@ pub fn clear(folder: &Path, names: &[OsString], log: &Log) {
     }
 }
 
+// ---------------------------------------------------------------- an unpacked version left behind
+
+/// How long taking the `.asar` files out of an unpacked new version may take ([`leave_removable`]).
+/// Before a refusal this is time the app waits for the answer: 0.3.4 gives the helper 30 s for it
+/// (v0.3.4 index.ts startSwap), the startup check up to [`STARTUP_CHECK_TIMEOUT`] of them.
+pub const ASAR_BUDGET: Duration = Duration::from_secs(3);
+/// At most this many entries are looked at (the Electron shell's portable copy has a few hundred).
+const ASAR_ENTRIES: usize = 100_000;
+
+/// What a plan says of where things are, to tell the new version an app unpacked
+/// ([`unpacked_by_the_app`]).
+#[derive(Clone, Copy, Debug)]
+pub struct PlanPlaces<'a> {
+    /// the plan's log
+    pub log: &'a Path,
+    /// the plan itself, when its path is known
+    pub plan: Option<&'a Path>,
+    /// the copy's folder, when known
+    pub app: Option<&'a Path>,
+}
+
+impl<'a> PlanPlaces<'a> {
+    pub fn of(plan: &'a Plan, file: Option<&'a Path>) -> PlanPlaces<'a> {
+        PlanPlaces {
+            log: &plan.log,
+            plan: file,
+            app: Some(&plan.app),
+        }
+    }
+}
+
+/// The new version unpacked by an older app, its top folder: `<updates>/staging-<…>/<folder>`,
+/// `updates` being the folder that holds the plan's log (and the plan itself, when its path is
+/// known), as 0.3.4 and both 0.3.5 shells lay it out. `folder` must be a plain absolute path (no
+/// `.` or `..`), neither the copy's folder nor holding it, and it and its `staging-` folder real
+/// folders (no links, no junctions). Why not, when it isn't.
+pub fn unpacked_by_the_app(folder: &Path, places: PlanPlaces<'_>) -> Result<(), String> {
+    use std::path::Component;
+    let plain = folder.is_absolute()
+        && folder
+            .components()
+            .all(|c| !matches!(c, Component::CurDir | Component::ParentDir));
+    if !plain {
+        return Err(format!("{} is not a plain absolute path", folder.display()));
+    }
+    let staging = folder
+        .parent()
+        .filter(|s| {
+            s.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("staging-"))
+        })
+        .ok_or_else(|| format!("{} is not in a staging- folder", folder.display()))?;
+    let updates = staging
+        .parent()
+        .ok_or_else(|| format!("{} has no parent", staging.display()))?;
+    let beside = |file: &Path| file.parent().is_some_and(|p| same(p, updates));
+    if !beside(places.log) || places.plan.is_some_and(|p| !beside(p)) {
+        return Err(format!(
+            "{} is not the folder of the plan and its log",
+            updates.display()
+        ));
+    }
+    if let Some(app) = places.app
+        && (same(app, folder) || within(folder, app).is_some())
+    {
+        return Err(format!("{} holds the copy's folder", folder.display()));
+    }
+    for dir in [folder, staging] {
+        let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        // a junction is a link here too (FileType::is_symlink on Windows: a name surrogate)
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(format!("{} is not a folder", dir.display()));
+        }
+    }
+    Ok(())
+}
+
+/// What [`take_out_asar`] did.
+#[derive(Debug, Default)]
+pub struct AsarSweep {
+    /// removed, relative to the folder
+    pub removed: Vec<PathBuf>,
+    pub failed: Vec<(PathBuf, io::Error)>,
+    /// every entry was looked at (not stopped by the deadline or the entry limit)
+    pub whole: bool,
+}
+
+/// Whether a name is an asar archive's as Electron sees it: ending in `.asar`, in any case
+/// (Chromium's FilePath::MatchesExtension).
+fn asar_name(name: &std::ffi::OsStr) -> bool {
+    let name = name.as_encoded_bytes();
+    name.len() > b".asar".len() && name[name.len() - 5..].eq_ignore_ascii_case(b".asar")
+}
+
+/// Remove the `.asar` files in `folder`, at any depth, and nothing else: regular files named so
+/// ([`asar_name`]); folders are entered only when they are real ones (no link is followed), a
+/// folder named `….asar` (which Electron leaves alone too) and `app.asar.unpacked` stay. Stops at
+/// `deadline`.
+pub fn take_out_asar(folder: &Path, deadline: Instant) -> AsarSweep {
+    let mut out = AsarSweep::default();
+    let mut todo = vec![folder.to_owned()];
+    let mut seen = 0usize;
+    while let Some(dir) = todo.pop() {
+        let Ok(list) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in list.filter_map(Result::ok) {
+            seen += 1;
+            if seen > ASAR_ENTRIES || Instant::now() >= deadline {
+                return out;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() {
+                todo.push(path);
+            } else if kind.is_file() && asar_name(&entry.file_name()) {
+                let rel = path.strip_prefix(folder).unwrap_or(&path).to_owned();
+                match std::fs::remove_file(&path) {
+                    Ok(()) => out.removed.push(rel),
+                    Err(e) => out.failed.push((rel, e)),
+                }
+            }
+        }
+    }
+    out.whole = true;
+    out
+}
+
+/// Leave an older app a staging folder it can remove: Electron's `fs` takes an `.asar` file for a
+/// folder (the archive inside), so `rm(folder, {recursive: true})` in an Electron app fails on a
+/// folder that holds one (ENOTEMPTY on Linux, EBUSY on Windows). 0.3.4 removes its
+/// `updates/staging-<version>` that way before it unpacks an update again (v0.3.4 index.ts
+/// replacePortable, frozen), and the Electron shell's portable copy holds `resources/app.asar`:
+/// once such a version was unpacked and not put in place, every later attempt failed with
+/// 「解压失败」. So whenever the helper refuses or the old version stays, the `.asar` files of
+/// where the new version was unpacked (`folders`, those that are there) are taken out
+/// ([`take_out_asar`]), each only when it is an app's staging folder next to the plan and its
+/// log ([`unpacked_by_the_app`]); nothing else is removed. The next attempt unpacks the version
+/// anew, every shell does. Before a refusal it runs before the answer (0.3.4 ends the helper as
+/// soon as it has read it), so it is bounded by `budget`. Written to the log when there was
+/// something to do, before the line that says how the helper ended (packaging/lib.mjs
+/// swapEnding reads the last one).
+pub fn leave_removable(folders: &[&Path], places: PlanPlaces<'_>, log: &Log, budget: Duration) {
+    const SHOWN: usize = 20;
+    let deadline = Instant::now() + budget;
+    for folder in folders {
+        if std::fs::symlink_metadata(folder).is_err()
+            || unpacked_by_the_app(folder, places).is_err()
+        {
+            continue; // not there, or not an app's staging folder: left as it is
+        }
+        let mut sweep = take_out_asar(folder, deadline);
+        sweep.removed.sort();
+        if !sweep.removed.is_empty() {
+            let mut names: Vec<String> = sweep
+                .removed
+                .iter()
+                .take(SHOWN)
+                .map(|p| p.display().to_string())
+                .collect();
+            if sweep.removed.len() > SHOWN {
+                names.push(format!("… {} in all", sweep.removed.len()));
+            }
+            log.say(&format!(
+                "took {} out of {} (an Electron app can't remove a folder that holds one)",
+                names.join(", "),
+                folder.display()
+            ));
+        }
+        for (rel, e) in &sweep.failed {
+            log.say(&format!(
+                "could not take {} out of {}: {e}",
+                rel.display(),
+                folder.display()
+            ));
+        }
+        if !sweep.whole {
+            log.say(&format!(
+                "stopped looking for .asar files in {} after {} s",
+                folder.display(),
+                budget.as_secs_f64()
+            ));
+        }
+    }
+}
+
+/// [`leave_removable`] for a plan that could not be used ([`Plan::read`] failed): its `new`,
+/// when it is a version-1 plan that names one.
+fn leave_unread_plan_removable(plan_file: &Path, log: &Log) {
+    let Some(raw) = std::fs::read(plan_file)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
+        return;
+    };
+    if raw.get("v").and_then(Value::as_i64) != Some(PLAN_VERSION) {
+        return;
+    }
+    let Some(new) = raw.get("new").and_then(Value::as_str).map(PathBuf::from) else {
+        return;
+    };
+    let path = |key: &str| raw.get(key).and_then(Value::as_str).map(PathBuf::from);
+    let plan_log = path("log").unwrap_or_else(|| plan_file.with_extension("log"));
+    let app = path("app");
+    let places = PlanPlaces {
+        log: &plan_log,
+        plan: Some(plan_file),
+        app: app.as_deref(),
+    };
+    leave_removable(&[&new], places, log, ASAR_BUDGET);
+}
+
 // ---------------------------------------------------------------- starting the app
 
 /// The environment for the app: without what a bundling bootloader set for itself (`_PYI_*`,
@@ -1449,6 +1665,7 @@ pub fn run(plan: &Plan, log: &Log) -> i32 {
 pub fn run_with(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
     log.say(&format!("waiting for SpaceKnife ({}) to quit", plan.pid));
     if !(ops.wait)(plan.pid, QUIT_TIMEOUT) {
+        leave_new_removable(plan, log);
         log.say("SpaceKnife did not quit: kept the old version");
         let detail = format!(
             "SpaceKnife did not quit within {} s",
@@ -1700,13 +1917,19 @@ fn room_for_new(plan: &Plan, new_names: &[OsString]) -> io::Result<PathBuf> {
     if !taken {
         return Ok(plan.new.clone());
     }
-    let mut name = plan.new.file_name().unwrap_or_default().to_owned();
-    name.push(".not-started");
-    let beside = plan.new.with_file_name(name);
+    let beside = not_started(plan);
     if beside.exists() {
         std::fs::remove_dir_all(&beside)?;
     }
     Ok(beside)
+}
+
+/// The folder beside the unpacked new version where [`room_for_new`] puts it back when its own
+/// place is taken: `<new>.not-started`.
+fn not_started(plan: &Plan) -> PathBuf {
+    let mut name = plan.new.file_name().unwrap_or_default().to_owned();
+    name.push(".not-started");
+    plan.new.with_file_name(name)
 }
 
 /// Rename `src` to `dst`; a folder that can't be renamed whole (on Windows, one holding a running
@@ -1749,7 +1972,20 @@ fn move_entry_with(src: &Path, dst: &Path, rename: Rename<'_>) -> io::Result<()>
     result
 }
 
+/// The old version stays (or came back): the new one, where it was unpacked, is left so that the
+/// app can remove it before its next attempt ([`leave_removable`]).
+fn leave_new_removable(plan: &Plan, log: &Log) {
+    let beside = not_started(plan);
+    leave_removable(
+        &[&plan.new, &beside],
+        PlanPlaces::of(plan, None),
+        log,
+        ASAR_BUDGET,
+    );
+}
+
 fn keep_old(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
+    leave_new_removable(plan, log);
     log.say("kept the old version");
     if let Err(e) = (ops.start)(&plan.exe, &[]) {
         log.say(&format!("could not start SpaceKnife: {e}"));
@@ -1948,10 +2184,15 @@ pub fn main_hooked(
         return 2;
     };
     let plan_path = Path::new(plan_path);
+    // every refusal below: the app can still remove the new version it unpacked (0.3.4 can't, while
+    // an .asar file is in it: leave_removable), before the answer, after which 0.3.4 ends this
+    // process at once
     let plan = match Plan::read(plan_path) {
         Ok(p) => p,
         Err(e) => {
-            Log::new(&plan_path.with_extension("log")).say(&format!("not started: {e}"));
+            let log = Log::new(&plan_path.with_extension("log"));
+            leave_unread_plan_removable(plan_path, &log);
+            log.say(&format!("not started: {e}"));
             say(
                 out,
                 &serde_json::json!({"ok": false, "error": e.to_string()}),
@@ -1960,6 +2201,14 @@ pub fn main_hooked(
         }
     };
     let log = Log::new(&plan.log);
+    let refusing = || {
+        leave_removable(
+            &[&plan.new],
+            PlanPlaces::of(&plan, Some(plan_path)),
+            &log,
+            ASAR_BUDGET,
+        );
+    };
     // the user's language for the answer, which the app shows as it is
     let lang = helper_language(&plan);
     // before anything is touched: only SpaceKnife's own files are ever moved, so a folder that
@@ -1968,6 +2217,7 @@ pub fn main_hooked(
     let foreign = match plan.survey() {
         Ok(folder) => folder.foreign,
         Err(e) => {
+            refusing();
             log.say(&format!(
                 "not started: can't read {}: {e}",
                 plan.app.display()
@@ -1988,6 +2238,7 @@ pub fn main_hooked(
         if foreign.len() > SHOWN {
             names.push_str(&format!(" … {} in all", foreign.len()));
         }
+        refusing();
         log.say(&format!(
             "not started: {} holds what is not SpaceKnife's: {names}",
             plan.app.display()
@@ -2006,6 +2257,7 @@ pub fn main_hooked(
         Err(e) => {
             // before the answer: the app may end this helper as soon as it has read it
             problem(&plan, &log);
+            refusing();
             // the log's last line says how it ended (packaging/lib.mjs swapEnding)
             log.say(&format!("not started: {e}"));
             let error = start_message(lang, &e.0);
@@ -2310,15 +2562,37 @@ mod tests {
         assert_eq!(read(&plan.app.join("resources/app.asar")), "0.3.3");
         assert!(!plan.app.join("E2E_NEW_BUILD.txt").exists());
         assert!(plan.app.join("data/keep.txt").is_file());
+        // what did not move in stays where it was unpacked, but for its .asar files: 0.3.4 can
+        // remove the folder before it tries again (leave_removable)
+        assert!(!plan.new.join("resources/app.asar").exists());
+        assert!(
+            plan.new
+                .join("resources/backend/_internal/python312.dll")
+                .is_file()
+        );
         let lines = log_lines(&plan);
         assert_eq!(
-            lines[lines.len() - 2..],
+            lines[lines.len() - 3..],
             [
-                "could not move the new files in: disk full",
-                "kept the old version"
+                "could not move the new files in: disk full".to_owned(),
+                took_asar(&plan.new, &["resources/app.asar"]),
+                "kept the old version".to_owned()
             ]
         );
         assert_eq!(noted(&plan), [("0.3.4".to_owned(), "place".to_owned())]);
+    }
+
+    /// The log's line for the .asar files [`leave_removable`] took out of `folder`.
+    fn took_asar(folder: &Path, rel: &[&str]) -> String {
+        let names: Vec<String> = rel
+            .iter()
+            .map(|r| r.replace('/', std::path::MAIN_SEPARATOR_STR))
+            .collect();
+        format!(
+            "took {} out of {} (an Electron app can't remove a folder that holds one)",
+            names.join(", "),
+            folder.display()
+        )
     }
 
     #[test]
@@ -2536,6 +2810,316 @@ mod tests {
         assert_eq!(main_with(&[], &mut Vec::new(), false), 2);
     }
 
+    // ------------------------------------------------------------ an unpacked version left behind
+
+    /// More of what an unpacked new version may hold: .asar files deeper down and in any case,
+    /// and what only looks like one.
+    fn asar_files(plan: &Plan) {
+        write(
+            &plan.new.join("resources/extra/deep/second.ASAR"),
+            "archive",
+        );
+        write(
+            &plan.new.join("resources/app.asar.unpacked/native.node"),
+            "unpacked",
+        );
+        write(
+            &plan.new.join("resources/folder.asar/inside.txt"),
+            "a folder",
+        );
+        write(&plan.new.join("resources/notes.asar.txt"), "text");
+    }
+
+    /// Only the .asar files are gone from the unpacked new version; the app's folder is as it was.
+    fn assert_only_asar_gone(plan: &Plan) {
+        assert!(!plan.new.join("resources/app.asar").exists());
+        assert!(!plan.new.join("resources/extra/deep/second.ASAR").exists());
+        for kept in [
+            "resources/app.asar.unpacked/native.node",
+            "resources/folder.asar/inside.txt",
+            "resources/notes.asar.txt",
+            "resources/backend/_internal/python312.dll",
+            "E2E_NEW_BUILD.txt",
+            "data/README.txt",
+        ] {
+            assert!(plan.new.join(kept).is_file(), "{kept}");
+        }
+        assert!(plan.new.join("resources/extra/deep").is_dir());
+        assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
+        assert_eq!(read(&plan.app.join("resources/app.asar")), "0.3.3");
+        assert!(!plan.old.exists());
+    }
+
+    /// A writer that notes, as the answer is written, whether `watched` is still there.
+    struct Watching {
+        watched: PathBuf,
+        there: Vec<bool>,
+        bytes: Vec<u8>,
+    }
+
+    impl Write for Watching {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.there.push(self.watched.exists());
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_refusal_leaves_a_staging_folder_the_app_can_remove() {
+        // 0.3.4 removes updates/staging-<v> with Electron's fs before it unpacks an update again,
+        // which can't remove a folder holding an .asar file (the Electron shell's portable copy has
+        // resources/app.asar): every refusal takes those files, and only those, out of the unpacked
+        // new version, before the answer (0.3.4 ends the helper as soon as it has read it)
+        for why in ["the user's files", "can't start", "bad plan"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let plan = tree(tmp.path());
+            asar_files(&plan);
+            match why {
+                "the user's files" => write(&plan.app.join("notes.txt"), "the user's"),
+                "bad plan" => std::fs::remove_file(plan.new.join(EXE)).unwrap(),
+                _ => {}
+            }
+            // where the apps write it: next to its log, in the updates folder
+            let file = write_plan(&plan, &plan.log.with_file_name("update-0.3.4.json"), &[]);
+            let mut out = Watching {
+                watched: plan.new.join("resources/app.asar"),
+                there: Vec::new(),
+                bytes: Vec::new(),
+            };
+            let code = main_hooked(
+                &[file.to_string_lossy().into_owned()],
+                &mut out,
+                false,
+                &|_| Err(StartError("no WebKitGTK 4.1".into())),
+                &|_, _| {},
+            );
+            assert_eq!(code, 2, "{why}");
+            assert!(
+                !out.there.is_empty() && out.there.iter().all(|t| !t),
+                "{why}: the .asar files go before the answer"
+            );
+            let said: Value = serde_json::from_slice(&out.bytes).unwrap();
+            assert_eq!(said["ok"], false, "{why}");
+            assert_only_asar_gone(&plan);
+            let lines = log_lines(&plan);
+            assert_eq!(
+                lines[0],
+                took_asar(
+                    &plan.new,
+                    &["resources/app.asar", "resources/extra/deep/second.ASAR"]
+                ),
+                "{why}"
+            );
+            // the last line still says how it ended (packaging/lib.mjs swapEnding)
+            assert!(
+                lines.len() == 2 && lines[1].starts_with("not started: "),
+                "{why}: {lines:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_app_that_does_not_quit_leaves_a_staging_folder_it_can_remove() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        asar_files(&plan);
+        let code = run_with(
+            &plan,
+            &Log::new(&plan.log),
+            &Ops {
+                wait: &|_, _| false,
+                start: &|_, _| panic!("it still runs"),
+                place: &place,
+                start_new: &not_watched,
+                ready: None,
+                ready_timeout: READY_TIMEOUT,
+            },
+        );
+        assert_eq!(code, 1);
+        assert_only_asar_gone(&plan);
+        let lines = log_lines(&plan);
+        assert_eq!(
+            lines[lines.len() - 2..],
+            [
+                took_asar(
+                    &plan.new,
+                    &["resources/app.asar", "resources/extra/deep/second.ASAR"]
+                ),
+                "SpaceKnife did not quit: kept the old version".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn only_an_apps_staging_folder_loses_its_asar_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let updates = plan.log.parent().unwrap().to_owned();
+        let plan_file = updates.join("update-0.3.4.json");
+        let log = Log::new(&plan.log);
+        let places = PlanPlaces::of(&plan, Some(&plan_file));
+        let gone = |folder: &Path, places: PlanPlaces<'_>| {
+            leave_removable(&[folder], places, &log, ASAR_BUDGET);
+            !folder.join("resources/app.asar").exists()
+        };
+        // not in a staging- folder
+        let other = updates.join("elsewhere").join("SpaceKnife-0.3.4-portable");
+        write(&other.join("resources/app.asar"), "x");
+        assert!(!gone(&other, places));
+        // a staging folder, but in another folder than the plan's and its log's
+        let away = tmp
+            .path()
+            .join("updates")
+            .join("staging-0.3.4")
+            .join("SpaceKnife-0.3.4-portable");
+        write(&away.join("resources/app.asar"), "x");
+        assert!(!gone(&away, places));
+        assert!(!gone(&away, PlanPlaces::of(&plan, None)));
+        // the plan, or the log, elsewhere
+        let elsewhere = tmp.path().join("update-0.3.4.json");
+        let log_elsewhere = elsewhere.with_extension("log");
+        for wrong in [
+            PlanPlaces {
+                plan: Some(&elsewhere),
+                ..places
+            },
+            PlanPlaces {
+                log: &log_elsewhere,
+                ..places
+            },
+        ] {
+            assert!(!gone(&plan.new, wrong));
+        }
+        // the copy's folder is it, or in it
+        for app in [plan.new.clone(), plan.new.join("resources")] {
+            let wrong = PlanPlaces {
+                app: Some(&app),
+                ..places
+            };
+            assert!(unpacked_by_the_app(&plan.new, wrong).is_err());
+            assert!(!gone(&plan.new, wrong));
+        }
+        // not a plain absolute path
+        let dotted = updates
+            .join("staging-0.3.4")
+            .join("..")
+            .join("staging-0.3.4")
+            .join("SpaceKnife-0.3.4-portable");
+        assert!(!gone(&dotted, places));
+        let relative = Path::new("staging-0.3.4").join("SpaceKnife-0.3.4-portable");
+        assert!(unpacked_by_the_app(&relative, places).is_err());
+        // a file, not a folder
+        let file = updates.join("staging-0.3.5").join("SpaceKnife.asar");
+        write(&file, "x");
+        leave_removable(&[&file], places, &log, ASAR_BUDGET);
+        assert!(file.is_file());
+        assert!(
+            !plan.log.exists(),
+            "nothing to say for what is left as it is"
+        );
+        // where it belongs: those files go
+        assert_eq!(unpacked_by_the_app(&plan.new, places), Ok(()));
+        assert!(gone(&plan.new, places));
+        assert_eq!(
+            log_lines(&plan),
+            [took_asar(&plan.new, &["resources/app.asar"])]
+        );
+    }
+
+    /// A link to the folder `target` at `link`: a symbolic link, on Windows a junction (made
+    /// without any privilege).
+    fn link_folder(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            let made = std::process::Command::new("cmd")
+                .arg("/C")
+                .arg("mklink")
+                .arg("/J")
+                .arg(link)
+                .arg(target)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(made.success(), "mklink /J {}", link.display());
+        }
+    }
+
+    #[test]
+    fn no_link_is_taken_for_an_apps_staging_folder_nor_followed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let updates = plan.log.parent().unwrap().to_owned();
+        let staging = plan.new.parent().unwrap().to_owned();
+        let log = Log::new(&plan.log);
+        let places = PlanPlaces::of(&plan, None);
+        // the staging folder a link to the real one, the new version's folder a link
+        let linked = updates.join("staging-linked");
+        link_folder(&staging, &linked);
+        let via = linked.join("SpaceKnife-0.3.4-portable");
+        let new_link = staging.join("SpaceKnife-linked");
+        link_folder(&plan.new, &new_link);
+        for folder in [&via, &new_link] {
+            assert!(unpacked_by_the_app(folder, places).is_err());
+            leave_removable(&[folder], places, &log, ASAR_BUDGET);
+            assert!(plan.new.join("resources/app.asar").is_file());
+        }
+        // a link inside is not followed
+        let outside = tmp.path().join("outside");
+        write(&outside.join("theirs.asar"), "theirs");
+        link_folder(&outside, &plan.new.join("resources").join("outside"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            outside.join("theirs.asar"),
+            plan.new.join("resources/linked.asar"),
+        )
+        .unwrap();
+        leave_removable(&[&plan.new], places, &log, ASAR_BUDGET);
+        assert!(!plan.new.join("resources/app.asar").exists());
+        assert_eq!(read(&outside.join("theirs.asar")), "theirs");
+        #[cfg(unix)]
+        assert!(
+            std::fs::symlink_metadata(plan.new.join("resources/linked.asar")).is_ok(),
+            "a link is no .asar file"
+        );
+        assert_eq!(
+            log_lines(&plan),
+            [took_asar(&plan.new, &["resources/app.asar"])]
+        );
+    }
+
+    #[test]
+    fn taking_out_asar_files_stops_at_its_deadline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let sweep = take_out_asar(&plan.new, Instant::now());
+        assert!(!sweep.whole && sweep.removed.is_empty() && sweep.failed.is_empty());
+        assert!(plan.new.join("resources/app.asar").is_file());
+        leave_removable(
+            &[&plan.new],
+            PlanPlaces::of(&plan, None),
+            &Log::new(&plan.log),
+            Duration::ZERO,
+        );
+        assert_eq!(
+            log_lines(&plan),
+            [format!(
+                "stopped looking for .asar files in {} after 0 s",
+                plan.new.display()
+            )]
+        );
+        let sweep = take_out_asar(&plan.new, Instant::now() + Duration::from_secs(60));
+        assert!(sweep.whole && sweep.failed.is_empty());
+        assert_eq!(sweep.removed, [Path::new("resources").join("app.asar")]);
+        assert!(asar_name("x.Asar".as_ref()) && !asar_name(".asar".as_ref()));
+        assert!(!asar_name("app.asar.unpacked".as_ref()) && !asar_name("asar".as_ref()));
+    }
+
     // ------------------------------------------------------------ after the swap: does it run?
 
     /// The process id of a program that has ended (nothing to wait for).
@@ -2623,15 +3207,33 @@ mod tests {
     }
 
     /// The swap was undone: the old version is back in its folder, the new files where they were
-    /// unpacked, the data folder untouched.
+    /// unpacked but for their .asar files (the app removes that folder before it tries again:
+    /// leave_removable), the data folder untouched.
     fn assert_taken_back(plan: &Plan) {
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
         assert_eq!(read(&plan.app.join("resources/app.asar")), "0.3.3");
         assert!(!plan.app.join("E2E_NEW_BUILD.txt").exists());
         assert!(plan.app.join("data/keep.txt").is_file());
         assert!(plan.new.join("E2E_NEW_BUILD.txt").is_file());
-        assert_eq!(read(&plan.new.join("resources/app.asar")), "0.3.4");
+        assert_eq!(
+            read(&plan.new.join("resources/backend/_internal/python312.dll")),
+            "0.3.4"
+        );
+        assert!(!plan.new.join("resources/app.asar").exists());
+        assert!(plan.new.join("resources").is_dir());
         assert_eq!(names(&plan.old), Vec::<String>::new());
+        let lines = log_lines(plan);
+        let at = lines
+            .iter()
+            .position(|l| l == "took the new version out again")
+            .unwrap_or_else(|| panic!("{lines:?}"));
+        assert_eq!(
+            lines[at + 1..at + 3],
+            [
+                took_asar(&plan.new, &["resources/app.asar"]),
+                "kept the old version".to_owned()
+            ]
+        );
     }
 
     #[test]
@@ -2656,11 +3258,10 @@ mod tests {
             .position(|l| l == "updated")
             .expect("the files were in place");
         assert_eq!(
-            lines[at + 1..at + 4],
+            lines[at + 1..at + 3],
             [
                 "the new version did not start: it ended before it was ready, with exit code 1",
                 "took the new version out again",
-                "kept the old version"
             ],
             "{lines:?}"
         );

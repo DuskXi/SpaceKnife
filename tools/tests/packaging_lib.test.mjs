@@ -9,7 +9,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSy
 import { join, sep } from "node:path";
 import { test } from "node:test";
 
-import { alternativesGroup, isElectron, notOwned, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, treeOf, uiIn, untilUninstalled, watchSwap } from "../../packaging/lib.mjs";
+import { alternativesGroup, asarFilesIn, isElectron, notOwned, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, treeOf, uiIn, untilUninstalled, watchSwap } from "../../packaging/lib.mjs";
 import { tempFolders } from "./temp.mjs";
 
 const tmp = tempFolders("sk-packaging-lib-");
@@ -28,9 +28,14 @@ test("every way the swap's log can end is recognised", () => {
     assert.equal(swapEnding(log(going)), null, going);
   }
   assert.equal(swapEnding(""), null);
+  // the .asar files taken out of the unpacked version (leave_removable) come before the last line
+  const took = line("took resources/app.asar out of /x/updates/staging-0.3.6/y (an Electron app can't remove a folder that holds one)");
+  assert.equal(swapEnding(took + line("not started: /x holds what is not SpaceKnife's: notes.txt")), "refused");
+  assert.equal(swapEnding(log("could not move the new files in: x") + took + line("kept the old version")), "kept");
+  assert.equal(swapEnding(log("waiting for SpaceKnife (42) to quit") + took), null);
   // the words are the helper's own (crates/sk-core/src/update/swap.rs): renaming one there must fail here
   const swap = readFileSync(new URL("../../crates/sk-core/src/update/swap.rs", import.meta.url), "utf8");
-  for (const said of ['log.say("updated")', '"kept the old version"', '"SpaceKnife did not quit: kept the old version"', '"not started: {e}"', '"could not start SpaceKnife: {e}"']) {
+  for (const said of ['log.say("updated")', '"kept the old version"', '"SpaceKnife did not quit: kept the old version"', '"not started: {e}"', '"could not start SpaceKnife: {e}"', "(an Electron app can't remove a folder that holds one)"]) {
     assert.ok(swap.includes(said), `swap.rs no longer says ${said}`);
   }
 });
@@ -153,6 +158,30 @@ test("the interface and the shell are found wherever a kind of portable copy kee
   put(["resources", "app.asar"]);
   assert.equal(uiIn(t), join(t, "resources", "ui", "index.html"));
   assert.equal(isElectron(t), true);
+});
+
+test("the .asar files an Electron app could not remove are found, and only those", (t) => {
+  const dir = tmp();
+  const put = (rel, text = "x") => {
+    mkdirSync(join(dir, ...rel.slice(0, -1)), { recursive: true });
+    writeFileSync(join(dir, ...rel), text);
+  };
+  assert.deepEqual(asarFilesIn(join(dir, "missing")), []);
+  put(["top", "resources", "app.asar"]);
+  put(["top", "resources", "deep", "Other.ASAR"]);
+  put(["top", "resources", "app.asar.unpacked", "native.node"]);
+  put(["top", "resources", "folder.asar", "inside.txt"]); // a folder named so: Electron leaves it alone
+  put(["top", "resources", "notes.asar.txt"]);
+  assert.deepEqual(asarFilesIn(dir), [join(dir, "top", "resources", "app.asar"), join(dir, "top", "resources", "deep", "Other.ASAR")]);
+  // a link is not followed
+  const outside = tmp();
+  writeFileSync(join(outside, "theirs.asar"), "x");
+  try {
+    symlinkSync(outside, join(dir, "top", "linked"), "junction");
+  } catch (e) {
+    return t.skip(`no link here: ${e.code}`);
+  }
+  assert.equal(asarFilesIn(dir).length, 2);
 });
 
 test("the alternatives group is read the way each system's tool answers", () => {
