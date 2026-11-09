@@ -41,6 +41,16 @@ function body(text, name) {
 /** The index of the first line of `lines` that contains `what` (-1 when none). */
 const at = (lines, what) => lines.findIndex((l) => l.includes(what));
 
+/** `first` and `then` are both in `lines`, `first` before `then` (`at` alone gives -1 for a line
+ *  that is not there, which comes before every other). */
+function before(lines, first, then, message) {
+  const i = at(lines, first);
+  const j = at(lines, then);
+  assert.ok(i >= 0, `no ${first}`);
+  assert.ok(j >= 0, `no ${then}`);
+  assert.ok(i < j, message ?? `${first} comes after ${then}`);
+}
+
 test("nothing deletes a folder as a whole but the uninstaller's data and cache folders", () => {
   const allowed = /^"\$\{SK_(LOCALAPPDATA|APPDATA)\}\\(\$\{SK_DATA\}|\$\{BUNDLEID\}|spaceknife-electron|spaceknife-electron-updater)(\\(electron|Cache|updates))?"$/;
   const found = [];
@@ -161,7 +171,7 @@ test("the uninstaller deletes the GUID keys only when they name its own folder",
   assert.equal(keys.length, 2);
   const otherwise = uninstall.findIndex((l, i) => i > owned && l === "${Else}");
   for (const [, i] of keys) assert.ok(i > owned + 1 && i < otherwise, "a GUID key is deleted whatever folder it names");
-  assert.ok(at(uninstall, 'ReadRegStr $R0 SHCTX "${SK_INSTKEY}" "InstallLocation"') < owned);
+  before(uninstall, 'ReadRegStr $R0 SHCTX "${SK_INSTKEY}" "InstallLocation"', "Call un.SkKeysOurs");
   // its scope: the hive whose key names this folder, never HKCU just because HKLM's does not
   assert.ok(at(body(helpers, "un.SkDetectScope"), "Call un.SkScopeFor") >= 0);
 });
@@ -169,12 +179,33 @@ test("the uninstaller deletes the GUID keys only when they name its own folder",
 test("the new program is asked whether it can start before anything of the installed one is touched", () => {
   const install = body(installer, "Install");
   const check = at(install, "Call SkStartupCheck");
-  assert.ok(check > at(install, "Call SkCheckStaged"), "asked before the staged files are checked");
-  assert.ok(check < at(install, "Call SkCloseIn"), "asked after SpaceKnife is closed");
-  assert.ok(check < at(install, "Call SkRemoveElectronBuilder"));
+  before(install, "Call SkCheckStaged", "Call SkStartupCheck", "asked before the staged files are checked");
+  before(install, "Call SkStartupCheck", "Call SkCloseIn", "asked after SpaceKnife is closed");
+  before(install, "Call SkStartupCheck", "Call SkRemoveElectronBuilder");
   assert.equal(install[check - 1], 'StrCpy $R0 "$SkStage\\${MAINBINARYNAME}.exe"');
   assert.ok(at(install.slice(check), '${SkAbort} "$(skCantStart)"') > 0);
-  assert.ok(at(body(helpers, "SkStartupCheck"), "nsExec::ExecToStack /TIMEOUT=${SK_STARTUP_CHECK_MS} '\"$R0\" --startup-check'") >= 0);
+  // without the system's error boxes (a missing DLL, a crash), as the portable swap's check runs
+  // it, and this process's own error mode back afterwards
+  const startup = body(helpers, "SkStartupCheck");
+  const exec = "nsExec::ExecToStack /TIMEOUT=${SK_STARTUP_CHECK_MS} '\"$R0\" --startup-check'";
+  before(startup, "kernel32::SetErrorMode(i 3) i .r3", exec, "the program may show the system's error boxes");
+  before(startup, "kernel32::SetErrorMode(i r2)", exec, "the program may show the system's error boxes");
+  assert.equal(startup[at(startup, "kernel32::SetErrorMode(i 3) i .r3") + 1], "IntOp $2 $3 | 3");
+  before(startup, exec, "kernel32::SetErrorMode(i r3)", "the installer's own error mode is not put back");
+  // its own reasons in the installer's language (skCantStart shows them)
+  for (const name of ["skCheckTimeout", "skCheckNotRun", "skCheckExit"]) assert.ok(at(startup, `"$(${name})"`) >= 0, `no $(${name})`);
+});
+
+test("every text of SpaceKnife's own that the installer shows is there in each of its languages", () => {
+  const used = new Set([...`${installer}\n${helpers}`.matchAll(/\$\((sk\w+)\)/g)].map((m) => m[1]));
+  assert.ok(used.size > 10);
+  const missing = [];
+  for (const name of used) {
+    for (const lang of ["LANG_ENGLISH", "LANG_SIMPCHINESE"]) {
+      if (!installer.includes(`\nLangString ${name} \${${lang}} "`)) missing.push(`${name} (${lang})`);
+    }
+  }
+  assert.deepEqual(missing, []);
 });
 
 test("a failed silent update says why, and nothing half placed is started again", () => {
@@ -185,20 +216,22 @@ test("a failed silent update says why, and nothing half placed is started again"
   }
   assert.deepEqual(body(installer, ".onInstFailed"), ["Function .onInstFailed", "Call SkFailed", "FunctionEnd"]);
   const failed = body(helpers, "SkFailed");
-  assert.ok(at(failed, "Call SkRestartPrevious") < at(failed, "MessageBox"), "the installed version is started before the message");
+  before(failed, "Call SkRestartPrevious", "MessageBox", "the installed version is started before the message");
   assert.ok(at(failed, "Call SkFailureLevel") >= 0);
   const silent = at(failed, "${If} ${Silent}");
   assert.equal(failed[silent + 1], "${AndIf} $UpdateMode = 1", "a message box in a silent run that is no update");
-  assert.ok(at(failed, "kernel32::ReleaseMutex") > silent && at(failed, "kernel32::ReleaseMutex") < at(failed, "MessageBox"), "the mutex is held while the message waits");
+  before(failed, "${If} ${Silent}", "kernel32::ReleaseMutex");
+  before(failed, "kernel32::ReleaseMutex", "MessageBox", "the mutex is held while the message waits");
   assert.ok(at(failed, "MB_TOPMOST") >= 0);
   const level = body(helpers, "SkFailureLevel");
   assert.equal(level[at(level, "${If} $SkOldGone = 1") + 1], "SetErrorLevel 3");
   // the outer instance: the elevated copy's 3 means nothing to start again
   const init = body(installer, ".onInit");
-  assert.ok(at(init, "Call SkAfterElevatedFailed") > at(init, "Call SkRunElevated"));
+  before(init, "Call SkRunElevated", "Call SkAfterElevatedFailed");
   assert.equal(at(init, "Call SkRestartPrevious"), -1);
   const after = body(helpers, "SkAfterElevatedFailed");
-  assert.ok(at(after, "${If} $0 = 3") < at(after, "Call SkRestartPrevious") && at(after, "${Else}") < at(after, "Call SkRestartPrevious"));
+  before(after, "${If} $0 = 3", "${Else}");
+  before(after, "${Else}", "Call SkRestartPrevious");
   // silent runs show a banner while WebView2 downloads; EdgeUpdate asks for rights only as an administrator
   const webview2 = body(installer, "WebView2");
   const exec = at(webview2, "ExecWait \"$6 ${WEBVIEW2INSTALLERARGS} /install\" $1");
@@ -212,16 +245,17 @@ test("a failed silent update says why, and nothing half placed is started again"
 test("the UAC prompt belongs to a window in front, which goes only once it is answered", () => {
   const leave = body(installer, "SkPageScopeLeave");
   assert.equal(at(leave, "HideWindow"), -1, "the wizard hides before the prompt");
-  assert.ok(at(leave, "StrCpy $SkFromWizard 1") < at(leave, "Call SkRunElevated"));
+  before(leave, "StrCpy $SkFromWizard 1", "Call SkRunElevated");
   const run = body(helpers, "${UN}SkRunElevated");
   const shell = at(run, "shell32::ShellExecuteExW");
-  assert.ok(at(run, "user32::SetForegroundWindow(p r5)") < shell);
-  assert.ok(at(run, "user32::ShowWindow(p r5, i 0)") > shell);
+  before(run, "user32::SetForegroundWindow(p r5)", "shell32::ShellExecuteExW", "the prompt's window is not brought to the front first");
+  before(run, "shell32::ShellExecuteExW", "user32::ShowWindow(p r5, i 0)", "the window goes before the prompt is answered");
   assert.ok(at(run, '*(&l4, i 0x140, p r5, w "runas"') >= 0, "the prompt's owner window");
   // .onInit has no window of its own yet: a banner
   const init = body(installer, ".onInit");
   const elevate = at(init, "Call SkRunElevated");
-  assert.ok(at(init, 'Banner::show "$(skBannerInstalling)"') < elevate && at(init, "Pop $SkOwnerHwnd") < elevate);
+  before(init, 'Banner::show "$(skBannerInstalling)"', "Call SkRunElevated");
+  before(init, "Pop $SkOwnerHwnd", "Call SkRunElevated");
   assert.ok(init.findIndex((l, i) => i > elevate && l === "Banner::destroy") > elevate);
   // the elevated copy of the wizard skips the pages the outer instance showed
   const skip = body(installer, "SkSkipIfPassiveOrUpdate");
@@ -233,9 +267,10 @@ test("the installer starts in its own folder, shows a wizard started hidden, and
   assert.equal(init[1], "SetOutPath $TEMP", "the folder it was started in is kept by the outer instance");
   const hidden = at(init, "Call SkShowIfStartedHidden");
   assert.equal(init[hidden - 1], "${IfNot} ${Silent}");
-  assert.ok(hidden < at(init, "Call SkRunElevated"));
+  before(init, "Call SkShowIfStartedHidden", "Call SkRunElevated");
   const log = body(helpers, "${UN}SkLogLine");
-  assert.ok(at(log, 'FileOpen $R1 "${SK_LOG_FILE}" a') >= 0 && at(log, "FileClose $R1") > at(log, "FileWriteUTF16LE"));
+  before(log, 'FileOpen $R1 "${SK_LOG_FILE}" a', "FileWriteUTF16LE");
+  before(log, "FileWriteUTF16LE", "FileClose $R1");
   assert.doesNotMatch(helpers, /SkLogFile/);
 });
 
@@ -245,7 +280,8 @@ test("a relocated installation's pins point at the new program", () => {
   assert.equal(pins.length, 2);
   assert.equal(install[pins[0] - 1], "Call SkMigrateShortcut");
   const migrate = body(helpers, "SkMigratePins");
-  assert.ok(at(migrate, "SetShellVarContext current") < at(migrate, "Call SkMigrateShortcutsIn") && at(migrate, "Call SkRestoreContext") > at(migrate, "Call SkMigrateShortcutsIn"));
+  before(migrate, "SetShellVarContext current", "Call SkMigrateShortcutsIn");
+  before(migrate, "Call SkMigrateShortcutsIn", "Call SkRestoreContext");
   assert.ok(at(migrate, "User Pinned\\TaskBar") >= 0 && at(migrate, "User Pinned\\StartMenu") >= 0);
   assert.ok(at(migrate, '${AndIf} $R1 != "$INSTDIR\\${MAINBINARYNAME}.exe"') >= 0, "pins of an update in place are rewritten");
 });

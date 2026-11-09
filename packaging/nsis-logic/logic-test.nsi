@@ -111,6 +111,10 @@ LangString skUpdateFailed 1033 "not installed"
 LangString skSeeLog 1033 "see the log"
 LangString skRunAgain 1033 "run it again"
 LangString skBannerWebView2 1033 "installing WebView2"
+; installer.nsi's English words for SkStartupCheck's own reasons
+LangString skCheckTimeout 1033 "it did not answer within ${SK_STARTUP_CHECK_MS} ms."
+LangString skCheckNotRun 1033 "it could not be run."
+LangString skCheckExit 1033 "it ended with exit code $0."
 
 Function TestDefaultDirOf
   Push $0
@@ -931,11 +935,12 @@ FunctionEnd
 
 ; A stand-in for SpaceKnife.exe asked --startup-check: SK_LOGIC_ANSWER on its standard output, exit
 ; code SK_LOGIC_ANSWER_CODE; "hang": no answer until the stop file (SkStartupCheck ends it first).
-; Writes its process id to SK_LOGIC_READY. Never returns.
+; Writes its process id to SK_LOGIC_READY (not from $0 or $1: PUT opens the file with those). Never
+; returns.
 Function Answer
   ReadEnvStr $R1 SK_LOGIC_READY
-  System::Call 'kernel32::GetCurrentProcessId() i .r0'
-  !insertmacro PUT "$R1" "$0"
+  System::Call 'kernel32::GetCurrentProcessId() i .r2'
+  !insertmacro PUT "$R1" "$2"
   ReadEnvStr $R0 SK_LOGIC_ANSWER_CODE
   ${If} $R0 == "hang"
     ReadEnvStr $R2 SK_LOGIC_STOP
@@ -976,7 +981,14 @@ Function StartupCheck
   CopyFiles /SILENT "$EXEPATH" "$R8\Stage\SpaceKnife.exe"
   System::Call 'kernel32::SetEnvironmentVariableW(w "SK_LOGIC_CASE", w "answer")'
   System::Call 'kernel32::SetEnvironmentVariableW(w "SK_LOGIC_STOP", w "$R8\stop.txt")'
+  ; this program's own error mode, before and after (SkStartupCheck sets the one the program
+  ; inherits, then puts this one back; an NSIS stand-in sets its own at its start, so what the
+  ; program gets is checked in the source, tools/tests/nsis_installer.test.mjs)
+  System::Call 'kernel32::GetErrorMode() i .r0'
+  !insertmacro OUT "mode_before=$0"
   !insertmacro T_CHECK "ok" '{"ok":true,"webview":"142.0.3595.80"}' "0"
+  System::Call 'kernel32::GetErrorMode() i .r0'
+  !insertmacro OUT "mode_after=$0"
   !insertmacro T_CHECK "old" '{"error":"SpaceKnife needs the Microsoft Edge WebView2 Runtime 89.0.774.44 or later; this computer has 88.0.705.81.","ok":false}' "1"
   !insertmacro T_CHECK "missing" '{"error":"SpaceKnife needs the Microsoft Edge WebView2 Runtime, which is not installed (error 0x80070002).","ok":false}' "1"
   !insertmacro T_CHECK "noanswer" "" "0"
@@ -1100,6 +1112,8 @@ Function un.Keys
   StrCpy $INSTDIR "$PROGRAMFILES64\SpaceKnife"
   !insertmacro T_SCOPE "programfiles" "" ""
   !insertmacro T_SCOPE "programfiles_other" "" "$R8\Programs\SpaceKnife-x"
+  ; (by where the folder is, which normalizes paths: $R1 is still what it was given)
+  !insertmacro OUT "scope_kept_r1=$R1"
   StrCpy $INSTDIR $R9
 FunctionEnd
 

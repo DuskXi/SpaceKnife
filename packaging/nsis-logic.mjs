@@ -132,6 +132,10 @@ try {
     if (!/^!define SK_DEFAULT_DIR_OF TestDefaultDirOf$/m.test(test)) broken.push("logic-test.nsi does not point SK_DEFAULT_DIR_OF into the sandbox");
     // SkMigratePins names the user's pinned folders: never called here
     if (/Call SkMigratePins/.test(test)) broken.push("logic-test.nsi calls SkMigratePins (the user's own pins)");
+    // PUT opens its file with $0 (and $1): text from those would be the file's handle (a stand-in's
+    // process id, which a case then ends or waits for)
+    const put = /!insertmacro PUT "[^"]*" "[^"]*\$[01](?!\d)/.exec(test);
+    if (put) broken.push(`logic-test.nsi writes $0 or $1 with PUT (the file handle): ${put[0]}`);
     if (broken.length) throw new Error(`not run, the cases would reach outside the sandbox: ${broken.join("; ")}`);
   }
 
@@ -455,17 +459,22 @@ try {
   {
     // the new program asked --startup-check before anything is touched (stand-ins answer as the
     // real one does): its own words when it can't start, its exit code when it says nothing, a
-    // time limit (and it is ended), a program that can't be run
+    // time limit (and it is ended: the stand-in's own process id, checked after), a program that
+    // can't be run; the installer's own error mode is what it was afterwards (the program runs
+    // without the system's error boxes, SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX: checked in
+    // the source, an NSIS stand-in sets its own mode)
     const { got } = run("startup", "", {}, { timeout: 120_000 });
-    expect("SkStartupCheck", got, {
+    const kept = got.get("mode_before") === got.get("mode_after") ? "1" : `${got.get("mode_before")} -> ${got.get("mode_after")}`;
+    expect("SkStartupCheck", new Map([...got, ["mode_kept", kept]]), {
+      mode_kept: "1",
       check_ok: "",
       check_old: "SpaceKnife needs the Microsoft Edge WebView2 Runtime 89.0.774.44 or later; this computer has 88.0.705.81.",
       check_missing: "SpaceKnife needs the Microsoft Edge WebView2 Runtime, which is not installed (error 0x80070002).",
-      check_noanswer: "exit code 0",
-      check_crash: "exit code -1073741515",
-      check_hang: "it did not answer within 3000 ms",
+      check_noanswer: "it ended with exit code 0.",
+      check_crash: "it ended with exit code -1073741515.",
+      check_hang: "it did not answer within 3000 ms.",
       hang_process: "ended",
-      check_absent: "it could not be run",
+      check_absent: "it could not be run.",
     });
   }
   {
@@ -529,8 +538,9 @@ try {
     // neither names it. From the values it is given (the case reads no registry; $INSTDIR is a folder
     // of the sandbox).
     {
-      const { got } = run("keys", `/S _?=${sandbox}\\Programs\\SpaceKnife`, {}, { program: uninstaller });
+      const { got, box } = run("keys", `/S _?=${sandbox}\\Programs\\SpaceKnife`, {}, { program: uninstaller });
       expect("un.SkKeysOurs and un.SkScopeFor", got, {
+        scope_kept_r1: `${box}\\Programs\\SpaceKnife-x`,
         owned_empty: "1",
         owned_same: "1",
         owned_slash: "1",

@@ -1864,8 +1864,9 @@ FunctionEnd
 ; whose outer instance does it, nor once that version is gone); the exit code says whether the
 ; earlier version is gone (SkFailureLevel); and a silent update tells the user, as nothing else
 ; would (the app that started it has quit): a message box on top, once the mutex is free for
-; another try. A silent installation that is no update (/S of an administrator's script) shows
-; nothing.
+; another try (the elevated copy holds none: its outer instance does, and starts the installed
+; version again only once the copy, and so its box, is done). A silent installation that is no
+; update (/S of an administrator's script) shows nothing.
 Function SkFailed
   Push $0
   Call SkDropStage
@@ -1914,14 +1915,23 @@ FunctionEnd
 ; and {"ok":true,…}; what it asks is the WebView2 runtime the window needs, which the registry may
 ; claim while it is missing or broken), else why not: its own words (the "error" of its answer), or
 ; what happened (its exit code, "timeout", "error": it could not be run). Asked before anything of
-; the installed version is touched. Registers but $R0 are kept.
+; the installed version is touched. It runs without the system's error boxes, as the portable
+; swap's check runs it (sk_core update::swap startup_check): a missing DLL or a crash fails at once
+; with its status, never a box in the middle of a silent update that waits out the time limit
+; (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX, which the program inherits; this process's own
+; mode comes back afterwards). Registers but $R0 are kept.
 Function SkStartupCheck
   Push $0
   Push $1
   Push $2
+  Push $3
+  System::Call 'kernel32::SetErrorMode(i 3) i .r3'
+  IntOp $2 $3 | 3
+  System::Call 'kernel32::SetErrorMode(i r2)'
   nsExec::ExecToStack /TIMEOUT=${SK_STARTUP_CHECK_MS} '"$R0" --startup-check'
   Pop $0
   Pop $1
+  System::Call 'kernel32::SetErrorMode(i r3)'
   ${SkLog} "$R0 --startup-check: $0 $1"
   StrCpy $2 0
   ${If} $0 == "0"
@@ -1944,15 +1954,17 @@ Function SkStartupCheck
     ${EndIf}
     ClearErrors
     ${If} $R0 == ""
+      ; in the installer's language (skCantStart shows it); skCheckExit names $0, the exit code
       ${If} $0 == "timeout"
-        StrCpy $R0 "it did not answer within ${SK_STARTUP_CHECK_MS} ms"
+        StrCpy $R0 "$(skCheckTimeout)"
       ${ElseIf} $0 == "error"
-        StrCpy $R0 "it could not be run"
+        StrCpy $R0 "$(skCheckNotRun)"
       ${Else}
-        StrCpy $R0 "exit code $0"
+        StrCpy $R0 "$(skCheckExit)"
       ${EndIf}
     ${EndIf}
   ${EndIf}
+  Pop $3
   Pop $2
   Pop $1
   Pop $0
@@ -2116,9 +2128,11 @@ FunctionEnd
 
 ; $R0 = the folder HKLM's GUID key names, $R1 = HKCU's -> $SkScope: "machine" when HKLM's is this
 ; folder, "user" when HKCU's is; when neither is (the keys are gone, or another installation's),
-; by where the folder is: "machine" inside Program Files, else "user". Registers are kept.
+; by where the folder is: "machine" inside Program Files, else "user". Registers are kept ($R1
+; too: un.SkNormalize writes it).
 Function un.SkScopeFor
   Push $R0
+  Push $R1
   Push $R2
   Push $R3
   Push $R4
@@ -2165,6 +2179,7 @@ Function un.SkScopeFor
   Pop $R4
   Pop $R3
   Pop $R2
+  Pop $R1
   Pop $R0
 FunctionEnd
 
