@@ -45,8 +45,11 @@
         folder) -> one entry, same folder, no Electron files, SpaceKnife.com kept, shortcuts are the
         same files with the AUMID, data and 0.3.4's theme kept, the app restarted with --updated,
         not elevated
-    S1U uninstall of S1's result: program, entry and shortcuts gone, caches gone, data kept;
-        then a fresh install + uninstall with --delete-app-data: data gone
+    S1U uninstall of S1's result right after the app S1 started was ended (its window's WebView2
+        still running or still starting): program, entry and shortcuts gone, caches gone (the
+        shell folder too, no WebView2 of it left, nothing written into it 5 s later), data kept;
+        then a fresh install, the app started until its WebView2 runs, and uninstall with
+        --delete-app-data while it runs (the uninstaller closes it): data gone, nothing left
     S2  all users: 0.3.4 /allusers, update with /allusers started NON-elevated (UAC legs) -> the
         fork elevates itself, HKLM entry, Program Files, all-users shortcuts, app restarted as the
         user (not elevated); on a runner the same update runs elevated from the start
@@ -443,9 +446,52 @@ function Run-Capture([string]$Exe, [string]$Arguments, [int]$Timeout = 60) {
   $p.WaitForExit()
   return [pscustomobject]@{ code = $p.ExitCode; out = $out.Result; err = $err.Result }
 }
-function Stop-SpaceKnife {
+# -NoWait: what comes next runs at once (an uninstaller started right after the app was ended,
+# while the WebView2 processes of its window are still there, or still starting)
+function Stop-SpaceKnife([switch]$NoWait) {
   Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('SpaceKnife.exe', 'spaceknife-backend.exe', 'spaceknife-cli.exe', 'SpaceKnife.com') } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
-  Start-Sleep -Seconds 1
+  if (-not $NoWait) { Start-Sleep -Seconds 1 }
+}
+# the installed app started from $Dir as the user starts it (its window minimized)
+function Start-App([string]$Dir) {
+  $env:SPACEKNIFE_START_MINIMIZED = '1'
+  Start-Process -FilePath (Join-Path $Dir 'SpaceKnife.exe')
+}
+# the WebView2 processes whose command line names $Dir (--user-data-dir: the window's profile is in
+# it); WebView2's processes of other programs name their own folders
+function Get-WebView2Of([string]$Dir) {
+  return @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($Dir, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | ForEach-Object { ConvertTo-Proc $_ })
+}
+# ... waited for (at most $Seconds) until there is one: the app's window is up
+function Wait-WebView2Of([string]$Dir, [int]$Seconds = 60) {
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  do {
+    $p = @(Get-WebView2Of $Dir)
+    if ($p.Count -gt 0) { return $p }
+    Start-Sleep -Milliseconds 500
+  } while ($sw.Elapsed.TotalSeconds -lt $Seconds)
+  return @()
+}
+# how many lines the install log has (what an uninstaller adds comes after them)
+function Get-InstallLogCount { return @(Get-Content -LiteralPath $INSTALL_LOG -Encoding Unicode -ErrorAction SilentlyContinue).Count }
+# the lines about WebView2 and what was left, after line $From
+function Get-WebView2Log([int]$From) {
+  $all = @(Get-Content -LiteralPath $INSTALL_LOG -Encoding Unicode -ErrorAction SilentlyContinue)
+  if ($all.Count -le $From) { return '(nothing about it in the install log)' }
+  return (@($all[$From..($all.Count - 1)] | Where-Object { $_ -match 'WebView2|still there|removed' }) -join ' | ')
+}
+# Once an uninstaller has ended: no WebView2 process of the shell's folder runs, the folder is gone,
+# and 5 s later still is (a WebView2 still running, or still starting, writes its profile into the
+# folder after it was deleted: Local State, lockfile and more was what the Windows Server 2022
+# runner kept).
+function Assert-ShellGone([string]$When, [int]$LogFrom) {
+  $log = Get-WebView2Log $LogFrom
+  $wv2 = @(Get-WebView2Of $SHELLDIR)
+  Assert "$When : no WebView2 of the shell folder left running" ($wv2.Count -eq 0) ((Show-Procs $wv2) + "; log: $log")
+  Assert "$When : the shell folder gone" (-not (Test-Path -LiteralPath $SHELLDIR)) ((Show-Left $SHELLDIR) + "; log: $log")
+  Start-Sleep -Seconds 5
+  Assert "$When : nothing written into it 5 s later" (-not (Test-Path -LiteralPath $SHELLDIR)) ((Show-Left $SHELLDIR) + "; WebView2: " + (Show-Procs (Get-WebView2Of $SHELLDIR)))
+  Note "$When, the install log: $log"
 }
 function Reset-SpaceKnife {
   Stop-SpaceKnife
@@ -629,9 +675,13 @@ try {
   if (Want 'S1') {
     Invoke-Scenario 'S1U' 'uninstall: data kept by default, gone with --delete-app-data' {
       if (-not $script:s1Done) { Skip 'S1U' 'S1 did not get to its end'; return }
-      Stop-SpaceKnife
       $uninst = Join-Path $USERDIR 'uninstall.exe'
       if (-not (Test-Path -LiteralPath $uninst)) { Assert 'an uninstaller to run' $false "no $uninst"; return }
+      # the app S1's update started (its window's WebView2 maybe still starting) ended, and the
+      # uninstaller run at once: WebView2's processes outlive the window a while
+      Note ("WebView2 of the shell folder when the app is ended: " + (Show-Procs (Get-WebView2Of $SHELLDIR)))
+      Stop-SpaceKnife -NoWait
+      $logFrom = Get-InstallLogCount
       $code = Run-Wait $uninst '/S /currentuser'
       Assert 'uninstall /S /currentuser exits 0' ($code -eq 0) "exit $code"
       $ended = Wait-Uninstaller $USERDIR
@@ -647,21 +697,33 @@ try {
       $caches = @((Join-Path $DATA 'Cache'), (Join-Path $DATA 'updates'), $SHELLDIR, (Join-Path $ROAM 'SpaceKnife\electron'), (Join-Path $LOCAL 'spaceknife-electron-updater'))
       $left = @(Get-Present $caches)
       $why = ($left | ForEach-Object { "$_ [" + ((@(Get-ChildItem -LiteralPath $_ -Recurse -Force -File -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { $_.FullName })) -join ', ') + "]" }) -join '; '
-      $wv2 = (@(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { "$($_.CommandLine)" -like "*$SHELLDIR*" } | ForEach-Object { $_.ProcessId })) -join ','
-      $log = (@(Get-Content -LiteralPath $INSTALL_LOG -Encoding Unicode -ErrorAction SilentlyContinue | Select-String 'still there|msedgewebview2' | ForEach-Object { $_.Line })) -join ' | '
+      $wv2 = Show-Procs (Get-WebView2Of $SHELLDIR)
+      $log = Get-WebView2Log $logFrom
       Assert 'caches gone (Cache, updates, the shell folder, 0.3.4''s profile and updater copy)' ($left.Count -eq 0) "left: $why; WebView2 still running: $wv2; log: $log"
+      Assert-ShellGone 'after uninstalling right after the app was ended' $logFrom
       $code = Run-Wait $InstallerNew '/S'
       Assert 'fresh install /S' ($code -eq 0) "exit $code"
       $loc = Get-InstallLocation 'HKCU'
       Assert '  into Programs\SpaceKnife' ($loc -eq $USERDIR) "InstallLocation: $loc"
       $sm = Get-Lnk $SM_USER
       Assert '  Start menu shortcut with AUMID' ($sm.aumid -eq $AUMID) (Show-Lnk $sm)
+      # the app running, its window's WebView2 up: the uninstaller closes the app and goes on at
+      # once, while WebView2 is still on its way out
       Stop-SpaceKnife
+      Start-App $USERDIR
+      $wv = @(Wait-WebView2Of $SHELLDIR 90)
+      Assert '  the app runs, its window''s WebView2 with its profile in the shell folder' ($wv.Count -gt 0) ("running from ${USERDIR}: " + (Show-Procs (Get-AppProcs $USERDIR)))
+      $logFrom = Get-InstallLogCount
       $code = Run-Wait $uninst '/S /currentuser --delete-app-data'
-      Assert 'uninstall --delete-app-data' ($code -eq 0) "exit $code"
+      Assert 'uninstall --delete-app-data (the app running)' ($code -eq 0) "exit $code"
       $ended = Wait-Uninstaller $USERDIR
       Assert '  its copy in %TEMP% has ended' $ended $script:uninstallerBusy
+      $app = @(Get-AppProcs $USERDIR)
+      Assert '  the app was closed' ($app.Count -eq 0) (Show-Procs $app)
+      Assert-ShellGone 'after uninstalling with --delete-app-data' $logFrom
       Assert 'data folder gone' (-not (Test-Path -LiteralPath $DATA)) (Show-Left $DATA)
+      $rest = @(Get-Present @((Join-Path $ROAM 'SpaceKnife'), (Join-Path $ROAM $AUMID), (Join-Path $LOCAL 'spaceknife-electron-updater')))
+      Assert 'nothing else of SpaceKnife''s left (%APPDATA%\SpaceKnife, the shell''s roaming folder, the updater copy)' ($rest.Count -eq 0) (($rest | ForEach-Object { Show-Left $_ }) -join '; ')
     }
   }
 

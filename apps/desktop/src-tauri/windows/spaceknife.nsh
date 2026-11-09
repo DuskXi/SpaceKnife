@@ -82,6 +82,8 @@ Var SkProcPids       ; " pid pid … "
 Var SkProcInfo       ; "name (pid), …" (the log)
 Var SkProcStuck      ; "name (pid): error N, …": what could not be ended
 Var SkHeldFile       ; SkCheckReplaceable: the first file another program keeps from being replaced
+Var SkWv2Seen        ; un.SkEndWebView2In: the WebView2 processes it last set out to end (the log)
+Var SkWv2Stuck       ; un.SkEndWebView2In: the WebView2 processes it could not end, as last logged
 
 ; ------------------------------------------------------------------ small helpers (both sides)
 
@@ -2217,24 +2219,163 @@ FunctionEnd
   !define SK_APPDATA "$APPDATA"
 !endif
 
+; WebView2 keeps the window's profile in the shell's folder (window.rs data_directory:
+; <folder>\webview, EBWebView in it). Its processes outlive the window a while, or are still
+; starting when the app was ended right after it started, and write the profile meanwhile (Local
+; State, lockfile, Variations…), also into a folder that was just deleted: un.SkRemoveData lets
+; them go first. How long they may take to go by themselves before they are ended: rounds of 250 ms
+; (10 s; the logic test waits less); then how often the folder is tried, 500 ms apart.
+!ifndef SK_WEBVIEW2_POLLS
+  !define SK_WEBVIEW2_POLLS 40
+!endif
+!ifndef SK_REMOVE_TRIES
+  !define SK_REMOVE_TRIES 10
+!endif
+; How un.SkEndWebView2In lists and ends them: the system's processes (un.SkWebView2In), or the logic
+; test's list of stand-ins (no process of the system's is looked at)
+!ifndef SK_WEBVIEW2_SCAN
+  !define SK_WEBVIEW2_SCAN un.SkWebView2In
+!endif
+
+; $R5 = a command line, or the part of one from just before its --user-data-dir= on -> $R5 = the
+; folder that switch names, "" when it has none. The switch starts an argument: at the start, after
+; a space or a tab, or after a quote (the whole argument quoted, "--user-data-dir=<folder>", as a
+; child process may get a folder with a space in it). Its value is quoted (--user-data-dir="<folder>",
+; as WebView2's own processes get it), else it runs to the next space or tab. Only the first one
+; counts. Registers but $R5 are kept.
+Function un.SkUserDataDir
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  StrLen $1 $R5
+  StrCpy $0 0
+  StrCpy $3 ""
+  ${DoWhile} $0 < $1
+    StrCpy $2 $R5 16 $0
+    ${If} $2 == "--user-data-dir="
+      ${If} $0 = 0
+        StrCpy $3 " "
+      ${Else}
+        IntOp $2 $0 - 1
+        StrCpy $2 $R5 1 $2
+        ${If} $2 == '"'
+          StrCpy $3 '"'
+        ${ElseIf} $2 == " "
+        ${OrIf} $2 == "$\t"
+          StrCpy $3 " "
+        ${EndIf}
+      ${EndIf}
+      ${If} $3 != ""
+        ${ExitDo}
+      ${EndIf}
+    ${EndIf}
+    IntOp $0 $0 + 1
+  ${Loop}
+  ${If} $3 == ""
+    StrCpy $R5 ""
+  ${Else}
+    IntOp $0 $0 + 16
+    StrCpy $R5 $R5 "" $0
+    StrCpy $2 $R5 1
+    ${If} $3 == " "
+    ${AndIf} $2 == '"'
+      StrCpy $3 '"'
+      StrCpy $R5 $R5 "" 1
+    ${EndIf}
+    ; up to the closing quote, or the next space or tab
+    StrLen $1 $R5
+    StrCpy $0 0
+    ${DoWhile} $0 < $1
+      StrCpy $2 $R5 1 $0
+      ${If} $2 == $3
+        ${ExitDo}
+      ${EndIf}
+      ${If} $3 == " "
+      ${AndIf} $2 == "$\t"
+        ${ExitDo}
+      ${EndIf}
+      IntOp $0 $0 + 1
+    ${Loop}
+    StrCpy $R5 $R5 $0
+  ${EndIf}
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; $R0 = a folder, $R5 = a process's file name, $R6 = its command line (or the part of it from just
+; before its --user-data-dir= on) -> $R4 = 1 when it is a WebView2 process (msedgewebview2.exe)
+; whose profile (--user-data-dir, un.SkUserDataDir) is that folder or one in it, else 0; $R5 = the
+; folder its --user-data-dir names ("" when none). Another program's WebView2 keeps its profile in
+; a folder of its own, and a folder whose name only begins like this one is another folder. Both
+; full and long, in any case. Registers but $R4 and $R5 are kept.
+Function un.SkWebView2Ours
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R6
+  Push $R7
+  StrCpy $R4 0
+  ${If} $R5 == "msedgewebview2.exe"
+    StrCpy $R5 $R6
+    Call un.SkUserDataDir
+    ${If} $R5 != ""
+      Call un.SkNormalize
+      Push $R0
+      Call un.SkLongPath
+      Pop $R3
+      StrCpy $R0 $R5
+      Call un.SkNormalize
+      Push $R0
+      Call un.SkLongPath
+      Pop $R2
+      Push $R5
+      Call un.SkRelation
+      Pop $R5
+      ${If} $R4 == "same"
+      ${OrIf} $R4 == "inside"
+        StrCpy $R4 1
+      ${Else}
+        StrCpy $R4 0
+      ${EndIf}
+    ${EndIf}
+  ${Else}
+    StrCpy $R5 ""
+  ${EndIf}
+  Pop $R7
+  Pop $R6
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+; un.SkWebView2In (and the logic test's stand-in list): one of them ended
+!macro SK_WV2_ENDED PID DIR
+  ${un.SkLog} "ended msedgewebview2.exe ${PID} (--user-data-dir ${DIR})"
+!macroend
+
 ; PROCESSENTRY32W as an x86 NSIS reads it (dwSize; th32ProcessID at 8, szExeFile at 36)
 !if ${NSIS_PTR_SIZE} != 4
   !error "un.SkWebView2In reads PROCESSENTRY32W as laid out in a 32-bit process"
 !endif
 !define SK_PE32W_SIZE 556
 
-; $R0 = a folder, $R2 = 1: end them -> $R1 = how many WebView2 processes (msedgewebview2.exe) run
-; with their --user-data-dir in that folder (another program's WebView2 has its own folder: never
-; touched). Registers but $R1 are kept.
+; The system's WebView2 processes with their profile in the folder $R0 (un.SkWebView2Ours, by the
+; command line: another program's are never touched). $R2 = "list" -> $R1 = how many, $R3 = their
+; process ids ("4242, 4243"). $R2 = "end" -> each one ended (TerminateProcess on the handle its
+; command line was read from: never another process that got its number since) and logged; $R1 /
+; $R3 = those that could not be ("4242: error 5, …": an elevated SpaceKnife's, from an uninstaller
+; that is not). Registers but $R1 and $R3 are kept.
 Function un.SkWebView2In
-  Push $R0
-  Push $R2
-  Push $R3
   Push $R4
   Push $R5
   Push $R6
-  Push $R7
   Push $R8
+  Push $R9
   Push $0
   Push $1
   Push $2
@@ -2245,66 +2386,85 @@ Function un.SkWebView2In
   Push $7
   Push $8
   Push $9
-  StrCpy $8 $R2
-  Call un.SkNormalize
-  StrCpy $9 $R0
   StrCpy $R8 0
+  StrCpy $R3 ""
   System::Call 'kernel32::CreateToolhelp32Snapshot(i 2, i 0) p .r0' ; TH32CS_SNAPPROCESS
   ${If} $0 P<> -1
-  ${AndIf} $9 != ""
+  ${AndIf} $0 P<> 0
     System::Alloc ${SK_PE32W_SIZE}
     Pop $1
     System::Call '*$1(i ${SK_PE32W_SIZE})'
     System::Call 'kernel32::Process32FirstW(p r0, p r1) i .r2'
     ${DoWhile} $2 <> 0
       System::Call '*$1(i, i, i .r3, p, i, i, i, i, i, &w260 .r4)'
+      ; by the file name first: no other process is opened
       ${If} $4 == "msedgewebview2.exe"
-        ; PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, else only the first
-        System::Call 'kernel32::OpenProcess(i 0x101001, i 0, i r3) p .r6'
+        ; PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, with PROCESS_TERMINATE to end it ($7 = 1)
+        StrCpy $6 0
+        StrCpy $7 0
+        StrCpy $R9 0
+        ${If} $R2 == "end"
+          System::Call 'kernel32::OpenProcess(i 0x101001, i 0, i r3) p .r6 ?e'
+          Pop $R9
+          ${If} $6 P<> 0
+            StrCpy $7 1
+          ${EndIf}
+        ${EndIf}
         ${If} $6 P= 0
-          System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i r3) p .r6'
+          System::Call 'kernel32::OpenProcess(i 0x101000, i 0, i r3) p .r6'
         ${EndIf}
         ${If} $6 P<> 0
-          ; its command line (ProcessCommandLineInformation: a UNICODE_STRING, then the text)
-          System::Alloc 65552
-          Pop $7
-          System::Call 'ntdll::NtQueryInformationProcess(p r6, i 60, p r7, i 65536, p 0) i .r2'
-          StrCpy $5 ""
+          ; its command line (ProcessCommandLineInformation: a UNICODE_STRING, then the text; at
+          ; most 32767 characters), from just before its --user-data-dir= on
+          StrCpy $R6 ""
+          System::Alloc 65560
+          Pop $5
+          System::Call 'ntdll::NtQueryInformationProcess(p r6, i 60, p r5, i 65544, p 0) i .r2'
           ${If} $2 = 0
-            System::Call '*$7(&i2 .r2, &i2, p .r5)'
-            IntPtrOp $2 $5 + $2
+            System::Call '*$5(&i2 .r8, &i2, p .r9)'
+            IntPtrOp $2 $9 + $8
             System::Call '*$2(&i2 0)'
-            System::Call 'shlwapi::StrStrIW(p r5, w "--user-data-dir=") p .r2'
-            StrCpy $5 ""
+            System::Call 'shlwapi::StrStrIW(p r9, w "--user-data-dir=") p .r2'
             ${If} $2 P<> 0
-              System::Call 'kernel32::lstrcpynW(w .r5, p r2, i ${NSIS_MAX_STRLEN}) p'
-              StrCpy $5 $5 "" 16
-              ; the value: quoted, or up to the next space
-              StrCpy $2 $5 1
-              ${If} $2 == '"'
-                StrCpy $5 $5 "" 1
-                ${WordFind} "$5" '"' "+1" $5
-              ${Else}
-                ${WordFind} "$5" " " "+1" $5
+              ${If} $2 P> $9
+                IntPtrOp $2 $2 - 2
               ${EndIf}
+              System::Call 'kernel32::lstrcpynW(w .R6, p r2, i ${NSIS_MAX_STRLEN}) p'
             ${EndIf}
           ${EndIf}
-          System::Free $7
-          ${If} $5 != ""
-            StrCpy $R0 $5
-            Call un.SkNormalize
-            StrCpy $R2 $R0
-            StrCpy $R3 $9
-            Call un.SkRelation
-            ${If} $R4 == "same"
-            ${OrIf} $R4 == "inside"
-              IntOp $R8 $R8 + 1
-              ${If} $8 = 1
-                System::Call 'kernel32::TerminateProcess(p r6, i 1) i .r2'
+          System::Free $5
+          StrCpy $R5 $4
+          Call un.SkWebView2Ours
+          ${If} $R4 = 1
+          ${AndIf} $R2 == "end"
+            ${If} $7 = 1
+              System::Call 'kernel32::TerminateProcess(p r6, i 1) i .r2 ?e'
+              Pop $R9
+              ${If} $2 <> 0
                 System::Call 'kernel32::WaitForSingleObject(p r6, i 2000)'
-                ${un.SkLog} "ended msedgewebview2.exe $3 (--user-data-dir $R2): $2"
+              ${Else}
+                ; gone already (it ended meanwhile): that is not a failure
+                System::Call 'kernel32::WaitForSingleObject(p r6, i 0) i .r2'
+                ${If} $2 <> 0
+                  StrCpy $7 0
+                ${EndIf}
               ${EndIf}
             ${EndIf}
+            ${If} $7 = 1
+              !insertmacro SK_WV2_ENDED "$3" "$R5"
+            ${Else}
+              IntOp $R8 $R8 + 1
+              ${If} $R3 != ""
+                StrCpy $R3 "$R3, "
+              ${EndIf}
+              StrCpy $R3 "$R3$3: error $R9"
+            ${EndIf}
+          ${ElseIf} $R4 = 1
+            IntOp $R8 $R8 + 1
+            ${If} $R3 != ""
+              StrCpy $R3 "$R3, "
+            ${EndIf}
+            StrCpy $R3 "$R3$3"
           ${EndIf}
           System::Call 'kernel32::CloseHandle(p r6)'
         ${EndIf}
@@ -2312,8 +2472,6 @@ Function un.SkWebView2In
       System::Call 'kernel32::Process32NextW(p r0, p r1) i .r2'
     ${Loop}
     System::Free $1
-  ${EndIf}
-  ${If} $0 P<> -1
     System::Call 'kernel32::CloseHandle(p r0)'
   ${EndIf}
   StrCpy $R1 $R8
@@ -2327,42 +2485,64 @@ Function un.SkWebView2In
   Pop $2
   Pop $1
   Pop $0
+  Pop $R9
   Pop $R8
-  Pop $R7
   Pop $R6
   Pop $R5
   Pop $R4
-  Pop $R3
-  Pop $R2
-  Pop $R0
 FunctionEnd
 
-; WebView2 keeps the window's profile in the shell's folder ($R0: %LOCALAPPDATA%\<identifier>,
-; EBWebView), and its processes go a moment after the window that used them: up to 3 s for them
-; to go by themselves, then they are ended (un.SkWebView2In: those of this folder only). Registers
-; are kept.
+; The WebView2 processes with their profile in the folder $R0 (${SK_WEBVIEW2_SCAN}): waited for up
+; to $R1 rounds of 250 ms to go by themselves, then the ones still there ended. Each step goes to
+; the log; with $R1 = 0 (a look between two tries at the folder) only what it finds and ends.
+; -> $R1 = how many of them could not be ended. Registers but $R1 are kept.
 Function un.SkEndWebView2In
-  Push $R1
   Push $R2
+  Push $R3
+  Push $R8
   Push $R9
-  StrCpy $R9 0
-  ${Do}
-    StrCpy $R2 0
-    Call un.SkWebView2In
-    ${If} $R1 = 0
-    ${OrIf} $R9 >= 12
-      ${ExitDo}
+  StrCpy $R9 $R1
+  StrCpy $R8 0
+  StrCpy $R2 "list"
+  Call ${SK_WEBVIEW2_SCAN}
+  ${If} $R1 = 0
+    ${If} $R9 > 0
+      ${un.SkLog} "no WebView2 process has its profile in $R0"
     ${EndIf}
-    Sleep 250
-    IntOp $R9 $R9 + 1
-  ${Loop}
-  ${If} $R1 > 0
-    StrCpy $R2 1
-    Call un.SkWebView2In
+    Goto sk_wv2_done
   ${EndIf}
+  ${If} $R9 > 0
+    ${un.SkLog} "WebView2 with its profile in $R0 still running: msedgewebview2.exe $R3; waiting for it to go (up to $R9 x 250 ms)"
+  ${EndIf}
+  ${DoWhile} $R8 < $R9
+    Sleep 250
+    IntOp $R8 $R8 + 1
+    Call ${SK_WEBVIEW2_SCAN}
+    ${If} $R1 = 0
+      IntOp $R8 $R8 * 250
+      ${un.SkLog} "WebView2 of $R0 went by itself after about $R8 ms"
+      Goto sk_wv2_done
+    ${EndIf}
+  ${Loop}
+  ${If} $R9 > 0
+    IntOp $R8 $R8 * 250
+    ${un.SkLog} "WebView2 of $R0 still running after about $R8 ms: msedgewebview2.exe $R3; ending it"
+  ${ElseIf} $R3 != $SkWv2Seen
+    ${un.SkLog} "WebView2 with its profile in $R0 running: msedgewebview2.exe $R3; ending it"
+  ${EndIf}
+  StrCpy $SkWv2Seen $R3
+  StrCpy $R2 "end"
+  Call ${SK_WEBVIEW2_SCAN}
+  ${If} $R1 > 0
+  ${AndIf} $R3 != $SkWv2Stuck
+    ${un.SkLog} "could not end WebView2 of $R0: msedgewebview2.exe $R3"
+    StrCpy $SkWv2Stuck $R3
+  ${EndIf}
+  sk_wv2_done:
   Pop $R9
+  Pop $R8
+  Pop $R3
   Pop $R2
-  Pop $R1
 FunctionEnd
 
 ; a line in the log for a folder un.SkRemoveData should have removed and could not
@@ -2412,23 +2592,31 @@ Function un.SkRemoveData
     RMDir /r "${SK_APPDATA}\${BUNDLEID}"
   ${EndIf}
   ${If} ${SK_LOCALAPPDATA} != ""
-    ; the shell's own folder: the WebView2 processes of the window that just quit can hold it a
-    ; moment longer (un.SkCloseIn waits for the app only), then up to 5 s more for the removal
-    RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
-    ${If} ${FileExists} "${SK_LOCALAPPDATA}\${BUNDLEID}\*.*"
-      StrCpy $R0 "${SK_LOCALAPPDATA}\${BUNDLEID}"
+    ; the shell's own folder, with the window's WebView2 profile: its processes go first, whether
+    ; or not the folder is there yet (un.SkCloseIn waits for SpaceKnife's own programs only, and a
+    ; WebView2 still starting writes its profile into a folder deleted a moment before), waited
+    ; for and then ended (un.SkEndWebView2In: those of this folder only). Then the folder, a few
+    ; tries; after each one, one of them that came up meanwhile is ended and the folder tried again.
+    StrCpy $R0 "${SK_LOCALAPPDATA}\${BUNDLEID}"
+    StrCpy $R1 ${SK_WEBVIEW2_POLLS}
+    Call un.SkEndWebView2In
+    StrCpy $R9 0
+    ${Do}
+      RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
+      StrCpy $R1 0
       Call un.SkEndWebView2In
-      StrCpy $R9 0
-      ${Do}
-        RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
-        ${IfNot} ${FileExists} "${SK_LOCALAPPDATA}\${BUNDLEID}\*.*"
-        ${OrIf} $R9 >= 10
-          ${ExitDo}
+      IntOp $R9 $R9 + 1
+      ${IfNot} ${FileExists} "${SK_LOCALAPPDATA}\${BUNDLEID}\*.*"
+        ${If} $R9 > 1
+          ${un.SkLog} "un.SkRemoveData: removed $R0 (try $R9)"
         ${EndIf}
-        Sleep 500
-        IntOp $R9 $R9 + 1
-      ${Loop}
-    ${EndIf}
+        ${ExitDo}
+      ${EndIf}
+      ${If} $R9 >= ${SK_REMOVE_TRIES}
+        ${ExitDo}
+      ${EndIf}
+      Sleep 500
+    ${Loop}
     RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\Cache"
     RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\updates"
     ${If} $SkDeleteData = 1

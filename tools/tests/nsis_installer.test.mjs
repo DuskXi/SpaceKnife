@@ -87,24 +87,45 @@ test("the uninstaller removes SpaceKnife's own folders by 0.3.4's rules", () => 
   assert.equal(at(body(installer, "un.SkDataPage"), "SkDeleteAppData"), -1);
 });
 
-test("the shell's folder waits for its WebView2 processes, and only those are ended", () => {
+test("the shell's folder goes once its WebView2 processes have, and only those are ended", () => {
   const remove = body(helpers, "un.SkRemoveData");
   const shell = 'RMDir /r "${SK_LOCALAPPDATA}\\${BUNDLEID}"';
-  const end = at(remove, "Call un.SkEndWebView2In");
-  assert.ok(at(remove, shell) >= 0 && at(remove, shell) < end, "the WebView2 processes are looked for before the folder is tried once");
-  assert.ok(remove.slice(end).includes(shell), "the folder is not tried again after them");
+  // waited for (then ended) before the folder is tried at all: one still starting writes its
+  // profile into a folder deleted a moment before (the Windows Server 2022 runner, WebView2 131)
+  const first = at(remove, "Call un.SkEndWebView2In");
+  assert.ok(first >= 0 && first < at(remove, shell), "the folder is tried before its WebView2 processes are waited for");
+  assert.equal(remove[first - 1], "StrCpy $R1 ${SK_WEBVIEW2_POLLS}");
+  assert.equal(remove[first - 2], 'StrCpy $R0 "${SK_LOCALAPPDATA}\\${BUNDLEID}"');
+  // then a few tries, each followed by a look for one that came up meanwhile (ended, no wait)
+  const tries = remove.slice(first + 1);
+  const again = at(tries, "Call un.SkEndWebView2In");
+  assert.ok(at(tries, shell) >= 0 && at(tries, shell) < again && tries[again - 1] === "StrCpy $R1 0");
+  assert.ok(at(tries, "${If} $R9 >= ${SK_REMOVE_TRIES}") > again, "the tries are not bounded");
+  assert.match(helpers, /^!ifndef SK_WEBVIEW2_POLLS\n {2}!define SK_WEBVIEW2_POLLS 40\n!endif$/m, "10 s for them to go by themselves");
+  assert.match(helpers, /^!ifndef SK_WEBVIEW2_SCAN\n {2}!define SK_WEBVIEW2_SCAN un\.SkWebView2In\n!endif$/m);
+  assert.doesNotMatch(installer, /SK_WEBVIEW2_(POLLS|SCAN)|SK_REMOVE_TRIES/, "installer.nsi changes the wait");
+  // waited for (polls of 250 ms) before they are ended, the end bounded
   const wait = body(helpers, "un.SkEndWebView2In");
-  assert.ok(at(wait, "Sleep") >= 0 && at(wait, "StrCpy $R2 1") > at(wait, "Sleep"), "they are ended without being waited for");
-  // by name and by --user-data-dir: the folder itself or one in it, never another program's
+  const poll = at(wait, "${DoWhile} $R8 < $R9");
+  assert.ok(poll >= 0 && wait[poll + 1] === "Sleep 250" && at(wait, 'StrCpy $R2 "end"') > poll, "they are ended without being waited for");
+  assert.equal(wait.filter((l) => l === "Call ${SK_WEBVIEW2_SCAN}").length, 3);
+  // which ones: msedgewebview2.exe whose --user-data-dir is the folder itself or one in it, by the
+  // command line read from the handle that ends it; never another program's
+  const ours = body(helpers, "un.SkWebView2Ours");
+  const name = at(ours, '${If} $R5 == "msedgewebview2.exe"');
+  const dir = at(ours, "Call un.SkUserDataDir");
+  const inside = at(ours, '${OrIf} $R4 == "inside"');
+  assert.ok(name >= 0 && name < dir && dir < inside);
+  assert.equal(ours[inside - 1], '${If} $R4 == "same"');
   const wv2 = body(helpers, "un.SkWebView2In");
-  const name = at(wv2, '${If} $4 == "msedgewebview2.exe"');
-  const dir = at(wv2, '"--user-data-dir="');
-  const inside = at(wv2, '${OrIf} $R4 == "inside"');
+  const read = at(wv2, "ntdll::NtQueryInformationProcess(p r6");
+  const judged = at(wv2, "Call un.SkWebView2Ours");
   const kill = at(wv2, "TerminateProcess");
-  assert.ok(name >= 0 && name < dir && dir < inside && inside < kill);
-  assert.equal(wv2[inside - 1], '${If} $R4 == "same"');
+  assert.ok(at(wv2, '${If} $4 == "msedgewebview2.exe"') < read && read < judged && judged < kill);
   assert.equal(wv2.filter((l) => l.includes("TerminateProcess")).length, 1);
-  assert.ok(at(wv2, "${If} $8 = 1") < kill && at(wv2, "${If} $8 = 1") > inside, "ended without being asked to");
+  assert.equal(wv2[judged + 1], "${If} $R4 = 1");
+  assert.equal(wv2[judged + 2], '${AndIf} $R2 == "end"', "ended without being asked to");
+  assert.ok(wv2.slice(judged, kill).every((l) => !/OpenProcess/.test(l)), "ended on another handle than the one its command line came from");
 });
 
 test("the files go by name: the list an installation wrote, the next update and the uninstaller read", () => {
