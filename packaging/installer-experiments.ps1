@@ -25,7 +25,12 @@
   Machine set-up for the UAC legs (VM): an administrator account, UAC on (EnableLUA=1) and
   ConsentPromptBehaviorAdmin=0 ("elevate without prompting", so -Verb RunAs needs no click), the
   script started from a NON-elevated Windows PowerShell 5.1. GitHub runners run the script
-  elevated: the UAC-dependent assertions are recorded as "skip" there.
+  elevated: the UAC-dependent assertions are recorded as "skip" there (S2 and S7 run there all the
+  same, their updates elevated from the start).
+
+  Updates are started as 0.3.4 starts them (Spawn-Wait: CreateProcess, in the installation folder).
+  A failed silent update tells the user in a message box: Spawn-Wait reads and closes each one (the
+  failure legs assert there was one, Assert-Updated that a good update showed none).
 
   Each scenario runs on its own: an error in one is recorded as a failed assertion (the message
   and the line), SpaceKnife is reset, and the next one runs; the JSON is written after every
@@ -44,7 +49,7 @@
         then a fresh install + uninstall with --delete-app-data: data gone
     S2  all users: 0.3.4 /allusers, update with /allusers started NON-elevated (UAC legs) -> the
         fork elevates itself, HKLM entry, Program Files, all-users shortcuts, app restarted as the
-        user (not elevated)
+        user (not elevated); on a runner the same update runs elevated from the start
     S4  0.3.4 running while updating (the user runs the new installer while SpaceKnife is open) ->
         its processes closed, updated; another program holding 0.3.4's app.asar (not SpaceKnife's
         to close) -> the update stops with nothing changed, that program left alone, 0.3.4 started
@@ -56,16 +61,19 @@
         uninstaller with its own flags) -> one entry 0.3.4, no Tauri files, data kept; then 0.3.5
         again; then 0.3.5 over 0.3.5 while 0.3.5 runs (the fork's app closed, in place)
     S7  both scopes installed: per-user and per-machine 0.3.4, each updated by its own flag, the
-        other untouched
-    S8  fork -> fork (needs -NextVersion): the update command every version uses (0.3.4's,
-        install.rs nsis_update_args: --updated /S --force-run /currentuser) -> in place, a stale
-        ui\ file removed, shortcuts kept, restarted
+        other untouched (runners too)
+    S8  fork -> fork (-NextVersion; without it the candidate over itself): the update command
+        every version uses (0.3.4's, install.rs nsis_update_args: --updated /S --force-run
+        /currentuser) -> in place, a stale ui\ file the earlier build's list names removed, a file
+        of the user's on no list kept, shortcuts kept, restarted
     S9  custom folder: 0.3.4 in C:\SK Test\SpaceKnife, update without a scope flag (0.3.4 passes
         none there) -> same folder
     S10 0.3.4 installed IN the data folder (pathological) -> data kept, program moved to
         Programs\SpaceKnife, the Electron files gone from the data folder
     S11 console: SpaceKnife.com --headless --help from the install folder
     S12 Defender: MpCmdRun custom scan of the installers, detections during the run
+    S13 0.3.4 whose registry keys are gone (only its files): the update, with and without a scope
+        flag, takes it over by its files -> no Electron file and no 0.3.4 uninstaller left
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File \\host\share\installer-experiments.ps1 -Share \\host\share -IAmOnATestMachine
@@ -106,6 +114,7 @@ $uacOn = $false
 $s1Done = $false
 $s1Seed = $null
 $uninstallerBusy = ''
+$boxes = @()
 
 $LOCAL = $env:LOCALAPPDATA
 $ROAM = $env:APPDATA
@@ -179,6 +188,33 @@ public static class SkNative {
   [StructLayout(LayoutKind.Explicit)] struct PROPVARIANT { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; [FieldOffset(16)] public IntPtr p2; }
   [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
   static extern void SHGetPropertyStoreFromParsingName(string path, IntPtr bc, int flags, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore ps);
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string title);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetDlgItemTextW(IntPtr h, int id, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
+  /// the message boxes (a visible dialog with a button: not the installer's banner) of these
+  /// processes: their text, and each one closed (WM_CLOSE, as its OK)
+  public static string[] CloseBoxes(int[] pids) {
+    var found = new System.Collections.Generic.List<string>();
+    EnumWindows((h, l) => {
+      int p; GetWindowThreadProcessId(h, out p);
+      if (Array.IndexOf(pids, p) >= 0 && IsWindowVisible(h)) {
+        var c = new StringBuilder(64); GetClassNameW(h, c, 64);
+        if (c.ToString() == "#32770" && FindWindowExW(h, IntPtr.Zero, "Button", null) != IntPtr.Zero) {
+          var t = new StringBuilder(4096); GetDlgItemTextW(h, 0xFFFF, t, 4096);
+          found.Add(t.ToString());
+          PostMessageW(h, 0x10, IntPtr.Zero, IntPtr.Zero);
+        }
+      }
+      return true;
+    }, IntPtr.Zero);
+    return found.ToArray();
+  }
+
   /// System.AppUserModel.ID of a .lnk (null when none)
   public static string Aumid(string lnk) {
     try {
@@ -363,6 +399,7 @@ function Shorten([string]$Text, [int]$Max = 400) {
 # ------------------------------------------------------------------ actions
 function Run-Wait([string]$Exe, [string]$Arguments, [switch]$Elevated, [int]$Timeout = 900) {
   Note "run $(Split-Path $Exe -Leaf) $Arguments$(if ($Elevated) { ' (elevated)' })"
+  $script:boxes = @()
   $how = @{ FilePath = $Exe; PassThru = $true }
   if ($Arguments) { $how.ArgumentList = $Arguments }
   if ($Elevated -and -not (Get-Elevated)) { $how.Verb = 'RunAs' }
@@ -370,15 +407,30 @@ function Run-Wait([string]$Exe, [string]$Arguments, [switch]$Elevated, [int]$Tim
   if (-not $p.WaitForExit($Timeout * 1000)) { try { $p.Kill() } catch {} ; return -999 }
   return $p.ExitCode
 }
-# what 0.3.4 (Node spawn) and 0.3.5 (Rust Command) do: CreateProcess, no shell, not elevated by itself
-function Spawn-Wait([string]$Exe, [string]$Arguments, [int]$Timeout = 900) {
-  Note "spawn (CreateProcess) $(Split-Path $Exe -Leaf) $Arguments"
+# what 0.3.4 (Node spawn) and 0.3.5 (Rust Command) do: CreateProcess, no shell, not elevated by
+# itself, in the folder the app runs in ($WorkDir: its installation folder, the folder its shortcut
+# starts it in). A failed silent update tells the user in a message box (spaceknife.nsh SkFailed):
+# each one of the installer's (and its elevated copy's, when this script may) is read into
+# $script:boxes and closed, as the user's OK.
+function Spawn-Wait([string]$Exe, [string]$Arguments, [int]$Timeout = 900, [string]$WorkDir = '') {
+  Note "spawn (CreateProcess) $(Split-Path $Exe -Leaf) $Arguments$(if ($WorkDir) { " (in $WorkDir)" })"
+  $script:boxes = @()
   $psi = New-Object Diagnostics.ProcessStartInfo $Exe, $Arguments
   $psi.UseShellExecute = $false
+  if ($WorkDir -and (Test-Path -LiteralPath $WorkDir)) { $psi.WorkingDirectory = $WorkDir }
   try { $p = [Diagnostics.Process]::Start($psi) } catch [ComponentModel.Win32Exception] { return (-1 * $_.Exception.NativeErrorCode) }
-  if (-not $p.WaitForExit($Timeout * 1000)) { try { $p.Kill() } catch {} ; return -999 }
+  $name = [IO.Path]::GetFileNameWithoutExtension($Exe)
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  while (-not $p.WaitForExit(500)) {
+    if ($sw.Elapsed.TotalSeconds -gt $Timeout) { try { $p.Kill() } catch {} ; return -999 }
+    $ids = [int[]]@(Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+    if ($ids.Count) {
+      foreach ($t in @([SkNative]::CloseBoxes($ids))) { $script:boxes += "$t"; Note "the installer's message: $(Shorten "$t")" }
+    }
+  }
   return $p.ExitCode
 }
+function Show-Boxes { $b = @($script:boxes); if ($b.Count -eq 0) { return 'no message box' }; return ($b | ForEach-Object { Shorten "$_" }) -join ' | ' }
 # a console program, its output read (2>&1 under $ErrorActionPreference = 'Stop' would end the run
 # at its first line on stderr), ended after $Timeout s: code (-999 on a timeout), out, err
 function Run-Capture([string]$Exe, [string]$Arguments, [int]$Timeout = 60) {
@@ -480,6 +532,7 @@ function Assert-Layout034([string]$Dir, [string]$Hive) {
   Assert '0.3.4 files' ($missing.Count -eq 0) ("missing in ${Dir}: " + ($missing -join ', '))
 }
 function Assert-Updated([string]$Dir, [string]$Hive, [string]$Version, [hashtable]$LnkBefore, [string[]]$Lnks, [datetime]$Since, [switch]$NoRestartCheck) {
+  Assert 'the installer showed no message' (@($script:boxes).Count -eq 0) (Show-Boxes)
   $entries = @(Get-Entries)
   Assert 'one SpaceKnife entry in this hive' (@($entries | Where-Object { $_.hive -eq $Hive }).Count -eq 1) (Show-Entries $entries)
   Assert "the entry is the GUID key, version $Version" (@($entries | Where-Object { $_.hive -eq $Hive -and $_.key -eq $GUID -and $_.version -eq $Version }).Count -eq 1) (Show-Entries $entries)
@@ -562,11 +615,13 @@ try {
     Assert '0.3.4 shortcuts carry the AUMID' (($before[$SM_USER].aumid -eq $AUMID) -and ($before[$DT_USER].aumid -eq $AUMID)) "Start menu: $(Show-Lnk $before[$SM_USER]); desktop: $(Show-Lnk $before[$DT_USER])"
     $setup = Stage-Update $InstallerNew
     $since = Get-Date
-    $code = Spawn-Wait $setup '--updated /S --force-run /currentuser'
+    $code = Spawn-Wait $setup '--updated /S --force-run /currentuser' -WorkDir $USERDIR
     Assert 'the update exits 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     Assert-Updated $USERDIR 'HKCU' $NewVersion $before $lnks $since
     Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
     if (-not $wv) { Assert 'WebView2 installed by the update' ([bool](Get-WebView2)) "WebView2: $(Get-WebView2)" }
+    $log = Get-InstallLog 60
+    Assert 'the new program was asked --startup-check first' ($log -match 'SpaceKnife\.exe --startup-check: 0 ') $log
     Note ("install log: " + (Get-InstallLog 30))
     $script:s1Done = $true
   }
@@ -611,8 +666,10 @@ try {
   }
 
   # ---------------------------------------------------------------- S2 all users
-  Invoke-Scenario 'S2' 'all users: 0.3.4 /allusers -> 0.3.5 started non-elevated with /allusers' {
-    if (-not $uacOn) { Skip 'S2' 'needs a non-elevated admin with UAC on (ConsentPromptBehaviorAdmin=0)'; return }
+  # On the VM (UAC on, the script not elevated) the update elevates itself; on a runner (elevated,
+  # UAC off) it runs elevated from the start: everything else is the same and is checked there too.
+  Invoke-Scenario 'S2' 'all users: 0.3.4 /allusers -> 0.3.5 with /allusers (started non-elevated on the VM)' {
+    if (-not $uacOn -and -not (Get-Elevated)) { Skip 'S2' 'needs administrator rights: a runner, or a non-elevated admin with UAC on (ConsentPromptBehaviorAdmin=0)'; return }
     Reset-SpaceKnife
     $code = Run-Wait $Installer034 '/S /allusers' -Elevated
     Assert 'installed 0.3.4 /allusers' ($code -eq 0) "exit $code"
@@ -622,8 +679,12 @@ try {
     $before = @{}; foreach ($l in $lnks) { $before[$l] = Get-Lnk $l }
     $setup = Stage-Update $InstallerNew
     $since = Get-Date
-    $code = Spawn-Wait $setup '--updated /S --force-run /allusers'
-    Assert 'the update exits 0 (it elevated itself)' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    $code = Spawn-Wait $setup '--updated /S --force-run /allusers' -WorkDir $MACHDIR
+    if ($uacOn) { Assert 'the update exits 0 (it elevated itself)' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)" }
+    else {
+      Assert 'the update exits 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+      Skip 'the update elevated itself' 'the script runs elevated (a runner): no UAC prompt to go through'
+    }
     Assert-Updated $MACHDIR 'HKLM' $NewVersion $before $lnks $since
     $user = @(Get-Entries | Where-Object { $_.hive -eq 'HKCU' })
     Assert 'no per-user entry appeared' ($user.Count -eq 0) (Show-Entries $user)
@@ -641,7 +702,7 @@ try {
     $running034 = @(Start-034)
     Assert '0.3.4 runs (its app and its backend)' (@($running034 | Where-Object { $_.path -like '*\SpaceKnife.exe' }).Count -ge 1 -and @($running034 | Where-Object { $_.path -like '*\spaceknife-backend.exe' }).Count -ge 1) (Show-Procs $running034)
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser' -WorkDir $USERDIR
     Assert 'the update exits 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     $left = @(Get-StillRunning $running034)
     Assert '0.3.4''s processes were ended' ($left.Count -eq 0) (Show-Procs $left)
@@ -658,8 +719,9 @@ try {
     try {
       Start-Sleep -Seconds 3
       $since = Get-Date
-      $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+      $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser' -WorkDir $USERDIR
       Assert 'held file: the update stops (non-zero)' ($code -ne 0) "exit $code; install log: $(Get-InstallLog)"
+      Assert '  the user is told why (a message box)' (@($script:boxes).Count -ge 1) (Show-Boxes)
       Assert '  the other program was left running' (-not $holder.HasExited) "it ended, exit $(if ($holder.HasExited) { $holder.ExitCode })"
       Assert-Layout034 $USERDIR 'HKCU'
       $tauri = @(Get-Present @('spaceknife-cli.exe', 'uninstall.exe', 'ui') $USERDIR)
@@ -679,8 +741,9 @@ try {
       $elevated = @(Get-NamedProcs 'SpaceKnife.exe')
       Assert 'an elevated 0.3.4 runs' ($elevated.Count -ge 1) (Show-Procs $elevated)
       $since = Get-Date
-      $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+      $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser' -WorkDir $USERDIR
       Assert 'elevated 0.3.4: the update stops (non-zero)' ($code -ne 0) "exit $code"
+      Assert '  the user is told why (a message box)' (@($script:boxes).Count -ge 1) (Show-Boxes)
       Assert-Layout034 $USERDIR 'HKCU'
       Assert '  the elevated 0.3.4 still runs' (@(Get-StillRunning $elevated).Count -ge 1) (Show-Procs (Get-NamedProcs 'SpaceKnife.exe'))
       $log = Get-InstallLog 20
@@ -710,15 +773,16 @@ try {
       New-NetFirewallRule -DisplayName 'sk-e2e-offline' -Direction Outbound -Action Block | Out-Null
       try {
         $since = Get-Date
-        $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+        $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser' -WorkDir $USERDIR
         Assert 'the update fails' ($code -ne 0) "exit $code"
+        Assert '  the user is told why (a message box)' (@($script:boxes).Count -ge 1) (Show-Boxes)
         Assert-Layout034 $USERDIR 'HKCU'
         Assert '0.3.4 was started again' (@(Wait-App $USERDIR 30 $since).Count -ge 1) (Show-Procs (Get-AppProcs $USERDIR))
         Stop-SpaceKnife
       } finally { Remove-NetFirewallRule -DisplayName 'sk-e2e-offline' }
     }
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser' -WorkDir $USERDIR
     Assert 'the update exits 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     Assert 'WebView2 is installed now' ([bool](Get-WebView2)) "WebView2: $(Get-WebView2)"
     Assert-Updated $USERDIR 'HKCU' $NewVersion $null @($SM_USER) $since
@@ -744,7 +808,7 @@ try {
     Assert-Seeded $seed @('data') 'after the downgrade'
     Stop-SpaceKnife
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser' -WorkDir $USERDIR
     Assert 'up to 0.3.5 again' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     Assert-Updated $USERDIR 'HKCU' $NewVersion $null @($SM_USER) $since
     # the fork over itself, in place (SkRemoveListed, SkCheckReplaceable), while it runs (the
@@ -760,43 +824,61 @@ try {
   }
 
   # ---------------------------------------------------------------- S7 both scopes
+  # The per-machine update elevates itself on the VM and runs elevated from the start on a runner.
   Invoke-Scenario 'S7' 'per-user and per-machine 0.3.4 side by side' {
-    if (-not $uacOn) { Skip 'S7' 'needs a non-elevated admin with UAC on'; return }
+    if (-not $uacOn -and -not (Get-Elevated)) { Skip 'S7' 'needs administrator rights: a runner, or a non-elevated admin with UAC on'; return }
     Reset-SpaceKnife
     [void](Run-Wait $Installer034 '/S /allusers' -Elevated)
     [void](Run-Wait $Installer034 '/S /currentuser')
     $e = @(Get-Entries)
     Assert 'two 0.3.4 entries' (@($e | Where-Object { $_.version -eq '0.3.4' }).Count -eq 2) (Show-Entries $e)
-    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser' -WorkDir $USERDIR
     Assert 'per-user update' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     $e = @(Get-Entries)
     Assert 'HKCU 0.3.5, HKLM still 0.3.4' ((@($e | Where-Object { $_.hive -eq 'HKCU' -and $_.version -eq $NewVersion }).Count -eq 1) -and (@($e | Where-Object { $_.hive -eq 'HKLM' -and $_.version -eq '0.3.4' }).Count -eq 1)) (Show-Entries $e)
     Assert 'Program Files 0.3.4 untouched' (Test-Path -LiteralPath "$MACHDIR\resources\app.asar") "no $MACHDIR\resources\app.asar"
     Stop-SpaceKnife
-    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /allusers'
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /allusers' -WorkDir $MACHDIR
     Assert 'per-machine update' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+    if (-not $uacOn) { Skip 'the per-machine update elevated itself' 'the script runs elevated (a runner): no UAC prompt to go through' }
     $e = @(Get-Entries)
     Assert 'both 0.3.5' (@($e | Where-Object { $_.version -eq $NewVersion }).Count -eq 2) (Show-Entries $e)
     Stop-SpaceKnife
   }
 
   # ---------------------------------------------------------------- S8 fork -> fork
-  Invoke-Scenario 'S8' 'the fork -> a newer fork with the update command every version uses' {
-    if (-not (Test-Path -LiteralPath $InstallerNext)) { Skip 'S8' 'no -NextVersion installer in the share'; return }
+  # Files go by name only (docs/packaging.md §5): an update removes what the earlier build's list
+  # (installed-files.txt) names, never a file it does not know. The stale file stands for one of an
+  # earlier build's interface files, so it is put on that list; a file of the user's next to it is
+  # on no list and stays. Without -NextVersion the candidate updates itself the same way.
+  Invoke-Scenario 'S8' 'the fork -> a newer fork (or itself) with the update command every version uses' {
+    $next = $InstallerNext; $nextVersion = $NextVersion
+    if (-not (Test-Path -LiteralPath $next)) { $next = $InstallerNew; $nextVersion = $NewVersion; Note "no -NextVersion installer in the share: $NewVersion updates itself" }
     Reset-SpaceKnife
     $code = Run-Wait $InstallerNew '/S'
     Assert "installed $NewVersion /S" ($code -eq 0) "exit $code"
     $seed = Seed-Data
     Pin-Copy $SM_USER
     $stale = Join-Path $USERDIR "ui\stale-from-$NewVersion.js"
+    $mine = Join-Path $USERDIR 'ui\keep-me.txt'
     Set-Content -LiteralPath $stale -Value '//'
+    Set-Content -LiteralPath $mine -Value 'the user''s'
+    $list = Join-Path $USERDIR 'installed-files.txt'
+    Assert 'the installer wrote its list of files' (Test-Path -LiteralPath $list) "no $list"
+    if (Test-Path -LiteralPath $list) {
+      $listed = [IO.File]::ReadAllText($list, [Text.Encoding]::Unicode)
+      [IO.File]::WriteAllText($list, "ui\stale-from-$NewVersion.js`r`n" + $listed, [Text.Encoding]::Unicode)
+    }
     $lnks = @($SM_USER, $DT_USER, $PIN); $before = @{}; foreach ($l in $lnks) { $before[$l] = Get-Lnk $l }
     Stop-SpaceKnife
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $InstallerNext) '--updated /S --force-run /currentuser'
+    $code = Spawn-Wait (Stage-Update $next) '--updated /S --force-run /currentuser' -WorkDir $USERDIR
     Assert 'exit 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
-    Assert-Updated $USERDIR 'HKCU' $NextVersion $before $lnks $since
-    Assert 'stale ui file removed' (-not (Test-Path -LiteralPath $stale)) "still there: $stale"
+    Assert-Updated $USERDIR 'HKCU' $nextVersion $before $lnks $since
+    Assert 'the stale ui file its list names is removed' (-not (Test-Path -LiteralPath $stale)) "still there: $stale"
+    Assert 'the user''s file in ui\ (on no list) is kept' (Test-Path -LiteralPath $mine) "gone: $mine"
+    $now = if (Test-Path -LiteralPath $list) { [IO.File]::ReadAllText($list, [Text.Encoding]::Unicode) } else { '' }
+    Assert 'the new list does not name the stale file' ($now -and ($now -notmatch 'stale-from-')) "list: $(Shorten $now)"
     Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
   }
 
@@ -808,7 +890,7 @@ try {
     Assert "installed 0.3.4 in $dir" ($code -eq 0) "exit $code"
     Assert-Layout034 $dir 'HKCU'
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run'
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run' -WorkDir $dir
     Assert 'exit 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     Assert-Updated $dir 'HKCU' $NewVersion $null @($SM_USER) $since
   }
@@ -823,7 +905,7 @@ try {
     Assert '0.3.4 is in the data folder' ($loc -eq $DATA) "InstallLocation: $loc"
     Assert-Seeded $seed @('data') 'after installing 0.3.4 there'
     $since = Get-Date
-    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser'
+    $code = Spawn-Wait (Stage-Update $InstallerNew) '--updated /S --force-run /currentuser' -WorkDir $DATA
     Assert 'exit 0' ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
     Assert-Seeded $seed @('data') 'after the update'
     $loc = Get-InstallLocation 'HKCU'
@@ -832,6 +914,36 @@ try {
     Assert 'no Electron files in the data folder' ($left.Count -eq 0) ($left -join ', ')
     $sm = Get-Lnk $SM_USER
     Assert 'shortcut retargeted' ($sm.target -eq (Join-Path $USERDIR 'SpaceKnife.exe')) (Show-Lnk $sm)
+  }
+
+  # ---------------------------------------------------------------- S13 0.3.4 without its keys
+  # A 0.3.4 installation whose registry keys are gone (its files are all there is: the state a user's
+  # machine was found in). The update finds it by its files (spaceknife.nsh SkFindByFiles,
+  # SkDetectScope) and takes it over as with its keys: no Electron file and no 0.3.4 uninstaller
+  # left next to 0.3.5 (that one would later delete 0.3.5 with its RMDir /r). Once with 0.3.4's own
+  # update command, once without a scope flag (the scope from the files too).
+  Invoke-Scenario 'S13' '0.3.4 whose registry keys are gone' {
+    foreach ($how in @('--updated /S --force-run /currentuser', '--updated /S --force-run')) {
+      Reset-SpaceKnife
+      $code = Run-Wait $Installer034 '/S /currentuser'
+      Assert 'installed 0.3.4 /currentuser' ($code -eq 0) "exit $code"
+      $seed = Seed-Data
+      Stop-SpaceKnife
+      foreach ($k in @("HKCU:\Software\$GUID", "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$GUID")) { Remove-Item -LiteralPath $k -Recurse -Force -ErrorAction SilentlyContinue }
+      $e = @(Get-Entries)
+      Assert '0.3.4''s keys are gone' ($e.Count -eq 0) (Show-Entries $e)
+      $files = @(Get-Present @('SpaceKnife.exe', 'Uninstall SpaceKnife.exe', 'resources\app.asar') $USERDIR)
+      Assert '  its files are there' ($files.Count -eq 3) "in ${USERDIR}: $($files -join ', ')"
+      $lnks = @($SM_USER, $DT_USER); $before = @{}; foreach ($l in $lnks) { $before[$l] = Get-Lnk $l }
+      $since = Get-Date
+      $code = Spawn-Wait (Stage-Update $InstallerNew) $how -WorkDir $USERDIR
+      Assert "the update ($how) exits 0" ($code -eq 0) "exit $code; install log: $(Get-InstallLog)"
+      Assert-Updated $USERDIR 'HKCU' $NewVersion $before $lnks $since
+      Assert-Seeded $seed @('data', 'cache', 'electron') 'after the update'
+      $log = Get-InstallLog 60
+      Assert '  the log says it was found by its files' ($log -match "0\.3\.4's files in") $log
+      Stop-SpaceKnife
+    }
   }
 
   # ---------------------------------------------------------------- S11 console launcher

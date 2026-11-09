@@ -20,10 +20,16 @@
 // uninstaller, with a Local and a Roaming folder in the sandbox: 0.3.4's rules for an update, the
 // 「你的数据」 box and --delete-app-data; WebView2's processes that still hold the shell's folder,
 // copies of cmd.exe under msedgewebview2.exe's name, waited for or ended, another program's left
-// alone) — and that the app the installer starts gets its environment (cmd.exe stands in for it: on
-// your own desktop run this from packaging/hidden-desktop.ps1, so its console window and the
-// stand-ins' window stay out of sight). Windows only; it writes in a temporary folder only, never
-// the registry.
+// alone), a 0.3.4 whose registry keys are gone found by its files (SkFindByFiles), which GUID keys
+// the uninstaller may delete and its scope (un.SkKeysOurs / un.SkScopeFor, from values it is given),
+// the new program's --startup-check (SkStartupCheck, stand-ins answering as it does), the exit code
+// of a failed run and what the outer instance then starts again (SkFailureLevel,
+// SkAfterElevatedFailed), the pins of a relocated installation (SkMigrateShortcutsIn on a folder of
+// the sandbox), a start with SW_HIDE (SkShowIfStartedHidden), the log opened for each line — and that
+// the app the installer starts gets its environment (cmd.exe stands in for it: on your own desktop
+// run this from packaging/hidden-desktop.ps1, so its console window and the stand-ins' window stay
+// out of sight). Windows only; it writes in a temporary folder only, never the registry, and checks
+// first that the functions its cases run name none of the user's own folders, keys or pins.
 //
 //   node packaging/nsis-logic.mjs [--makensis PATH] [--utils PATH] [--helpers PATH]
 //
@@ -86,6 +92,53 @@ try {
   if (c.status !== 0 || !existsSync(exe)) fail(`makensis (${makensis}): exit ${c.status}\n${c.stdout}\n${c.stderr}`);
   console.log(`compiled with ${makensis}: ${helpers}`);
 
+  // ------------------------------------------------------------------ the sandbox holds
+  // The cases run spaceknife.nsh's functions for real: none of those they call may name the user's
+  // own installation, registry keys or pinned shortcuts itself (installer.nsi, their caller, does).
+  // Checked in the source before anything runs.
+  {
+    const source = readFileSync(helpers, "utf8");
+    const test = readFileSync(join(here, "nsis-logic", "logic-test.nsi"), "utf8");
+    const body = (name) => {
+      const m = new RegExp(`^Function ${name.replace(/[.$]/g, "\\$&")}\\r?\\n([\\s\\S]*?)^FunctionEnd`, "m").exec(source);
+      return m ? m[1].split(/\r?\n/).filter((l) => !/^\s*;/.test(l)).join("\n") : null;
+    };
+    const registry = /\b(Read|Write|Delete|Enum)Reg\w*|\bDeleteRegKey\b|\bDeleteRegValue\b/i;
+    const userFolders = /\$(APPDATA|LOCALAPPDATA|SMPROGRAMS|SMSTARTUP|STARTMENU|DESKTOP|QUICKLAUNCH|PROFILE|PROGRAMFILES\w*)\b/i;
+    const rules = [
+      // "pins": the folder it is given only
+      ["SkMigrateShortcutsIn", userFolders],
+      // "probe034": the folders it is given only
+      ["SkFindByFiles", new RegExp(`${userFolders.source}|SkDefaultDir`, "i")],
+      ["SkIsEbFolder", userFolders],
+      // "keys": the values it is given, never the registry
+      ["un.SkKeysOurs", registry],
+      ["un.SkIsInstDir", registry],
+      ["un.SkScopeFor", registry],
+      // "outer", "failcode"
+      ["SkAfterElevatedFailed", registry],
+      ["SkFailureLevel", registry],
+      ["SkStartupCheck", registry],
+    ];
+    const broken = [];
+    for (const [fn, forbidden] of rules) {
+      const code = body(fn);
+      if (code === null) broken.push(`${fn}: not found`);
+      else if (forbidden.test(code)) broken.push(`${fn} names ${forbidden.exec(code)[0]}`);
+    }
+    // SkDetectScope and SkFindPrevious (the "flags" case) look for 0.3.4's files only where
+    // SK_DEFAULT_DIR_OF says, which the test points into its sandbox
+    for (const fn of ["SkDetectScope", "SkFindPrevious"]) if (/Call SkDefaultDir/.test(body(fn) ?? "")) broken.push(`${fn} looks into the default folder itself`);
+    if (!/^!define SK_DEFAULT_DIR_OF TestDefaultDirOf$/m.test(test)) broken.push("logic-test.nsi does not point SK_DEFAULT_DIR_OF into the sandbox");
+    // SkMigratePins names the user's pinned folders: never called here
+    if (/Call SkMigratePins/.test(test)) broken.push("logic-test.nsi calls SkMigratePins (the user's own pins)");
+    // PUT opens its file with $0 (and $1): text from those would be the file's handle (a stand-in's
+    // process id, which a case then ends or waits for)
+    const put = /!insertmacro PUT "[^"]*" "[^"]*\$[01](?!\d)/.exec(test);
+    if (put) broken.push(`logic-test.nsi writes $0 or $1 with PUT (the file handle): ${put[0]}`);
+    if (broken.length) throw new Error(`not run, the cases would reach outside the sandbox: ${broken.join("; ")}`);
+  }
+
   // ------------------------------------------------------------------ run
   const temp = join(sandbox, "temp");
   mkdirSync(temp);
@@ -96,7 +149,7 @@ try {
    * copy at this path in the case's folder; `prepare(box)` runs once the case's folder (and that
    * copy) is there, before the program starts.
    */
-  function run(kind, cmdline = "", extra = {}, { program = exe, exeAt = null, prepare = () => {}, timeout = 60_000 } = {}) {
+  function run(kind, cmdline = "", extra = {}, { program = exe, exeAt = null, prepare = () => {}, timeout = 60_000, windowsHide = false } = {}) {
     const out = join(sandbox, `out-${++n}.txt`);
     const box = join(sandbox, `box-${n}`);
     mkdirSync(box);
@@ -109,6 +162,7 @@ try {
     prepare(box);
     const r = spawnSync(program, cmdline ? [cmdline] : [], {
       windowsVerbatimArguments: true,
+      windowsHide,
       encoding: "utf8",
       timeout,
       env: { ...process.env, TMP: temp, TEMP: temp, SK_LOGIC_CASE: kind, SK_LOGIC_OUT: out, SK_LOGIC_SANDBOX: box, ...extra },
@@ -120,7 +174,7 @@ try {
       const at = line.startsWith("dir ") ? line.lastIndexOf("=") : line.indexOf("=");
       got.set(line.slice(0, at), line.slice(at + 1));
     }
-    return { got, box };
+    return { got, box, status: r.status };
   }
   /** `why`: keys of `got` that say why (HRESULTs and the like), printed when the case fails. */
   function expect(what, got, want, why = []) {
@@ -135,7 +189,7 @@ try {
 
   // 0.3.4's flags (v0.3.4 update.ts nsisUpdateArgs, its uninstaller's) and Tauri's; the elevated
   // copy gets the same ones, its own flag and the scope, /D= last
-  const none = { passive: "0", update: "0", noshortcut: "0", run: "0", runargs: "", scope: "", forced: "0", inner: "0", keepshortcuts: "0", deletedata: "0", deleteappdata: "0" };
+  const none = { passive: "0", update: "0", noshortcut: "0", run: "0", runargs: "", scope: "", forced: "0", inner: "0", wizard: "0", keepshortcuts: "0", deletedata: "0", deleteappdata: "0" };
   const flags = [
     ["--updated /S --force-run /currentuser", { update: "1", run: "1", runargs: "--updated", scope: "user", forced: "1", keepshortcuts: "1", flag: "/currentuser", elevated: "--updated /S --force-run /currentuser --sk-elevated /currentuser" }],
     ["--updated /S --force-run /allusers", { update: "1", run: "1", runargs: "--updated", scope: "machine", forced: "1", keepshortcuts: "1", flag: "/allusers", elevated: "--updated /S --force-run /allusers --sk-elevated /allusers" }],
@@ -149,6 +203,8 @@ try {
     ["/S /R --updated --no-desktop-shortcut", { update: "1", noshortcut: "1", run: "1", runargs: "--updated", keepshortcuts: "1" }],
     ["/s --UPDATED /r /AllUsers /D=C:\\Some Dir\\SpaceKnife", { update: "1", run: "1", runargs: "--updated", scope: "machine", forced: "1", keepshortcuts: "1", elevated: "/s --UPDATED /r /AllUsers --sk-elevated /allusers /D=C:\\Some Dir\\SpaceKnife" }],
     ["/S --sk-elevated /allusers", { scope: "machine", forced: "1", inner: "1" }],
+    // the elevated copy the scope page starts: it skips the pages the outer instance showed
+    ["--sk-elevated /allusers --sk-wizard /D=C:\\Some Dir\\SpaceKnife", { scope: "machine", forced: "1", inner: "1", wizard: "1", elevated: "--sk-elevated /allusers --sk-wizard --sk-elevated /allusers /D=C:\\Some Dir\\SpaceKnife" }],
   ];
   for (const [cmdline, want] of flags) {
     const { got } = run("flags", cmdline);
@@ -351,6 +407,96 @@ try {
     expect("SkCheckReplaceable", got, { held: "ui\\index.html", shared: "", free: "" });
   }
   {
+    // 0.3.4 whose registry keys are gone (its files are all there is): found by its uninstaller and
+    // its app.asar, in the folder /D= gives, else in the scope's default one (a folder of the
+    // sandbox here), with its version read from its program; one of the two files is not enough
+    const { got, box } = run("probe034");
+    const eb = (dir, def) => `eb|${box}\\${dir}|${box}\\${dir}\\Uninstall SpaceKnife.exe|0.3.4|${def ? `${box}\\${def}` : ""}`;
+    const nothing = (def) => `||||${def ? `${box}\\${def}` : ""}`;
+    expect("SkFindByFiles: 0.3.4 without its keys", got, {
+      default: eb("Default\\SpaceKnife", "Default\\SpaceKnife"),
+      cmd: eb("Mine\\SpaceKnife", "Default\\SpaceKnife"),
+      cmd_empty: eb("Default\\SpaceKnife", "Default\\SpaceKnife"),
+      asar_only: nothing("AsarOnly\\SpaceKnife"),
+      uninstaller_only: nothing("UninstallerOnly\\SpaceKnife"),
+      empty: nothing("Empty\\SpaceKnife"),
+      none: nothing(""),
+      missing: nothing("Gone\\SpaceKnife"),
+      kept: "1",
+    });
+  }
+  {
+    // a failed run's exit code: 3 once the earlier version is gone (the elevated copy tells its
+    // outer instance so), NSIS's own otherwise (2: a run the script stopped, here by Quit)
+    for (const [gone, code] of [["1", 3], ["0", 2], ["", 2]]) {
+      const { got, status } = run("failcode", "", { SK_LOGIC_GONE: gone });
+      expect(`SkFailureLevel: the earlier version gone = "${gone}"`, new Map([...got, ["status", String(status)]]), { gone, status: String(code) });
+    }
+  }
+  {
+    // the outer instance after its elevated copy failed: the installed version is started again
+    // (a stand-in in the sandbox), but not after exit code 3 (it is gone, the new one is not whole)
+    for (const [code, restarted] of [["2", "1"], ["-1", "1"], ["3", "0"]]) {
+      const { got } = run("outer", "", { SK_LOGIC_INNER_CODE: code });
+      // elevated through UAC, the stand-in starts as the desktop user without this environment
+      const want = got.get("elevation") === "2" && restarted === "1" ? /./ : restarted;
+      expect(`SkAfterElevatedFailed: the elevated copy exited with ${code}`, got, { restarted: want });
+    }
+  }
+  {
+    // a relocated installation's pins (a folder of the sandbox standing in for User Pinned\TaskBar):
+    // the old program's points here with the AppUserModelID, another program's and a file that is
+    // no shortcut stay, a folder that is not there is nothing
+    const { got, box } = run("pins");
+    const aumid = (lnk) => (readFileSync(join(box, "pins", lnk)).includes(Buffer.from("io.github.duskxi.spaceknife", "utf16le")) ? "1" : "0");
+    expect(
+      "SkMigrateShortcutsIn",
+      new Map([...got, ["moved_aumid", aumid("SpaceKnife.lnk")], ["other_aumid", aumid("Mine.lnk")]]),
+      { moved: "1", moved_aumid: "1", other: "1", other_aumid: "0", notes: "the user's", no_pins: "0", kept_r1: `${box}\\old\\SpaceKnife.exe`, kept_r2: `${box}\\pins` },
+      ["moved_why", "moved_want"],
+    );
+  }
+  {
+    // the new program asked --startup-check before anything is touched (stand-ins answer as the
+    // real one does): its own words when it can't start, its exit code when it says nothing, a
+    // time limit (and it is ended: the stand-in's own process id, checked after), a program that
+    // can't be run; the installer's own error mode is what it was afterwards (the program runs
+    // without the system's error boxes, SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX: checked in
+    // the source, an NSIS stand-in sets its own mode)
+    const { got } = run("startup", "", {}, { timeout: 120_000 });
+    const kept = got.get("mode_before") === got.get("mode_after") ? "1" : `${got.get("mode_before")} -> ${got.get("mode_after")}`;
+    expect("SkStartupCheck", new Map([...got, ["mode_kept", kept]]), {
+      mode_kept: "1",
+      check_ok: "",
+      check_old: "SpaceKnife needs the Microsoft Edge WebView2 Runtime 89.0.774.44 or later; this computer has 88.0.705.81.",
+      check_missing: "SpaceKnife needs the Microsoft Edge WebView2 Runtime, which is not installed (error 0x80070002).",
+      check_noanswer: "it ended with exit code 0.",
+      check_crash: "it ended with exit code -1073741515.",
+      check_hang: "it did not answer within 3000 ms.",
+      hang_process: "ended",
+      check_absent: "it could not be run.",
+    });
+  }
+  {
+    // started as 0.3.4 starts the installer (Node's windowsHide: SW_HIDE in STARTUPINFO), a window
+    // that is never shown takes the startup's SW_HIDE, so that the wizard's first ShowWindow shows
+    // it; started otherwise, nothing happens
+    const hidden = run("hidden", "", {}, { windowsHide: true }).got;
+    expect("SkShowIfStartedHidden: started with windowsHide", hidden, { usewindow: "1", show: "0", consumed: "1" });
+    const shown = run("hidden").got;
+    expect("SkShowIfStartedHidden: started without it", shown, { consumed: "0" });
+  }
+  {
+    // the log is opened for each line: another instance (the elevated copy) writes between two of
+    // this one's lines; the error flag is what it was
+    const mark = `sk-log-${process.pid}-${Date.now()}`;
+    const { got } = run("log", "", { SK_LOGIC_MARK: mark });
+    const logFile = join(temp, "SpaceKnife-install.log");
+    const lines = (existsSync(logFile) ? readFileSync(logFile).toString("utf16le") : "").split("\r\n").filter((l) => l.startsWith(mark));
+    const order = JSON.stringify(lines.slice(0, 3)) === JSON.stringify([`${mark} first`, `${mark} second`, `${mark} third`]) ? "1" : JSON.stringify(lines);
+    expect("SkLogLine: one line at a time", new Map([...got, ["order", order]]), { child: /^\d+$/, order: "1", errors_after: "0", errors_kept: "1" });
+  }
+  {
     // What the uninstaller removes of SpaceKnife's own folders (un.SkRemoveData), by the rules of
     // 0.3.4's uninstaller (v0.3.4 apps/electron/build/installer.nsh, and electron-builder's own
     // --delete-app-data part): run in this program's uninstaller, in the sandbox's Local and
@@ -385,6 +531,34 @@ try {
     ]) {
       const { got } = run("removedata", `${cmdline} _?=${sandbox}\\Programs\\SpaceKnife`, env, { program: uninstaller });
       expect(`un.SkRemoveData: ${what}`, got, want, ["error", "update", "deletedata", "deleteappdata"]);
+    }
+
+    // which GUID keys the uninstaller deletes: only those that name its own folder (or none), never
+    // another installation's in the same hive; and its scope from them, by where the folder is when
+    // neither names it. From the values it is given (the case reads no registry; $INSTDIR is a folder
+    // of the sandbox).
+    {
+      const { got, box } = run("keys", `/S _?=${sandbox}\\Programs\\SpaceKnife`, {}, { program: uninstaller });
+      expect("un.SkKeysOurs and un.SkScopeFor", got, {
+        scope_kept_r1: `${box}\\Programs\\SpaceKnife-x`,
+        owned_empty: "1",
+        owned_same: "1",
+        owned_slash: "1",
+        owned_quoted: "1",
+        owned_case: "1",
+        owned_dot: "1",
+        owned_short: "1",
+        owned_alike: "0",
+        owned_parent: "0",
+        owned_child: "0",
+        owned_elsewhere: "0",
+        scope_hklm: "machine",
+        scope_hkcu: "user",
+        scope_neither: "user",
+        scope_none: "user",
+        scope_programfiles: "machine",
+        scope_programfiles_other: "machine",
+      }, ["error", "instdir"]);
     }
 
     // WebView2's processes of the window that just quit hold the shell's folder a moment longer:

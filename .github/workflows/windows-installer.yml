@@ -177,10 +177,14 @@ jobs:
           node tools/package_checks.mjs crt "$u"
 
       # spaceknife.nsh run for real without installing anything: the flags of 0.3.4 and Tauri, the
-      # folder guard, the staging of the new files, the app started with the installer's environment
+      # folder guard, the staging of the new files, the app started with the installer's environment,
+      # 0.3.4 found by its files, the keys the uninstaller may delete, the new program's
+      # --startup-check, a start with SW_HIDE, the log line by line (all in a sandbox folder)
       - name: The installer's logic
         run: node packaging/nsis-logic.mjs
 
+      # first the wizard as 0.3.4 starts it (windowsHide: SW_HIDE in STARTUPINFO), which must show
+      # a visible window (closed again), then a silent installation and the rest
       - name: Install, run, update and uninstall
         timeout-minutes: 20
         run: node packaging/nsis-e2e.mjs "target/installers/SpaceKnife-$version-Setup-x64.exe"
