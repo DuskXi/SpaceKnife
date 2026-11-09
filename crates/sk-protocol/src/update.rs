@@ -120,6 +120,24 @@ pub struct UpdateDownload {
     pub error: Option<String>,
 }
 
+/// A portable copy's update that was undone after the app had quit: the old version was kept or
+/// came back (the swap's note `rollback-<version>.json` in the updates folder).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateRollback {
+    /// The version that was not put in place, or was taken out again
+    pub version: String,
+    /// What happened, in the session's language
+    pub reason: String,
+    /// The swap's own words (English), as its log has them
+    #[serde(default)]
+    pub detail: String,
+    #[serde(default)]
+    pub at: Option<DateTime>,
+    /// The update's log, on the computer SpaceKnife runs on
+    #[serde(default)]
+    pub log: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateStatus {
     /// Version of the running app
@@ -156,6 +174,9 @@ pub struct UpdateStatus {
     /// When the next automatic check is due; None while automatic checks are off, and where the backend makes none (tests, demos, tools)
     #[serde(default)]
     pub next_check_at: Option<DateTime>,
+    /// The last update of this portable copy was undone (to a version newer than this one): shown until update.dismiss, which also removes the note
+    #[serde(default)]
+    pub rollback: Option<UpdateRollback>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

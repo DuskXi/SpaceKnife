@@ -126,7 +126,12 @@ Every 15 seconds the backend compares its memory with what the open scans need. 
 
 ### "Can't start the update"
 
-**Seamless update** of a portable copy asks the new version whether it can start on this computer before it replaces anything. When the answer is no, nothing is changed: the copy goes on as it was, and the card says `Can't start the update: the new version can't start on this computer: …` with the reason. The usual reasons are a missing web view: the WebView2 Runtime on Windows, or WebKitGTK 4.1 for the small Linux portable (RHEL 9 has none). Install it and try again, or take the other download ([Which file to download](../install/#which-file-to-download)). The steps are in `updates/update-<version>.log` in the data folder.
+**Seamless update** of a portable copy checks two things before it replaces anything. When either says no, nothing is changed: the copy goes on as it was, and the card says **Can't start the update:** and why.
+
+- **The folder holds more than SpaceKnife.** The update only ever replaces SpaceKnife's own files, so when the program's folder also holds other things of yours (another app, documents), it doesn't start and names them: *The folder also holds things that are not SpaceKnife's (…)*. Put SpaceKnife and its `data` folder in a folder of their own and try again, or use **Replace it yourself**. Files your system puts in folders (`desktop.ini`, `.DS_Store`) don't count and stay where they are.
+- **The new version can't start on this computer.** The usual reason is a missing web view: the WebView2 Runtime on Windows (then a window of the new version says what is missing and where to get it), or WebKitGTK 4.1 for the small Linux portable (RHEL 9 has none). Install it and try again, or take the other download ([Which file to download](../install/#which-file-to-download)).
+
+If an update was put in place but had to be undone (the new version didn't start), the old version says so on its update card when it opens again: **The update didn't complete: …**. The steps are in `updates/update-<version>.log` in the data folder.
 
 ### The installer update didn't finish
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { UpdateDownload, UpdateInfo, UpdateStatus } from "@/protocol/generated";
 
-import { announced, autoSurface, downloadOf, downloadPct, hasUpdate, type InstallKind, installChoices, notesFor, plainInline, releaseDate, seriesName, summarizeNotes, visibleSurface } from "./updates";
+import { announced, autoSurface, downloadOf, downloadPct, hasUpdate, type InstallKind, installChoices, isPreview, notesFor, plainInline, releaseDate, rolledBack, seriesName, summarizeNotes, visibleSurface } from "./updates";
 
 const info = (patch: Partial<UpdateInfo> = {}): UpdateInfo => ({
   version: "0.4.0",
@@ -42,6 +42,7 @@ const status = (patch: Partial<UpdateStatus> = {}): UpdateStatus => ({
   series: "0.4",
   muted: false,
   download: dl(),
+  rollback: null,
   ...patch,
 });
 
@@ -82,6 +83,41 @@ describe("surfaces", () => {
     expect(visibleSurface(status({ level: "major" }), false)).toBe("dialog");
     expect(visibleSurface(status({ level: "patch" }), false)).toBe("none");
     expect(visibleSurface(status({ level: "none", latest: null }), true)).toBe("none");
+  });
+
+  it("says that an update was undone on its card, at any level, until it is closed", () => {
+    const rollback = { version: "0.4.0", reason: "0.4.0 换上之后没能启动，已换回原来的版本", detail: "it ended before it was ready, with exit code 1", at: null, log: null };
+    expect(rolledBack(status())).toBe(false);
+    for (const level of ["patch", "minor"] as const) {
+      // also when its card was closed before, or its series skipped: this is about the attempt
+      for (const patch of [{}, { dismissed: true }, { muted: true, series: "0.4" }]) {
+        const st = status({ level, rollback, ...patch });
+        expect(rolledBack(st)).toBe(true);
+        expect(autoSurface(st)).toBe("corner");
+        expect(visibleSurface(st, false)).toBe("corner");
+        expect(visibleSurface(st, true)).toBe("anchored");
+      }
+    }
+    expect(autoSurface(status({ level: "major", rollback, dismissed: true }))).toBe("dialog");
+    // no newer release to show it on: not on a card (actions.ts says it in a toast)
+    expect(rolledBack(status({ level: "none", latest: null, rollback }))).toBe(false);
+    expect(autoSurface(status({ level: "none", latest: null, rollback }))).toBe("none");
+  });
+});
+
+describe("preview", () => {
+  it("tags a release as a preview by the channel's rule, not GitHub's flag alone during 0.x", () => {
+    // every 0.x release is a GitHub pre-release; 「只要正式版」 offers those without a pre-release part
+    expect(isPreview({ version: "0.3.6", prerelease: true })).toBe(false);
+    expect(isPreview({ version: "v0.3.6", prerelease: false })).toBe(false);
+    expect(isPreview({ version: "0.4.0-beta.1", prerelease: false })).toBe(true);
+    expect(isPreview({ version: "0.4.0-rc.1+build.5", prerelease: true })).toBe(true);
+    // from 1.0 on GitHub's flag counts
+    expect(isPreview({ version: "1.1.0", prerelease: true })).toBe(true);
+    expect(isPreview({ version: "1.0.0", prerelease: false })).toBe(false);
+    expect(isPreview({ version: "1.0.0+build.7", prerelease: false })).toBe(false);
+    // not a version: never offered as stable
+    expect(isPreview({ version: "nightly", prerelease: false })).toBe(true);
   });
 });
 

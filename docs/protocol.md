@@ -141,9 +141,9 @@ token 是这次启动生成的，放在打印出的链接的片段里（`#token=
 | `palette.preview` | 一个过滤式在整个扫描上的匹配项数与大小（命令面板的过滤直达项与最近过滤项），按规范形与数据版本缓存 |
 | `palette.remember` / `palette.clear` | 记录在面板里执行过的路径跳转（按扫描目标）与过滤（全局）；清除某扫描目标的跳转和全部过滤 |
 | `view.render`、`view.list`、`view.close` | 重发一帧；列出本会话的视图；关闭视图（会话断开或扫描关闭时自动关闭） |
-| `update.status` | 更新检查的现状（`UpdateStatus`）：当前版本、安装方式、是否自动检查、通道、上次成功检查的时间与失败原因、下次自动检查的时间 `next_check_at`（自动检查关闭时为空）、落后程度 `level`、最新版本（标题、发布页、说明、本安装方式对应的文件）、卡片是否已关闭 `dismissed`、最新版本所属的系列 `series`（次版本更新为 major.minor，如 `"0.4"`；主版本更新为 major，如 `"1"`；修订版或没有更新时为空）与它是否被跳过 `muted`、下载状态 |
+| `update.status` | 更新检查的现状（`UpdateStatus`）：当前版本、安装方式、是否自动检查、通道、上次成功检查的时间与失败原因、下次自动检查的时间 `next_check_at`（自动检查关闭时为空）、落后程度 `level`、最新版本（标题、发布页、说明、本安装方式对应的文件）、卡片是否已关闭 `dismissed`、最新版本所属的系列 `series`（次版本更新为 major.minor，如 `"0.4"`；主版本更新为 major，如 `"1"`；修订版或没有更新时为空）与它是否被跳过 `muted`、下载状态；`rollback`（0.3.5 起）：便携版上一次更新在应用退出之后被撤回了（替换助手的说明 `updates/rollback-<版本>.json`，版本比正在运行的新）时的 `UpdateRollback`——`version`、用会话语言写的 `reason`、助手的英文原文 `detail`、`at`、更新日志的路径 `log`，否则为空 |
 | `update.check` | 立即检查 GitHub 发布列表（自动检查关闭时也查），检查进行中则等它结束；返回新的 `UpdateStatus` |
-| `update.dismiss` | `{version}` 的卡片 / 对话框已被关闭，此版本不再弹出（徽章保留） |
+| `update.dismiss` | `{version}` 的卡片 / 对话框已被关闭，此版本不再弹出（徽章保留）；撤回的说明（`rollback`）一并删除 |
 | `update.mute` | 跳过或恢复一个系列的提示（`UpdateMuteParams`：`series` 匹配 `^\d{1,6}(\.\d{1,6})?$`，取 `UpdateStatus.series` 的值；`muted` 默认 `true`，`false` 为恢复）：被跳过的系列的版本不弹卡片、不弹对话框、不显示徽章，也不自动下载（「关于与更新」页仍显示）。返回新的 `UpdateStatus`；恢复后如果「自动下载更新」开启，随即开始自动下载 |
 | `update.releases` | 缓存里最近的发布（`UpdateReleases`，最多 30 个，新的在前，每个的说明最多 16 KiB，不带文件），即「关于与更新」页的发布时间线；还没检查过时为空 |
 | `update.download` / `update.cancel` | 把 `{version}` 对应本安装方式的文件下载到数据目录的 `updates` 文件夹并校验 SHA-256（立即返回，进度见 `update.changed`）；不是当前可更新的版本返回 INVALID_PARAMS，没有对应文件返回 INVALID_REQUEST。停止下载并删除未完成的文件 |

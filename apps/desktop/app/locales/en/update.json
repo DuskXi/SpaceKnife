@@ -87,5 +87,7 @@
  "已跳过 {series} 的版本提示：不弹出、不显示徽章、不自动下载": "Prompts for {series} are off: no card, no badge, no automatic download.",
  "恢复提示": "Turn prompts back on",
  "有新版本 {version}（已跳过 {series} 的提示）": "Version {version} is available (prompts for {series} are off)",
- "发现新版本 {version}（已跳过 {series} 的提示，见「关于与更新」）": "Found version {version} (prompts for {series} are off: see About & updates)"
+ "发现新版本 {version}（已跳过 {series} 的提示，见「关于与更新」）": "Found version {version} (prompts for {series} are off: see About & updates)",
+ "更新没有完成：{reason}": "The update didn't complete: {reason}",
+ "在文件夹中显示日志": "Show the log in its folder"
 }

@@ -199,6 +199,9 @@ export interface AppState {
   update: UpdateStatus | null;
   /** the update card opened from the title bar's badge (shell/UpdateBadge) */
   updateOpen: boolean;
+  /** why the last click on one of the card's install buttons did not start the update (the
+   * shell's words, 「无法启动更新：…」): the card keeps it until the next click or until it is closed */
+  updateInstallError: string | null;
   /** 「本机磁盘」 (machine.disks): the start page's card and the page; null until first read */
   machine: MachineDisks | null;
   /** Date.now() of that read, 0 before it */
@@ -279,6 +282,7 @@ function initialState(): AppState {
     visuals: [],
     update: null,
     updateOpen: false,
+    updateInstallError: null,
     machine: null,
     machineAt: 0,
     machineLoading: false,
