@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "99bce398f511f02f";
+export const SCHEMA_HASH = "82e98c03926bb206";
 
 export interface AgeCond {
   end: number;
@@ -1705,6 +1705,22 @@ export interface UpdateReleases {
   releases: UpdateInfo[];
 }
 
+/**
+ * A portable copy's update that was undone after the app had quit: the old version was kept or
+ * came back (the swap's note `rollback-<version>.json` in the updates folder).
+ */
+export interface UpdateRollback {
+  at: string | null;
+  /** The swap's own words (English), as its log has them */
+  detail: string;
+  /** The update's log, on the computer SpaceKnife runs on */
+  log: string | null;
+  /** What happened, in the session's language */
+  reason: string;
+  /** The version that was not put in place, or was taken out again */
+  version: string;
+}
+
 export interface UpdateStatus {
   channel: "stable" | "preview";
   /** Last successful check */
@@ -1728,6 +1744,8 @@ export interface UpdateStatus {
   muted: boolean;
   /** When the next automatic check is due; None while automatic checks are off, and where the backend makes none (tests, demos, tools) */
   next_check_at: string | null;
+  /** The last update of this portable copy was undone (to a version newer than this one): shown until update.dismiss, which also removes the note */
+  rollback: UpdateRollback | null;
   /** The series of the newest release that update.mute takes: its major.minor for a minor update ("0.4"), its major for a major one ("1"); None for a patch release or no update */
   series: string | null;
 }

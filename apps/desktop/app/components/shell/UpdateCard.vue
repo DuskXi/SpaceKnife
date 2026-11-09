@@ -5,7 +5,9 @@
      shown in its folder). Nothing is ever installed without one of those clicks. 「跳过 0.4.x」 keeps a
      whole series quiet (update.mute). The same card opens under the title bar's badge, hangs at the
      top left by itself for a minor release and fills the dialog of a major one (UpdatePrompt.vue). It
-     never takes the focus, except as that dialog. -->
+     never takes the focus, except as that dialog. Why a click did not start the update stays on it
+     until the next click; a portable copy's update that was undone after the app had quit (the
+     swap's note, status.rollback) is said at its top, at any level, until it is closed. -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
@@ -58,6 +60,7 @@ const readyPath = computed(() => (d.value.state === "done" && d.value.path ? d.v
 const reveal = (path: string) => window.sk.shell.showItemInFolder(path);
 const choices = computed(() => installChoices(props.status.install_kind));
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+const installError = useApp((s) => s.updateInstallError);
 
 // closing SpaceKnife stops a running scan: the first click says so, the second goes on
 function go(path: string, how: InstallHow, step: InstallStep): void {
@@ -100,6 +103,17 @@ function go(path: string, how: InstallHow, step: InstallStep): void {
         <Icon name="close" :size="14" />
       </button>
     </header>
+    <!-- the last update of this portable copy was undone after it had quit: why, until the card is closed -->
+    <div v-if="status.rollback" class="uc-body">
+      <div class="uc-line error" role="alert">
+        <Icon name="warning" :size="14" />
+        <span :title="status.rollback.detail || undefined">{{ t("更新没有完成：{reason}", { reason: status.rollback.reason }) }}</span>
+      </div>
+      <button v-if="!browser && status.rollback.log" class="link small uc-more" @click="reveal(status.rollback.log)">
+        {{ t("在文件夹中显示日志") }}
+        <Icon name="folder" :size="12" />
+      </button>
+    </div>
     <div v-if="notes.lines.length > 0" class="uc-notes">
       <p v-for="(line, i) in notes.lines" :key="i" :class="['uc-note', line.kind, { deep: line.depth }]">{{ line.text }}</p>
       <button class="link small uc-more" @click="openPage">
@@ -164,6 +178,11 @@ function go(path: string, how: InstallHow, step: InstallStep): void {
         <div v-if="confirming" class="uc-line warn">
           <Icon name="warning" :size="14" />
           {{ t("还有扫描在进行，更新会中断它（已扫描的部分不会保存）") }}
+        </div>
+        <!-- the last click did not start it: the shell's reason (「无法启动更新：…」), until the next click -->
+        <div v-if="installError" class="uc-line error" role="alert">
+          <Icon name="warning" :size="14" />
+          <span>{{ installError }}</span>
         </div>
       </div>
       <div v-if="choices.length > 0" class="uc-choices">

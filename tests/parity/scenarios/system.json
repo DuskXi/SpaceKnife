@@ -4,7 +4,8 @@
   "fixtures": {"small": "small"},
   "normalize": {"drop_keys": ["bytes"]},
   "known_diffs": [
-    {"path": "steps/33/read/0", "why": "export generator: Rust writes the app version (SpaceKnife 0.3.5); 0.3.4 wrote its backend package version (SpaceKnife 0.1.0)"}
+    {"path": "steps/33/read/0", "why": "export generator: Rust writes the app version (SpaceKnife 0.3.5); 0.3.4 wrote its backend package version (SpaceKnife 0.1.0)"},
+    {"path": "steps/*/result/rollback", "why": "0.3.5 by design: UpdateStatus.rollback says that a portable copy's update was undone (the swap's note, sk_core::update::rollback); a new field, null here"}
   ],
   "steps": [
     {"call": "update.status", "params": {}},

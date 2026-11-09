@@ -738,6 +738,61 @@ async fn what_the_old_version_still_held_is_cleaned_again() {
     stop(srv).await;
 }
 
+/// A portable copy's swap undid the update and started this (old) version again: it says so when
+/// it starts, until the card is closed.
+#[tokio::test]
+async fn an_undone_update_is_shown_until_its_card_is_closed() {
+    use sk_core::update::rollback::{self, Rollback};
+    let _s = SERIAL.lock().await;
+    let (srv, dir) = setup().await;
+    let gh = fake(&srv);
+    gh.lock().unwrap().releases = vec![rel("0.3.1", vec![installer("0.3.1")], false, "")];
+    let updates = dir.path().join("updates");
+    std::fs::create_dir_all(&updates).unwrap();
+    let log = updates.join("update-0.3.1.log");
+    let note = Rollback::new(
+        "0.3.1",
+        rollback::WHY_START,
+        "it ended before it was ready, with exit code 1",
+        Some(&log),
+    );
+    let file = rollback::write(&updates, &note).unwrap();
+    // an older one is stale (that version runs or ran): not shown
+    rollback::write(
+        &updates,
+        &Rollback::new("0.2.9", rollback::WHY_PLACE, "disk full", None),
+    )
+    .unwrap();
+    // the next start reads the notes
+    srv.server
+        .updates
+        .relocate(dir.path().join("update.json"), updates.clone());
+    let ui = Client::open(&srv.url).await;
+    let st = ui.ok("update.check", json!({})).await;
+    assert_eq!(st["level"], "patch");
+    let shown = &st["rollback"];
+    assert_eq!(shown["version"], "0.3.1");
+    assert_eq!(shown["reason"], note.reason());
+    assert_eq!(
+        shown["detail"],
+        "it ended before it was ready, with exit code 1"
+    );
+    assert_eq!(shown["log"], log.display().to_string());
+    assert!(shown["at"].is_string());
+    // closing the card removes the notes
+    let st = ui.ok("update.dismiss", json!({"version": "0.3.1"})).await;
+    assert!(st["rollback"].is_null() && st["dismissed"] == true);
+    assert!(!file.exists());
+    assert!(rollback::read_all(&updates).is_empty());
+    update_event(&ui, |s| s["rollback"].is_null() && s["dismissed"] == true).await;
+    // a version that has none at all says nothing
+    let again = sk_server::updates::UpdateService::new(&srv.server.config, &srv.server.settings);
+    again.relocate(dir.path().join("update.json"), updates);
+    again.set_app_version(Some("0.3.0".into()));
+    assert_eq!(again.status().rollback, None);
+    stop(srv).await;
+}
+
 #[tokio::test]
 async fn state_survives_a_restart() {
     let _s = SERIAL.lock().await;

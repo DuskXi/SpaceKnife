@@ -6552,6 +6552,45 @@
       ],
       "type": "object"
     },
+    "UpdateRollback": {
+      "description": "A portable copy's update that was undone after the app had quit: the old version was kept or\ncame back (the swap's note `rollback-<version>.json` in the updates folder).",
+      "properties": {
+        "at": {
+          "default": null,
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detail": {
+          "default": "",
+          "description": "The swap's own words (English), as its log has them",
+          "type": "string"
+        },
+        "log": {
+          "default": null,
+          "description": "The update's log, on the computer SpaceKnife runs on",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "What happened, in the session's language",
+          "type": "string"
+        },
+        "version": {
+          "description": "The version that was not put in place, or was taken out again",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "reason"
+      ],
+      "type": "object"
+    },
     "UpdateStatus": {
       "properties": {
         "channel": {
@@ -6656,6 +6695,18 @@
             "string",
             "null"
           ]
+        },
+        "rollback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpdateRollback"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The last update of this portable copy was undone (to a version newer than this one): shown until update.dismiss, which also removes the note"
         },
         "series": {
           "default": null,

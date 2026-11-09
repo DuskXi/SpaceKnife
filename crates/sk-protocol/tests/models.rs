@@ -236,14 +236,21 @@ fn outputs_serialise_every_field() {
         muted: false,
         download: update::UpdateDownload::default(),
         next_check_at: None,
+        rollback: None,
     };
     let v = serde_json::to_value(&status).unwrap();
     assert_eq!(v["checked_at"], Value::Null);
+    assert_eq!(v["rollback"], Value::Null);
     assert_eq!(
         v["download"],
         json!({"state": "idle", "version": null, "received": 0, "total": 0, "path": null, "verified": null, "error": null})
     );
-    assert_eq!(v.as_object().unwrap().len(), 14);
+    assert_eq!(v.as_object().unwrap().len(), 15);
+    // a status from a backend without the field (additive): None
+    let mut older = v.clone();
+    older.as_object_mut().unwrap().remove("rollback");
+    let read: update::UpdateStatus = serde_json::from_value(older).unwrap();
+    assert_eq!(read.rollback, None);
     // timestamps are RFC 3339 in UTC
     let ping = system::PingResult {
         payload: None,

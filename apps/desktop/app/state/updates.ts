@@ -36,16 +36,25 @@ export function announced(st: UpdateStatus | null | undefined): st is UpdateStat
 /** A series as the buttons name it: "0.4" → "0.4.x", "1" → "1.x". */
 export const seriesName = (series: string): string => `${series}.x`;
 
+/** A portable copy's update was undone after the app had quit (the swap's note, `rollback`), and a
+ * newer release is known: its card says so at the start, whatever the level, closed or muted, until
+ * it is closed (update.dismiss removes the note). */
+export function rolledBack(st: UpdateStatus | null | undefined): st is UpdateStatus & { latest: UpdateInfo } {
+  return hasUpdate(st) && !!st.rollback;
+}
+
 /** What opens by itself for a status: the top-left card for a minor release, the dialog for a major
- * one, nothing for a patch release, once this version's card was closed or for a muted series. */
+ * one, nothing for a patch release, once this version's card was closed or for a muted series; the
+ * card (the dialog for a major one) after an update that was undone. */
 export function autoSurface(st: UpdateStatus | null | undefined): Exclude<UpdateSurface, "anchored"> {
+  if (rolledBack(st)) return st.level === "major" ? "dialog" : "corner";
   if (!announced(st) || st.dismissed) return "none";
   return st.level === "major" ? "dialog" : st.level === "minor" ? "corner" : "none";
 }
 
 /** The surface on screen: the card opened from the badge replaces the one that opened by itself. */
 export function visibleSurface(st: UpdateStatus | null | undefined, open: boolean): UpdateSurface {
-  if (!announced(st)) return "none";
+  if (!announced(st) && !rolledBack(st)) return "none";
   return open ? "anchored" : autoSurface(st);
 }
 
