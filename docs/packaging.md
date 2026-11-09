@@ -176,6 +176,16 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 - `tools/release.mjs assemble` 检查并合并：各构建作业的 `SHA256SUMS-installers-*.txt`（Tauri 的 Windows 安装包和 deb、Electron 外壳的 rpm 和 AppImage）合成 `SHA256SUMS.txt`，只写那四个安装包。
 - tag 是 `v<版本>`（语义化版本，可带预发布段）。不要改名：`crates/sk-core/src/update/mod.rs` 的 `asset_templates`、`tools/release.mjs` 的 `expected` 和 `tools/compat034.mjs` 的 `CONTRACT` 都按 0.3.4 写死，测试逐个比对。
 
+**0.3.5 的约定**：0.3.5 发布以后，它的更新代码就冻结了，已安装的 0.3.5 用自己的代码更新到以后的每一个版本，所以以后的每个版本除了守上面 0.3.4 的约定，还要守这些（Release check 的 `compat035` 作业用 v0.3.5 自己的 `release_check` 读每个更新的发布，第 5 步）：
+
+- **文件名与校验清单**：上面那套，加上 Tauri 版 Linux 便携包 `SpaceKnife-<版本>-linux-<架构>-tauri.tar.gz` 和它的 `SHA256SUMS-tauri-linux-<架构>.txt`；按外壳给名字（`SPACEKNIFE_SHELL`），0.3.5 的 `asset_templates` 就是这样找文件的。
+- **便携包**：顶层正好一个文件夹，里面的程序名不变：Windows 上 `SpaceKnife.exe`，Linux 上 `spaceknife`（两种外壳都是），macOS 上 `SpaceKnife.app`（可执行文件 `Contents/MacOS/SpaceKnife`）。0.3.5 的 Tauri 版把计划交给新版本的这个主程序（`<程序> --apply-update <计划>`），Electron 外壳交给新版本里的 `spaceknife-cli`，没有时 `resources/backend/spaceknife-backend`（给 0.3.4 留着的那个）。
+- **主程序在加载任何东西之前处理 `--apply-update <计划>`**（第一个参数：先在 stdout 回一行 `{"ok": true}` 或 `{"ok": false, "error": …}`，再自己换文件，第 8 节），**并回答 `--startup-check`**（stdout 第一行是一行 JSON，`{"ok": true, …}` 并以 0 退出才算能启动；不开窗口，不读写设置和文件；后面可能跟着 `--no-sandbox`）。回答要如实：AppImage 的「无缝更新」是 0.3.5 自己在问（20 秒内回答），只问这一句；新版本启动时还要别的（如运行时才加载的库），就在自己的回答里查。
+- **AppImage**：0.3.5 把新文件放在 `$APPIMAGE.new` 问 `--startup-check`，旧文件留成 `$APPIMAGE.previous`，再以 `--updated`（当前进程带着 `--no-sandbox` 时在它后面）启动新的 `$APPIMAGE`（第 8 节）。
+- **计划 v1**（`v`、`pid`、`app`、`new`、`old`、`exe`、`log`、`keep: ["data"]`，第 8 节）和数据目录里的 **`update.json` v1**（`version: 1`；`feed`、`checked_at`、`failed_at`、`etag`、`releases`、`kept`、`dismissed`、`muted`，`crates/sk-core/src/update/mod.rs` 的 `UpdateState`）照旧读。
+- **NSIS**：0.3.5 以 0.3.4 那套参数 `--updated /S --force-run` 加 `/currentuser` 或 `/allusers`（或都不加）运行新安装包，不带参数时是向导（第 5 节、`install.rs` 的 `nsis_update_args`）；新安装包认这套参数，按 0.3.5 写的 **`installed-files.txt`** 删 0.3.5 的文件：UTF-16 LE（带 BOM）、CRLF，每行一个相对 `$INSTDIR` 的路径，先是文件，再是它们所在的文件夹（以 `\` 结尾）、最深的在前（`spaceknife.nsh` 的 `SkWriteManifest`；第 5 节第 8 步和「删除只按名字」）。同一个卸载项 GUID、目录和快捷方式。
+- **deb / rpm / dmg**：0.3.5 按名字找到文件交给系统（deb 先复制到下载文件夹）；包名 `spaceknife`、bundle id `io.github.duskxi.spaceknife`（可执行文件 `SpaceKnife`）不变，新包才能直接装在旧包上面。
+
 **累积更新**：还没发布的更改随做随记在仓库根目录的 [UNRELEASED.md](../UNRELEASED.md)（中英双语，「新功能」「修复」两节，和发布说明同一个结构）。两份 README 的顶部导航里固定链接到它。发布时，它就是发布说明的正文，再补上下载表和已知限制；发布之后，在 dev 上把它清空：只留标题、语言切换、开头那句说明（版本号改成下一版），以及每节下面的「（暂无）」/「(nothing yet)」。
 
 **发布**（从 0.3.4 起由 CI 发布，文件不经过任何人的电脑）：
@@ -184,9 +194,9 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 2. PR dev → main，等「CI passed」再合并。
 3. 在 main 的合并提交上本地签名打 tag（`git tag -s v<版本> <提交> -m "SpaceKnife <版本>"`）并推送。CI 不持有签名的私钥。
 4. tag 推上去就触发 **Release** 工作流（`.github/workflows/release.yml`）：检查 tag 是带签名的附注 tag 且 GitHub 认可签名、文件和 main 完全相同、应用的版本号就是 tag 的版本、`release-notes/<版本>.md` 存在、同名的发布还没有；用 `Portable build`（带 deb）、`macOS build`、`Windows installer build` 和 `Electron shell build` 从 tag 构建全部文件，四者都给每个文件生成构建来源证明（`actions/attest-build-provenance`，可以用 `gh attestation verify <文件> --repo DuskXi/SpaceKnife` 核对），并各自测从真实的 0.3.4 文件更新上来（第 11 节）；`node tools/release.mjs assemble` 核对每份校验和文件、确认正好是这个发布该有的文件、合并 `SHA256SUMS.txt`、填好发布说明（汇总结果也作为运行的产物 `release-<版本>` 留 14 天）；`node tools/compat034.mjs --dir release` 用 0.3.4 自己的更新代码读汇总好的文件；建成预发布的草稿（0.x 和带预发布段的版本都是预发布）。
-5. 在 GitHub 上看一眼草稿，点发布。**Release check** 工作流（`release-check.yml`）在发布时用 `cargo run -p sk-core --example release_check -- <版本>` 按已安装的 SpaceKnife 的方式读这个发布（每种安装方式都按确切的名字找到文件，`--download` 时下载并核对校验和），再用 `tools/compat034.mjs --github` 按已安装的 0.3.4 的方式读一遍。
+5. 在 GitHub 上看一眼草稿，点发布。**Release check** 工作流（`release-check.yml`）在发布时用 `cargo run -p sk-core --example release_check -- <版本>` 按已安装的 SpaceKnife 的方式读这个发布（每种安装方式都按确切的名字找到文件，`--download` 时下载并核对校验和），再用 `tools/compat034.mjs --github` 按已安装的 0.3.4 的方式读一遍；v0.3.5 有了 tag 以后，`compat035` 作业还把 v0.3.5 检出到单独的 worktree，用它自己的 `cargo run -p sk-core --example release_check -- <版本> --download` 按已安装的 0.3.5 的方式读一遍（还没有这个 tag、或发布的就是 0.3.5 及更早的版本时，只留一条 notice，不算失败）。
 
-手动运行 Release（Actions › Release › Run workflow）给已经在 GitHub 上的 tag 发布：可以填同一份文件树的四个构建运行号，直接用它们的文件，不再构建（工作流核对四个运行成功、构建的提交和 tag 的文件完全相同；这时没有构建来源证明）。`dry_run` 只核对和汇总，不建发布；`publish` 不留草稿，直接发布并立刻读回检查。两者在本机也能跑：`node tools/release.mjs assemble` 接 `gh run download` 下载的产物；`cargo run -p sk-core --example release_check -- <版本> [--sums DIR] [--download]` 读真实的发布列表。
+手动运行 Release（Actions › Release › Run workflow）给已经在 GitHub 上的 tag 发布：可以填同一份文件树的四个构建运行号，直接用它们的文件，不再构建（工作流核对四个运行成功、构建的提交和 tag 的文件完全相同；这时没有构建来源证明）。`dry_run` 只核对和汇总，不建发布；`publish` 不留草稿，直接发布并立刻读回检查（由 Release 自己的 read-back 作业：`release_check` 和 `compat034`，没有 `compat035`；用工作流的令牌建的发布不会触发 Release check，要按 0.3.5 的方式读，手动运行一次 Release check）。两者在本机也能跑：`node tools/release.mjs assemble` 接 `gh run download` 下载的产物；`cargo run -p sk-core --example release_check -- <版本> [--sums DIR] [--download]` 读真实的发布列表。
 
 ## 10. 数据位置
 
