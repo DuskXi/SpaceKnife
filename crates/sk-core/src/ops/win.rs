@@ -8,7 +8,9 @@
 //!   recycled item landed (`PostDeleteItem`'s newly created item: the `$R` file). The COM
 //!   objects are driven through their vtables by hand (no `windows` crate).
 //! * Recycle-bin facts: per-volume settings (HKCU `BitBucket`), the current user's SID, the bin's
-//!   current usage. Nothing here shows a window or asks for elevation.
+//!   current usage (from its `$I` records). Nothing here shows a window or asks for elevation.
+//! * Moving into the bin by this process itself where the bin is the user's own folder: a `$I`
+//!   record and a rename to `$R` ([`recycle_into`]), what the shell does without walking anything.
 
 #![allow(clippy::upper_case_acronyms)]
 
@@ -41,9 +43,7 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
     QueryFullProcessImageNameW,
 };
-use windows_sys::Win32::UI::Shell::{
-    SHChangeNotify, SHCreateItemFromParsingName, SHQUERYRBINFO, SHQueryRecycleBinW,
-};
+use windows_sys::Win32::UI::Shell::{SHChangeNotify, SHCreateItemFromParsingName};
 use windows_sys::core::{GUID, HRESULT};
 
 pub const S_OK: HRESULT = 0;
@@ -238,19 +238,63 @@ pub fn bin_settings(guid: &str, total: u64) -> BinSettings {
     }
 }
 
-/// (bytes, items) in the recycle bin of the volume at `root`; (-1, -1) when unknown.
+/// (bytes, items) in this user's recycle bin on the volume at `root`, as its `$I` records tell
+/// (each holds its item's size): the bin's folder listed, each record read once (kept by its
+/// path, length and time: a record never changes), the items themselves never walked.
+/// `SHQueryRecycleBin` walked every folder in the bin each time it was asked (60 000 operations
+/// for a bin holding one folder of 33 000 files), and the drawer asks after every change. (0, 0)
+/// without a bin folder; (-1, -1) when it cannot be read.
 pub fn bin_usage(root: &str) -> (i64, i64) {
-    let w = wide(root);
-    let mut info = SHQUERYRBINFO {
-        cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32,
-        i64Size: 0,
-        i64NumItems: 0,
-    };
-    // SAFETY: a sized struct.
-    if unsafe { SHQueryRecycleBinW(w.as_ptr(), &mut info) } != S_OK {
+    use std::time::SystemTime;
+    type Known = HashMap<PathBuf, (u64, Option<SystemTime>, i64)>;
+    static RECORDS: std::sync::Mutex<Option<Known>> = std::sync::Mutex::new(None);
+    let _phase = super::probe::phase("bin_usage");
+    let Ok(sid) = user_sid() else {
         return (-1, -1);
+    };
+    let folder = Path::new(root).join("$Recycle.Bin").join(sid);
+    super::probe::call(super::probe::Call::List);
+    let listing = match std::fs::read_dir(&folder) {
+        Ok(it) => it,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return (0, 0),
+        Err(_) => return (-1, -1),
+    };
+    let mut known = RECORDS.lock().unwrap_or_else(|p| p.into_inner());
+    let known = known.get_or_insert_with(HashMap::new);
+    if known.len() > 200_000 {
+        known.clear();
     }
-    (info.i64Size, info.i64NumItems)
+    let (mut bytes, mut items) = (0i64, 0i64);
+    for entry in listing.flatten() {
+        let name = entry.file_name();
+        let named = name.to_string_lossy();
+        if !named.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("$I")) {
+            continue;
+        }
+        // the listing's own facts (no call of its own on Windows)
+        let Ok(meta) = entry.metadata() else { continue };
+        let (len, when) = (meta.len(), meta.modified().ok());
+        let path = entry.path();
+        let size = match known.get(&path) {
+            Some(&(l, w, s)) if l == len && w == when => s,
+            _ => {
+                super::probe::call(super::probe::Call::Open);
+                let Ok(data) = std::fs::read(&path) else {
+                    continue;
+                };
+                let Ok((s, _, _)) =
+                    super::trash::parse_recycle_record(&data[..data.len().min(1 << 16)])
+                else {
+                    continue;
+                };
+                known.insert(path, (len, when, s));
+                s
+            }
+        };
+        bytes += size.max(0);
+        items += 1;
+    }
+    (bytes, items)
 }
 
 /// String SID of the user this process runs as (the name of its folder in `$Recycle.Bin`).
@@ -323,6 +367,255 @@ pub fn notify_changed(path: &str, folder: bool) {
     }
 }
 
+// --------------------------------------------------------------------------- the bin, directly
+
+/// The current user's recycle-bin folder on the volume mounted at `root`, when this process may
+/// put items into it itself: `$Recycle.Bin` and `$Recycle.Bin\<SID>` both real folders (neither a
+/// reparse point), the latter owned by this user (what the shell made it), the former by this
+/// user or the system (SYSTEM, Administrators, TrustedInstaller: what Windows and the shell make
+/// it). A `$Recycle.Bin` another user made (on a data volume any user may create folders on)
+/// lets that user swap this user's folder for a link between this check and the renames: such a
+/// volume is left to the shell. None leaves the volume to the shell: it makes the folder when
+/// there is none, and knows what to do with one it did not make (FAT has no owners at all).
+pub fn own_bin(root: &str) -> Option<PathBuf> {
+    use std::os::windows::fs::MetadataExt;
+    const DIRECTORY: u32 = 0x10;
+    const REPARSE_POINT: u32 = 0x400;
+    /// SYSTEM, Administrators, TrustedInstaller
+    const TRUSTED: [&str; 3] = [
+        "S-1-5-18",
+        "S-1-5-32-544",
+        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+    ];
+    let sid = user_sid().ok()?;
+    let top = Path::new(root).join("$Recycle.Bin");
+    let mine = top.join(&sid);
+    for p in [&top, &mine] {
+        super::probe::call(super::probe::Call::Stat);
+        let attrs = std::fs::symlink_metadata(p).ok()?.file_attributes();
+        if attrs & DIRECTORY == 0 || attrs & REPARSE_POINT != 0 {
+            return None;
+        }
+    }
+    let top_owner = owner_of(&top)?;
+    if !(top_owner.eq_ignore_ascii_case(&sid) || TRUSTED.contains(&top_owner.as_str())) {
+        return None;
+    }
+    owner_of(&mine)?.eq_ignore_ascii_case(&sid).then_some(mine)
+}
+
+/// The string SID of the owner of the file or folder `path`.
+fn owner_of(path: &Path) -> Option<String> {
+    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
+    let w = wide_path(path);
+    let mut owner: PSID = null_mut();
+    let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+    // SAFETY: a NUL-terminated path, out pointers; the descriptor is freed below, `owner` points
+    // into it.
+    unsafe {
+        let err = GetNamedSecurityInfoW(
+            w.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut sd,
+        );
+        if err != 0 || owner.is_null() {
+            if !sd.is_null() {
+                LocalFree(sd);
+            }
+            return None;
+        }
+        let mut text: *mut u16 = null_mut();
+        let named = ConvertSidToStringSidW(owner, &mut text) != 0;
+        let owner_sid = if named {
+            from_wide_ptr(text)
+        } else {
+            String::new()
+        };
+        if !text.is_null() {
+            LocalFree(text as *mut c_void);
+        }
+        LocalFree(sd);
+        named.then_some(owner_sid)
+    }
+}
+
+/// Now, as a FILETIME (100 ns since 1601).
+pub fn filetime_now() -> i64 {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
+    let mut ft = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    // SAFETY: a valid out pointer.
+    unsafe { GetSystemTimeAsFileTime(&mut ft) };
+    ((u64::from(ft.dwHighDateTime) << 32) | u64::from(ft.dwLowDateTime)) as i64
+}
+
+/// A `$I` record as Windows 10 and later write it (version 2): the version, the item's size, when
+/// it was deleted (FILETIME), the original path's length in UTF-16 units with its NUL, then the
+/// path and the NUL ([`super::trash::parse_recycle_record`] reads it back).
+pub fn recycle_record(size: u64, deleted: i64, original: &[u16]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(28 + 2 * (original.len() + 1));
+    out.extend_from_slice(&2i64.to_le_bytes());
+    out.extend_from_slice(&size.to_le_bytes());
+    out.extend_from_slice(&deleted.to_le_bytes());
+    out.extend_from_slice(&((original.len() + 1) as i32).to_le_bytes());
+    for u in original.iter().chain(std::iter::once(&0u16)) {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
+    out
+}
+
+/// Six characters as the shell picks them for `$R` / `$I` names (letters and digits).
+fn bin_name() -> String {
+    use std::sync::atomic::AtomicU64;
+    static STATE: AtomicU64 = AtomicU64::new(0);
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let mut x = STATE
+        .fetch_add(0x9E37_79B9_7F4A_7C15, Ordering::Relaxed)
+        .wrapping_add(seed)
+        .wrapping_add(u64::from(std::process::id()) << 32);
+    (0..6)
+        .map(|_| {
+            // splitmix64
+            x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = x;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^= z >> 31;
+            CHARS[(z % CHARS.len() as u64) as usize] as char
+        })
+        .collect()
+}
+
+/// Move `item` (a file, a folder or a link, not followed) into the bin folder `bin` (on the same
+/// volume, [`own_bin`]) as the shell does: its `$I…` record is written first under a name no
+/// entry has, then the item is renamed to the `$R…` beside it — a rename only: never replacing
+/// anything, never copying (another volume fails). `size` goes into the record. Returns the `$R`
+/// path; on failure the record is removed again and the item is where it was.
+pub fn recycle_into(item: &Path, bin: &Path, size: u64) -> io::Result<PathBuf> {
+    use std::io::Write;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let abs = super::paths::absolute(item);
+    // recorded as the shell records it: 8.3 short names (`RUNNER~1`) expanded; a name that is
+    // not Unicode exactly as it is
+    let original: Vec<u16> = match (abs.to_str(), long_names_of(&abs)) {
+        (Some(_), Some(long)) => long.encode_utf16().collect(),
+        _ => abs.as_os_str().encode_wide().collect(),
+    };
+    let record = recycle_record(size, filetime_now(), &original);
+    // the shell keeps the extension (a folder's too); a name stays within 255 units
+    let ext: Vec<u16> = item
+        .extension()
+        .map(|e| {
+            std::iter::once(b'.' as u16)
+                .chain(e.encode_wide())
+                .collect::<Vec<u16>>()
+        })
+        .filter(|e| e.len() <= 240)
+        .unwrap_or_default();
+    let mut last = io::Error::from(io::ErrorKind::AlreadyExists);
+    for _ in 0..16 {
+        let stem = bin_name();
+        let named = |prefix: &str| -> PathBuf {
+            let units: Vec<u16> = prefix
+                .encode_utf16()
+                .chain(stem.encode_utf16())
+                .chain(ext.iter().copied())
+                .collect();
+            bin.join(std::ffi::OsString::from_wide(&units))
+        };
+        let (info, payload) = (named("$I"), named("$R"));
+        super::probe::call(super::probe::Call::Write);
+        let record_phase = super::probe::phase("direct.record");
+        let mut fh = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&info)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        };
+        if let Err(e) = fh.write_all(&record) {
+            drop(fh);
+            let _ = std::fs::remove_file(&info);
+            return Err(e);
+        }
+        drop(fh);
+        drop(record_phase);
+        super::probe::call(super::probe::Call::Rename);
+        let _rename_phase = super::probe::phase("direct.rename");
+        match super::trash::rename_noreplace(item, &payload) {
+            Ok(()) => return Ok(payload),
+            Err(e) => {
+                let _ = std::fs::remove_file(&info);
+                if e.kind() == io::ErrorKind::AlreadyExists {
+                    last = e; // a `$R` left without its record: another name
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Err(last)
+}
+
+/// Tell Explorer windows what [`recycle_into`] did: the folders the originals were in, and the
+/// bin folders, changed (once each: a notice per item cost 0.7 ms each, the shell resolving its
+/// path); the bin's icon may be full now. Never blocks, shows nothing.
+pub fn notify_recycled(originals: &[String], bins: &[PathBuf]) {
+    const SHCNE_UPDATEDIR: i32 = 0x0000_1000;
+    const SHCNF_PATHW: u32 = 0x0005;
+    let mut folders: Vec<PathBuf> = originals
+        .iter()
+        .filter_map(|p| Path::new(p).parent().map(Path::to_path_buf))
+        .chain(bins.iter().cloned())
+        .collect();
+    folders.sort();
+    folders.dedup();
+    for f in &folders {
+        let w = wide_path(f);
+        // SAFETY: a NUL-terminated string.
+        unsafe {
+            SHChangeNotify(
+                SHCNE_UPDATEDIR,
+                SHCNF_PATHW,
+                w.as_ptr() as *const c_void,
+                null(),
+            )
+        };
+    }
+    update_bin_icon();
+}
+
+/// `SHUpdateRecycleBinIcon` (shell32; not in the bindings): the desktop's bin shows full.
+fn update_bin_icon() {
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    let module = wide("shell32.dll");
+    // SAFETY: shell32 is loaded (SHChangeNotify links it); the export takes nothing.
+    unsafe {
+        let h = GetModuleHandleW(module.as_ptr());
+        if h.is_null() {
+            return;
+        }
+        if let Some(f) = GetProcAddress(h, c"SHUpdateRecycleBinIcon".as_ptr().cast()) {
+            let f: unsafe extern "system" fn() = std::mem::transmute(f);
+            f();
+        }
+    }
+}
+
 /// The stored name of what `path` opens: its path below the volume's root as the file system
 /// stores it (normalised, `FileNormalizedNameInfo`, else `FileNameInfo`), or None when it cannot
 /// be read. Opened with no access rights and without following a reparse point at the end.
@@ -335,6 +628,8 @@ pub fn final_name(path: &str) -> Option<String> {
     const FILE_NORMALIZED_NAME_INFO: i32 = 24;
     const FILE_NAME_INFO: i32 = 2;
     let w = wide(&long_path(path));
+    super::probe::call(super::probe::Call::Open);
+    super::probe::call(super::probe::Call::Query);
     // SAFETY: plain Win32 calls; the handle is closed.
     unsafe {
         let h = CreateFileW(
@@ -395,23 +690,55 @@ pub fn long_path(path: &str) -> String {
 
 // --------------------------------------------------------------------------- Restart Manager
 
-fn image_name(pid: u32) -> String {
+/// The full Win32 path of the program process `pid` runs, when this process may ask.
+fn image_path(pid: u32) -> Option<String> {
     // SAFETY: plain Win32 calls; the handle is closed.
     unsafe {
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if h.is_null() {
-            return String::new();
+            return None;
         }
-        let mut buf = vec![0u16; 1024];
+        let mut buf = vec![0u16; 4096];
         let mut size = buf.len() as u32;
         let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut size) != 0;
         CloseHandle(h);
-        if !ok {
-            return String::new();
-        }
-        let full = String::from_utf16_lossy(&buf[..size as usize]);
-        full.rsplit(['\\', '/']).next().unwrap_or("").to_string()
+        ok.then(|| String::from_utf16_lossy(&buf[..size as usize]))
     }
+}
+
+fn image_name(pid: u32) -> String {
+    image_path(pid)
+        .map(|full| full.rsplit(['\\', '/']).next().unwrap_or("").to_string())
+        .unwrap_or_default()
+}
+
+/// The programs running now, by their full paths (every process this one may ask about; no
+/// disk I/O). A folder holding one renames although the program runs from it: its image is
+/// mapped, no handle is open.
+pub fn running_images() -> Vec<String> {
+    use windows_sys::Win32::System::ProcessStatus::EnumProcesses;
+    let mut pids = vec![0u32; 2048];
+    loop {
+        let mut got = 0u32;
+        let bytes = (pids.len() * 4) as u32;
+        // SAFETY: a buffer of `bytes` bytes, an out pointer.
+        if unsafe { EnumProcesses(pids.as_mut_ptr(), bytes, &mut got) } == 0 {
+            return Vec::new();
+        }
+        if got < bytes || pids.len() >= 1 << 20 {
+            pids.truncate(got as usize / 4);
+            break;
+        }
+        pids = vec![0u32; pids.len() * 2];
+    }
+    let mut out: Vec<String> = pids
+        .into_iter()
+        .filter(|&p| p != 0)
+        .filter_map(image_path)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn rm_error(what: &str, err: u32) -> io::Error {

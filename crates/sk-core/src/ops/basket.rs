@@ -165,6 +165,9 @@ pub struct Target {
     pub os_path: PathBuf,
     /// bytes it holds as last scanned (max of logical and allocated): trash capacity checks
     pub size: i64,
+    /// its logical bytes as last scanned, what a trash records for it (None: not known, e.g. a
+    /// group's member: measured when it is moved)
+    pub bytes: Option<i64>,
     /// the scan root it was found under
     pub root: String,
     /// the key the basket covers it by: what [`Basket::apply_results`] matches results to
@@ -686,6 +689,7 @@ impl Basket {
                         path: p.clone(),
                         os_path: os,
                         size: s,
+                        bytes: None,
                         root: e.item.root.clone(),
                         key: k.clone(),
                         longest: None,
@@ -697,6 +701,8 @@ impl Basket {
                     path: e.item.path.clone(),
                     os_path: e.item.os_path.clone(),
                     size: e.item.size.max(e.measure.base).max(e.item.alloc),
+                    // what the scan measured (an item put back by an undo: as it was then)
+                    bytes: Some(e.item.size),
                     root: e.item.root.clone(),
                     key: e.key.clone(),
                     longest: e.measure.longest,
@@ -871,6 +877,21 @@ impl Basket {
 
     /// Apply [`super::locks::find_lockers`] results: items (or members) held open become `locked`.
     pub fn set_lockers(&self, lockers: &HashMap<String, Vec<String>>) {
+        self.apply_lockers(None, lockers);
+    }
+
+    /// [`Basket::set_lockers`] for the items covering the paths `checked` only (what one check
+    /// asked about, e.g. the items just added); the others keep what they had.
+    pub fn set_lockers_for(&self, checked: &[String], lockers: &HashMap<String, Vec<String>>) {
+        let asked: HashSet<String> = checked.iter().map(|p| path_key(p)).collect();
+        self.apply_lockers(Some(&asked), lockers);
+    }
+
+    fn apply_lockers(
+        &self,
+        only: Option<&HashSet<String>>,
+        lockers: &HashMap<String, Vec<String>>,
+    ) {
         let mut g = self.inner.lock();
         let held: HashMap<String, &Vec<String>> = lockers
             .iter()
@@ -878,6 +899,11 @@ impl Basket {
             .map(|(p, n)| (path_key(p), n))
             .collect();
         for e in g.entries.iter_mut() {
+            if let Some(only) = only
+                && !e.shown_keys().iter().any(|k| only.contains(k))
+            {
+                continue;
+            }
             let mut names: Vec<String> = Vec::new();
             for k in e.shown_keys() {
                 for n in held.get(&k).map(|v| v.as_slice()).unwrap_or(&[]) {

@@ -1,8 +1,11 @@
 //! Which processes hold files open (docs/manage.md §2.4, UI-W5-37).
 //!
 //! * Windows: Restart Manager; the friendly name is `strAppName` ("Microsoft Word"). A folder
-//!   registers its files (at most [`MAX_FILES`] per call). One session answers "is anything held
-//!   at all"; only when something is, sessions on halves of the set find which paths.
+//!   registers its files (at most [`MAX_FILES`] per call). Sessions over parts of the files at
+//!   once, as many as the device takes threads ([`super::par`]: its time goes with the files a
+//!   session holds), answer "is anything held at all"; only where something is, sessions on
+//!   halves of the asked paths of that part find which paths. (Asking the file system per file
+//!   instead, `FileProcessIdsUsingFileInformation`, took 57 ms a file here.)
 //! * Linux: the links in `/proc/<pid>/fd` (processes we may not inspect are skipped). An open
 //!   file does not block deleting it there, but the space only comes back once it is closed.
 //! * macOS: `lsof -Fpcn` when it is installed (best effort, not tested on a Mac), else nothing.
@@ -69,6 +72,8 @@ fn unique(names: impl IntoIterator<Item = String>) -> Vec<String> {
 /// Restart Manager takes files only: a folder among them fails the whole query.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn walk_files(path: &Path, budget: usize) -> Vec<String> {
+    use super::probe::{Call, call};
+    call(Call::Stat);
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return vec![path.to_string_lossy().into_owned()];
     };
@@ -89,6 +94,7 @@ fn walk_files(path: &Path, budget: usize) -> Vec<String> {
         if names.len() >= budget {
             break;
         }
+        call(Call::List);
         let Ok(it) = std::fs::read_dir(&folder) else {
             continue;
         };
@@ -121,6 +127,7 @@ fn windows(paths: &[String]) -> HashMap<String, Vec<String>> {
         if budget == 0 {
             break;
         }
+        super::probe::call(super::probe::Call::Stat);
         let exists = std::fs::symlink_metadata(p).is_ok();
         let got = if exists {
             walk_files(Path::new(p), PER_FOLDER.min(budget))
@@ -142,6 +149,8 @@ fn windows(paths: &[String]) -> HashMap<String, Vec<String>> {
             .iter()
             .flat_map(|p| names[p].iter().cloned())
             .collect();
+        super::probe::count(super::probe::Call::Locks, 1);
+        super::probe::count(super::probe::Call::LockFile, files.len() as u64);
         match super::win::rm_lockers(&files) {
             Ok(list) => Some(unique(list.into_iter().map(|(_, n)| n))),
             Err(e) => {
@@ -152,9 +161,46 @@ fn windows(paths: &[String]) -> HashMap<String, Vec<String>> {
             }
         }
     };
+    // "is anything held at all", the files split over sessions at once (the Restart Manager's
+    // time goes with the files a session holds: 20 000 files took 2.5 s in one, 0.5 s in four);
+    // only the asked paths in a part that holds something go on to the halving below
+    let workers =
+        super::par::workers_for_all(&order.iter().map(Path::new).collect::<Vec<_>>()).max(1);
+    let files: Vec<(usize, &str)> = order
+        .iter()
+        .enumerate()
+        .flat_map(|(k, p)| names[p].iter().map(move |f| (k, f.as_str())))
+        .collect();
+    let parts: Vec<&[(usize, &str)]> = files.chunks(files.len().div_ceil(workers).max(1)).collect();
+    let quiet: Vec<std::sync::OnceLock<bool>> = (0..parts.len())
+        .map(|_| std::sync::OnceLock::new())
+        .collect();
+    super::par::for_each(parts.len(), workers, &|| false, |k| {
+        let asked: Vec<String> = parts[k].iter().map(|f| f.1.to_string()).collect();
+        super::probe::count(super::probe::Call::Locks, 1);
+        super::probe::count(super::probe::Call::LockFile, asked.len() as u64);
+        let nobody = super::win::rm_lockers(&asked).is_ok_and(|l| l.is_empty());
+        let _ = quiet[k].set(nobody);
+    });
+    let mut suspect = vec![false; order.len()];
+    for (part, q) in parts.iter().zip(&quiet) {
+        if q.get() != Some(&true) {
+            for (k, _) in part.iter() {
+                suspect[*k] = true;
+            }
+        }
+    }
+    let order: Vec<&str> = order
+        .into_iter()
+        .zip(suspect)
+        .filter_map(|(p, s)| s.then_some(p))
+        .collect();
     let mut out: HashMap<String, Vec<String>> = HashMap::new();
     let mut pending: Vec<Vec<&str>> = vec![order];
     while let Some(group) = pending.pop() {
+        if group.is_empty() {
+            continue;
+        }
         let who = held(&group);
         if who.as_ref().is_some_and(Vec::is_empty) {
             continue;
