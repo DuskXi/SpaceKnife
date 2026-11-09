@@ -308,7 +308,11 @@ pub fn get() -> &'static Pace {
             trace,
             born: Instant::now(),
         };
-        pace.log(&format!("start {cfg:?}"));
+        // the wall clock of time 0, to line the trace up with others (SPACEKNIFE_IO_TRACE)
+        let wall = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64() - pace.born.elapsed().as_secs_f64());
+        pace.log(&format!("start {cfg:?} wall={wall:.3}"));
         pace
     })
 }
