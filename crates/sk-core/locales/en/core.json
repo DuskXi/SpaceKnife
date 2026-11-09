@@ -202,5 +202,22 @@
  "对比失败：树的子项范围相互重叠": "Comparison failed: the trees' child ranges overlap",
  "快照不能重新扫描": "A snapshot can't be scanned again",
  "扫描意外中断：{reason}": "The scan stopped unexpectedly: {reason}",
- "启动扫描助手时意外中断：{reason}": "Starting the scan helper stopped unexpectedly: {reason}"
+ "启动扫描助手时意外中断：{reason}": "Starting the scan helper stopped unexpectedly: {reason}",
+ "其中有一个 Btrfs 子卷（例如快照），未进入；它要用 btrfs subvolume delete 删除": "Contains a Btrfs subvolume (a snapshot, for example), which wasn't entered; it's deleted with btrfs subvolume delete",
+ "文件夹没能删除：里面还有东西（可能有程序打开着其中的文件，或删除期间又放进了新内容）": "The folder couldn't be deleted: it isn't empty (a program may have a file in it open, or something was put into it meanwhile)",
+ "里面的内容已删除，但还有程序（如杀毒软件、预览或同步程序）打开着其中的文件，这个文件系统要等它们关闭后才真正删掉，文件夹因此没能删除；稍后再删一次即可": "Its contents were deleted, but a program (an antivirus scanner, a preview or a sync program) still has some of the files open, and this file system removes them only once they're closed, so the folder couldn't be deleted yet; delete it again in a moment",
+ "删除期间文件夹里又放进了新内容，文件夹没有删除": "Something was put into the folder while it was being deleted, so the folder wasn't deleted",
+ "介质是只读的（写保护或以只读方式挂载），不能改动": "The medium is read-only (write-protected or mounted read-only) and can't be changed",
+ "磁盘空间已满，无法完成": "The disk is full; this couldn't be done",
+ "读写磁盘出错（I/O 错误）：设备可能已断开，或这里有坏块": "A disk read or write failed (I/O error): the device may have been disconnected, or there are bad blocks here",
+ "设备已断开或还没有就绪": "The device was disconnected or isn't ready",
+ "与网络位置的连接断开了": "The connection to the network location was lost",
+ "这个文件系统不支持这个操作": "This file system doesn't support this operation",
+ "名字里有这个文件系统不接受的字符": "The name contains characters this file system doesn't accept",
+ "名字或路径太长，这个文件系统处理不了": "The name or path is too long for this file system",
+ "文件系统有损坏，请先检查磁盘（Windows 用 chkdsk，Linux 用 fsck）": "The file system is damaged; check the disk first (chkdsk on Windows, fsck on Linux)",
+ "云同步程序（如 OneDrive）现在不允许改动它：{detail}": "The cloud sync program (OneDrive, for example) doesn't allow changing it now: {detail}",
+ "内部错误：{detail}": "Internal error: {detail}",
+ "{reason}（系统的说法：{detail}）": "{reason} (the system says: {detail})",
+ "这个卷不支持废纸篓，只能永久删除": "This volume has no Trash; it can only be deleted permanently"
 }

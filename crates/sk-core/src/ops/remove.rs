@@ -95,12 +95,33 @@ pub(super) fn mount_inside() -> io::Error {
     io::Error::other(text("mount_inside"))
 }
 
+#[cfg(target_os = "linux")]
+fn subvolume_inside() -> io::Error {
+    io::Error::other(text("subvolume_inside"))
+}
+
 fn bad_name_inside() -> io::Error {
     io::Error::other(text("bad_name_inside"))
 }
 
 fn moved_inside() -> io::Error {
     io::Error::other(text("moved_inside"))
+}
+
+/// Something that went wrong in the deletion itself (a bug), as the item's error.
+fn internal(what: &str) -> io::Error {
+    io::Error::other(super::text::fill(
+        text("internal"),
+        &[("detail", what.into())],
+    ))
+}
+
+/// What a panic said.
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "panic".into())
 }
 
 /// POSIX: folder levels below the deleted folder that keep their descriptor open at a time.
@@ -195,6 +216,8 @@ trait Walk: Sync {
     ) -> Visit<Self::Dir>;
     /// Remove `dir`, emptied: from `parent` (None: the item's top, `top`).
     fn remove(&self, dir: &Self::Dir, parent: Option<&Self::Dir>, top: &Path) -> io::Result<()>;
+    /// `dir` stays (something in it could not go): let go of what it holds open.
+    fn keep(&self, _dir: &Self::Dir) {}
 }
 
 /// What became of one listed name.
@@ -218,6 +241,9 @@ struct Node<D> {
     /// what is still to do in it: its own names (1), each subfolder not removed yet, each share
     /// of its names lent out
     pending: AtomicUsize,
+    /// something in it stays (failed, refused, not entered): it is not asked to go, nor is any
+    /// folder above it (asking would only fail, and on Windows wait for deletions still pending)
+    kept: AtomicBool,
     parent: Option<Arc<Node<D>>>,
     item: usize,
     depth: usize,
@@ -335,11 +361,17 @@ impl<'a, W: Walk> Engine<'a, W> {
                 self.worker();
             });
         }
-        // what a cancel left: stopped where it was
+        // what a cancel left: stopped where it was; else what something that went wrong in it
+        // (it says what) or in an item inside it left unfinished
+        let stopped = self.stop.load(Ordering::Acquire);
         for k in 0..self.tops.len() {
             if !self.finished[k].swap(true, Ordering::AcqRel) {
                 let mut r = std::mem::take(&mut *self.items[k].lock());
-                r.cancelled = true;
+                if stopped {
+                    r.cancelled = true;
+                } else if r.first.is_none() {
+                    r.fail(internal("unfinished"));
+                }
                 (self.done)(k, r);
             }
         }
@@ -392,9 +424,20 @@ impl<'a, W: Walk> Engine<'a, W> {
                     self.idle.fetch_sub(1, Ordering::AcqRel);
                 }
             };
-            match task {
+            let item = match &task {
+                Task::Item(k) => *k,
+                Task::Names(node, _) => node.item,
+            };
+            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match task {
                 Task::Item(k) => self.item(k, &mut scratch),
                 Task::Names(node, names) => self.names(node, names, &mut scratch),
+            }));
+            if let Err(panic) = ran {
+                // a bug, not the file system: the item says so and the threads go on (a thread
+                // gone with its task would leave the others waiting for it for ever)
+                let what = panic_text(&*panic);
+                tracing::error!("deleting {}: {what}", self.tops[item].display());
+                self.items[item].lock().fail(internal(&what));
             }
             if self.outstanding.fetch_sub(1, Ordering::AcqRel) == 1 {
                 let _q = self.queue.lock();
@@ -424,6 +467,7 @@ impl<'a, W: Walk> Engine<'a, W> {
                 let node = Arc::new(Node {
                     dir,
                     pending: AtomicUsize::new(1),
+                    kept: AtomicBool::new(false),
                     parent: None,
                     item: k,
                     depth: 0,
@@ -464,9 +508,15 @@ impl<'a, W: Walk> Engine<'a, W> {
             {
                 Visit::Deleted => self.items[item].lock().deleted = true,
                 Visit::Gone => {}
-                Visit::Failed(e) => self.items[item].lock().fail(e),
+                Visit::Failed(e) => {
+                    node.kept.store(true, Ordering::Release);
+                    self.items[item].lock().fail(e);
+                }
                 Visit::Whole(r) => {
                     let stop = r.cancelled;
+                    if r.first.is_some() || stop {
+                        node.kept.store(true, Ordering::Release); // the folder stayed
+                    }
                     self.items[item].lock().fail_from(r);
                     if stop {
                         self.stop.store(true, Ordering::Release);
@@ -480,6 +530,7 @@ impl<'a, W: Walk> Engine<'a, W> {
                     let child = Arc::new(Node {
                         dir,
                         pending: AtomicUsize::new(1),
+                        kept: AtomicBool::new(false),
                         parent: Some(node.clone()),
                         item,
                         depth: node.depth + 1,
@@ -506,17 +557,28 @@ impl<'a, W: Walk> Engine<'a, W> {
                 return; // nothing is removed after a cancel
             }
             let item = cur.item;
-            let gone = self.walk.remove(
-                &cur.dir,
-                cur.parent.as_deref().map(|p| &p.dir),
-                &self.tops[item],
-            );
-            {
+            if cur.kept.load(Ordering::Acquire) {
+                // what stays in it was reported; it stays too, and so does its parent
+                self.walk.keep(&cur.dir);
+            } else {
+                let gone = self.walk.remove(
+                    &cur.dir,
+                    cur.parent.as_deref().map(|p| &p.dir),
+                    &self.tops[item],
+                );
                 let mut it = self.items[item].lock();
                 match gone {
                     Ok(()) => it.deleted = true,
-                    Err(e) => it.fail(e),
+                    Err(e) => {
+                        it.fail(e);
+                        cur.kept.store(true, Ordering::Release);
+                    }
                 }
+            }
+            if cur.kept.load(Ordering::Acquire)
+                && let Some(p) = &cur.parent
+            {
+                p.kept.store(true, Ordering::Release);
             }
             match cur.parent.clone() {
                 Some(p) => cur = p,
@@ -612,6 +674,10 @@ mod tests {
         tops: HashMap<PathBuf, usize>,
         /// entries whose deletion fails (held open)
         held: HashSet<usize>,
+        /// entries whose visit panics (a bug in the deletion)
+        bugs: HashSet<usize>,
+        /// folders asked to go while something in them was left
+        asked_too_soon: AtomicUsize,
         gone: Mutex<HashSet<usize>>,
         /// removals asked for after the stop
         late: AtomicUsize,
@@ -705,6 +771,9 @@ mod tests {
                 .iter()
                 .find(|&&c| OsString::from(&self.tree[c].name) == name)
                 .unwrap();
+            if self.bugs.contains(&child) {
+                panic!("a bug at {}", self.tree[child].name);
+            }
             let got = if self.tree[child].folder {
                 if cancel() {
                     self.stopped.store(true, Ordering::SeqCst);
@@ -741,6 +810,7 @@ mod tests {
                 self.wrong_order.store(true, Ordering::SeqCst);
             }
             if !left.is_empty() {
+                self.asked_too_soon.fetch_add(1, Ordering::SeqCst);
                 return Err(io::Error::other("not empty"));
             }
             gone.insert(*dir);
@@ -838,6 +908,44 @@ mod tests {
         let gone = fake.gone.lock().unwrap();
         assert!(!gone.contains(&top) && !gone.contains(&a) && !gone.contains(&deep));
         assert!(!fake.wrong_order.load(Ordering::SeqCst));
+        // the folders that keep it are not asked to go (that could only fail, and on Windows
+        // wait for deletions still pending first)
+        assert_eq!(fake.asked_too_soon.load(Ordering::SeqCst), 0);
+    }
+
+    /// A bug that panics in one thread does not leave the others waiting for its task for ever:
+    /// its item is reported failed (with what went wrong), the other items are deleted.
+    #[test]
+    fn a_panic_in_one_thread_fails_its_item_only() {
+        let mut fake = Fake {
+            pause: Duration::from_micros(100),
+            ..Fake::default()
+        };
+        let top = fake.top("r");
+        fake.grow(top, 3, 4, 2);
+        let a = fake.tree[top].children.clone();
+        let deep = *a.iter().rev().find(|&&c| fake.tree[c].folder).unwrap();
+        let bug = fake.add(Some(deep), "boom.txt", false);
+        fake.bugs.insert(bug);
+        let other = fake.top("q");
+        fake.grow(other, 2, 3, 1);
+        // on a thread of its own: a hang fails the test instead of holding it
+        let fake: &'static Fake = Box::leak(Box::new(fake));
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(run(fake, &["r", "q"], 4, None));
+        });
+        let done = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the threads hung");
+        assert_eq!(done.len(), 2);
+        let by: HashMap<usize, &Removed> = done.iter().map(|(k, r)| (*k, r)).collect();
+        let r = by[&0];
+        assert!(!r.cancelled, "{r:?}");
+        let msg = r.first.as_ref().unwrap().to_string();
+        assert!(msg.contains("a bug at boom.txt"), "{msg}");
+        assert!(by[&1].first.is_none() && by[&1].deleted, "{:?}", by[&1]);
+        assert!(fake.all_gone(other));
     }
 
     /// An item inside another one goes first; the outer one starts only once it is finished.
@@ -1294,7 +1402,7 @@ mod imp {
                 continue;
             }
             if st.st_dev != tree.dev {
-                out.fail(super::mount_inside());
+                out.fail(other_device(dirfd, &c));
                 continue;
             }
             if cancel() {
@@ -1437,7 +1545,7 @@ mod imp {
                 };
             }
             if st.st_dev != dir.tree.dev {
-                return Visit::Failed(super::mount_inside());
+                return Visit::Failed(other_device(dirfd, &c));
             }
             if cancel() {
                 return Visit::Stop;
@@ -1473,6 +1581,39 @@ mod imp {
                 Some(p) => unlink_checked(p.fd.as_raw_fd(), &dir.name, (dir.dev, dir.ino)),
                 None => std::fs::remove_dir(top),
             }
+        }
+    }
+
+    /// Why the folder `name` of the folder open as `dirfd`, on another device than its tree, is
+    /// not entered: a mount point, or (Linux) a Btrfs subvolume — another device number on the
+    /// same mount, not a mount's root.
+    fn other_device(dirfd: RawFd, name: &CString) -> io::Error {
+        #[cfg(target_os = "linux")]
+        if mount_root(dirfd, name) == Some(false) {
+            return super::subvolume_inside();
+        }
+        let _ = (dirfd, name);
+        super::mount_inside()
+    }
+
+    /// Whether `name` in the folder open as `dirfd` is the root of a mount (`statx`'s
+    /// STATX_ATTR_MOUNT_ROOT, Linux 5.8+); None when it cannot be told.
+    #[cfg(target_os = "linux")]
+    fn mount_root(dirfd: RawFd, name: &CString) -> Option<bool> {
+        const STATX_ATTR_MOUNT_ROOT: u64 = 0x2000;
+        probe::call(Call::Stat);
+        // SAFETY: zeroed is a valid statx; a NUL-terminated name.
+        unsafe {
+            let mut stx: libc::statx = std::mem::zeroed();
+            let rc = libc::statx(
+                dirfd,
+                name.as_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+                libc::STATX_BASIC_STATS,
+                &mut stx,
+            );
+            (rc == 0 && stx.stx_attributes_mask & STATX_ATTR_MOUNT_ROOT != 0)
+                .then_some(stx.stx_attributes & STATX_ATTR_MOUNT_ROOT != 0)
         }
     }
 
@@ -1604,7 +1745,8 @@ mod imp {
     use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_FULL_DIR_INFO, FILE_ID_BOTH_DIR_INFO,
-        GetFileInformationByHandle, GetFileInformationByHandleEx, SetFileInformationByHandle,
+        GetFileInformationByHandle, GetFileInformationByHandleEx, GetVolumeInformationByHandleW,
+        SetFileInformationByHandle,
     };
     use windows_sys::Win32::System::IO::DeviceIoControl;
 
@@ -1643,6 +1785,21 @@ mod imp {
     const ERROR_ACCESS_DENIED: i32 = 5;
     const ERROR_NO_MORE_FILES: i32 = 18;
     const ERROR_SHARING_VIOLATION: i32 = 32;
+    const ERROR_DIR_NOT_EMPTY: i32 = 145;
+    const STATUS_DELETE_PENDING: i32 = 0xC000_0056_u32 as i32;
+    /// GetVolumeInformation: the file system can hold names that differ only in case
+    const FILE_CASE_SENSITIVE_SEARCH: u32 = 0x1;
+
+    /// Pauses before a folder whose every entry was deleted, but that is not empty yet, is asked
+    /// to go again (about a second in all): [`remove_when_empty`].
+    const SETTLE_MS: [u64; 6] = [10, 30, 60, 120, 250, 500];
+
+    #[link(name = "ntdll", kind = "raw-dylib")]
+    unsafe extern "system" {
+        /// The NTSTATUS the last failed call of this thread ended with (finer than its Win32
+        /// error: STATUS_DELETE_PENDING is ERROR_ACCESS_DENIED there).
+        fn RtlGetLastNtStatus() -> i32;
+    }
 
     const BACKSLASH: u16 = b'\\' as u16;
 
@@ -2051,10 +2208,30 @@ mod imp {
         unsafe { CompareStringOrdinal(a.as_ptr(), la, b.as_ptr(), lb, 1) == CSTR_EQUAL }
     }
 
+    /// Whether the folder at `d`'s path is still `d` (volume and file index).
+    fn still_there(d: &Dir) -> bool {
+        open(
+            &d.path,
+            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            d.facts.reparse(),
+        )
+        .ok()
+        .and_then(|h| identity(&h).ok())
+            == Some((d.facts.volume, d.facts.index))
+    }
+
+    /// What [`listed_ids`] found.
+    struct Listed {
+        /// the folder at the path is the one being emptied, and it could be listed
+        folder: bool,
+        ids: HashMap<Vec<u16>, u64>,
+    }
+
     /// The file id each name of the folder `d` lists has (FileIdBothDirectoryInformation, the id
     /// a handle's file index is), through a listing handle checked to be that folder. Ids that
-    /// say nothing (0, all ones) are left out; a folder that cannot be listed so has none.
-    fn listed_ids(d: &Dir, buf: &mut [u64]) -> HashMap<Vec<u16>, u64> {
+    /// say nothing (0, all ones) are left out (FAT and exFAT list none); a folder that cannot be
+    /// listed so has none.
+    fn listed_ids(d: &Dir, buf: &mut [u64]) -> Listed {
         let mut ids = HashMap::new();
         let lister = match open(
             &d.path,
@@ -2062,7 +2239,7 @@ mod imp {
             d.facts.reparse(),
         ) {
             Ok(h) if identity(&h).ok() == Some((d.facts.volume, d.facts.index)) => h,
-            _ => return ids,
+            _ => return Listed { folder: false, ids },
         };
         let listed = entries(&lister, buf, &ID_BOTH, |units, id| {
             if let Some(id) = id.filter(|&i| i != 0 && i != u64::MAX) {
@@ -2072,7 +2249,10 @@ mod imp {
         if listed.is_err() {
             ids.clear();
         }
-        ids
+        Listed {
+            folder: listed.is_ok(),
+            ids,
+        }
     }
 
     /// `\\?\` and the absolute path (no Win32 rewriting, no MAX_PATH).
@@ -2105,6 +2285,18 @@ mod imp {
         PathBuf::from(OsString::from_wide(w))
     }
 
+    /// What all folders of one item share.
+    struct Item {
+        /// its volume
+        volume: u32,
+        /// its file system tells what a handle was opened as
+        names_known: bool,
+        /// its file system cannot hold names that differ only in case (FAT, exFAT)
+        case_blind: bool,
+        /// it may delete with POSIX semantics: cleared at the first refusal ([`delete`])
+        posix: AtomicBool,
+    }
+
     /// A folder being emptied (by one thread or several).
     pub(in super::super) struct Dir {
         /// what deletes it once it is empty: taken then, and closed right away (before its
@@ -2112,14 +2304,10 @@ mod imp {
         h: Mutex<Option<Handle>>,
         facts: Facts,
         path: Vec<u16>,
-        /// the item's: its volume, whether its file system tells what a handle was opened as,
-        /// whether it may delete with POSIX semantics (shared by the item's folders)
-        volume: u32,
-        names_known: bool,
-        posix: Arc<AtomicBool>,
+        item: Arc<Item>,
         /// the file ids it lists its names with, read once a handle reports a name of it in
         /// another case ([`listed_ids`])
-        ids: Mutex<Option<HashMap<Vec<u16>, u64>>>,
+        ids: Mutex<Option<Listed>>,
     }
 
     /// List the folder `h` is open on: through a listing handle checked to be the same folder
@@ -2129,7 +2317,7 @@ mod imp {
         h: Handle,
         facts: Facts,
         path: Vec<u16>,
-        (volume, names_known, posix): (u32, bool, Arc<AtomicBool>),
+        item: Arc<Item>,
         buf: &mut [u64],
     ) -> io::Result<(Dir, Vec<OsString>)> {
         let lister = open(
@@ -2146,9 +2334,7 @@ mod imp {
                 h: Mutex::new(Some(h)),
                 facts,
                 path,
-                volume,
-                names_known,
-                posix,
+                item,
                 ids: Mutex::new(None),
             },
             names,
@@ -2176,7 +2362,12 @@ mod imp {
             if !f.dir() || f.link() {
                 return Err(super::moved_inside()); // replaced since the caller looked
             }
-            let item = (f.volume, f.name.is_some(), Arc::new(AtomicBool::new(true)));
+            let item = Arc::new(Item {
+                volume: f.volume,
+                names_known: f.name.is_some(),
+                case_blind: case_blind(&h),
+                posix: AtomicBool::new(true),
+            });
             frame(h, f, top_w, item, buf)
         }
 
@@ -2205,26 +2396,29 @@ mod imp {
             // first program to open it used) only as the entry the folder lists under the name,
             // by its file id (in a case-sensitive folder another case is another entry)
             let named = match (&facts.name, &expected) {
-                _ if !dir.names_known => true,
+                _ if !dir.item.names_known => true,
                 (Some(got), Some(want)) if got == want => true,
                 (Some(got), Some(want)) if same_but_case(got, want) => {
                     let mut ids = dir.ids.lock();
-                    if ids.is_none() {
-                        *ids = Some(listed_ids(dir, buf));
+                    let listed = ids.get_or_insert_with(|| listed_ids(dir, buf));
+                    match listed.ids.get(&units) {
+                        Some(&id) => id == facts.index,
+                        // no file ids in its listing (FAT, exFAT): where names cannot differ
+                        // only in case, this name in this very folder (checked, now, to be the
+                        // one being emptied) is the entry listed
+                        None => listed.folder && dir.item.case_blind && still_there(dir),
                     }
-                    ids.as_ref().and_then(|ids| ids.get(&units)) == Some(&facts.index)
                 }
                 _ => false,
             };
-            if facts.volume != dir.volume || !named {
+            if facts.volume != dir.item.volume || !named {
                 return Visit::Failed(super::moved_inside());
             }
             if facts.dir() && !facts.link() {
                 if cancel() {
                     return Visit::Stop;
                 }
-                let item = (dir.volume, dir.names_known, dir.posix.clone());
-                return match frame(h, facts, path, item, buf) {
+                return match frame(h, facts, path, dir.item.clone(), buf) {
                     Ok((d, names)) => Visit::Folder(d, names),
                     Err(e) => Visit::Failed(e),
                 };
@@ -2233,7 +2427,7 @@ mod imp {
                 return Visit::Failed(super::mount_inside());
             }
             // a file, or a link of any kind: the entry itself, never what it points to
-            match delete(&h, &path, &facts, &dir.posix) {
+            match delete(&h, &path, &facts, &dir.item.posix) {
                 Ok(()) => Visit::Deleted,
                 Err(e) => Visit::Failed(e),
             }
@@ -2243,9 +2437,129 @@ mod imp {
             let Some(h) = dir.h.lock().take() else {
                 return Ok(());
             };
-            let gone = delete(&h, &dir.path, &dir.facts, &dir.posix);
+            let gone = delete(&h, &dir.path, &dir.facts, &dir.item.posix);
             drop(h);
-            gone
+            match gone {
+                Err(e) if e.raw_os_error() == Some(ERROR_DIR_NOT_EMPTY) => remove_when_empty(dir),
+                other => other,
+            }
+        }
+
+        fn keep(&self, dir: &Dir) {
+            drop(dir.h.lock().take());
+        }
+    }
+
+    /// Whether the file system `h` is on cannot hold names that differ only in case (no
+    /// FILE_CASE_SENSITIVE_SEARCH: FAT, exFAT); false when it cannot be told.
+    fn case_blind(h: &Handle) -> bool {
+        let mut flags = 0u32;
+        probe::call(Call::Query);
+        // SAFETY: no name buffers asked for; an out pointer for the flags.
+        let ok = unsafe {
+            GetVolumeInformationByHandleW(
+                h.0,
+                null_mut(),
+                0,
+                null_mut(),
+                null_mut(),
+                &mut flags,
+                null_mut(),
+                0,
+            )
+        } != 0;
+        ok && flags & FILE_CASE_SENSITIVE_SEARCH == 0
+    }
+
+    /// A folder whose every entry was deleted is not empty yet: on a file system without POSIX
+    /// semantics (FAT, exFAT, network shares) a file deleted while another program holds it open
+    /// sharing its deletion (an antivirus scanner, a preview, a sync or backup program) keeps its
+    /// name until that program closes it. Asked again for a moment ([`SETTLE_MS`]), the same
+    /// folder (checked) by its path; then it says why it stays.
+    fn remove_when_empty(dir: &Dir) -> io::Result<()> {
+        for ms in SETTLE_MS {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+            let h = match open(
+                &dir.path,
+                DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                false,
+            ) {
+                Ok(h) => h,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()), // gone after all
+                Err(e) => return Err(e),
+            };
+            if identity(&h)? != (dir.facts.volume, dir.facts.index) {
+                return Err(super::moved_inside());
+            }
+            let gone = delete(&h, &dir.path, &dir.facts, &dir.item.posix);
+            drop(h);
+            match gone {
+                Err(e) if e.raw_os_error() == Some(ERROR_DIR_NOT_EMPTY) => continue,
+                other => return other,
+            }
+        }
+        Err(why_not_empty(dir))
+    }
+
+    /// Why a folder whose every entry was deleted is still not empty: its entries' deletions
+    /// still pending (another program holds them open), or something put into it meanwhile.
+    fn why_not_empty(dir: &Dir) -> io::Error {
+        let generic = || io::Error::other(text("not_empty"));
+        let mut buf = vec![0u64; 65536 / 8];
+        let Ok(lister) = open(
+            &dir.path,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            false,
+        ) else {
+            return generic();
+        };
+        if identity(&lister).ok() != Some((dir.facts.volume, dir.facts.index)) {
+            return generic();
+        }
+        let Ok(names) = list(&lister, &mut buf) else {
+            return generic();
+        };
+        let (mut pending, mut there) = (0usize, 0usize);
+        for name in names.iter().take(256) {
+            let units: Vec<u16> = name.encode_wide().collect();
+            match open_status(&join(&dir.path, &units)) {
+                None => there += 1,
+                Some(STATUS_DELETE_PENDING) => pending += 1,
+                Some(_) => {}
+            }
+        }
+        if there > 0 {
+            io::Error::other(text("new_inside"))
+        } else if pending > 0 {
+            io::Error::other(text("pending_inside"))
+        } else {
+            generic()
+        }
+    }
+
+    /// Open `path` to look only (not following a link at its end): None when it opens, else the
+    /// NTSTATUS it failed with.
+    fn open_status(path: &[u16]) -> Option<i32> {
+        let mut w: Vec<u16> = path.to_vec();
+        w.push(0);
+        probe::call(Call::Open);
+        // SAFETY: a NUL-terminated path; the handle is closed; the status is this thread's,
+        // read right after the call that set it.
+        unsafe {
+            let h = CreateFileW(
+                w.as_ptr(),
+                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                SHARE_ALL,
+                null(),
+                OPEN_EXISTING,
+                BACKUP_SEMANTICS | OPEN_REPARSE_POINT,
+                null_mut(),
+            );
+            if h == INVALID_HANDLE_VALUE || h.is_null() {
+                return Some(RtlGetLastNtStatus());
+            }
+            CloseHandle(h);
+            None
         }
     }
 }

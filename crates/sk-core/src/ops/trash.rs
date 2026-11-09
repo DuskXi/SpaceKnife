@@ -204,30 +204,109 @@ fn strerror(e: &io::Error) -> String {
     }
 }
 
+/// What an I/O error of a file operation means, in the user's words: its code, and the reason
+/// where the cause is known (in use, a read-only medium, a full disk, a device or network
+/// connection gone, a file system that cannot do it, …) — the system's own text (in the system's
+/// language, often as vague as 「参数错误」) only where it is not.
+pub fn cause(e: &io::Error) -> (OpCode, String) {
+    known(e).unwrap_or_else(|| {
+        (
+            OpCode::Error,
+            fill(text("error"), &[("detail", strerror(e).into())]),
+        )
+    })
+}
+
+/// Why `e` stopped something, for a sentence that says what (`partly`): [`cause`]'s reason, or
+/// the system's own words where the cause is not known.
+fn reason_of(e: &io::Error) -> String {
+    known(e).map_or_else(|| strerror(e), |k| k.1)
+}
+
+/// [`cause`] where the cause is known.
+fn known(e: &io::Error) -> Option<(OpCode, String)> {
+    let reason = |key: &str| text(key).to_string();
+    if e.kind() == io::ErrorKind::NotFound {
+        return Some((OpCode::Missing, reason("missing")));
+    }
+    let key: Option<(OpCode, &str)> = match e.raw_os_error() {
+        #[cfg(windows)]
+        Some(code) => match code {
+            32 | 33 => Some((OpCode::Locked, "locked_unknown")), // sharing / lock violation
+            5 | 1314 => Some((OpCode::Denied, "denied")),        // access denied, privilege
+            19 => Some((OpCode::Denied, "read_only")),           // ERROR_WRITE_PROTECT
+            39 | 112 => Some((OpCode::Error, "disk_full")),
+            21 | 55 | 433 | 1167 => Some((OpCode::Error, "not_ready")),
+            23 | 483 | 1117 => Some((OpCode::Error, "io_error")), // CRC, hardware, I/O device
+            51 | 53 | 59 | 64 | 67 | 1231 | 1232 | 1236 | 2250 => Some((OpCode::Error, "network")),
+            1 | 50 => Some((OpCode::Error, "unsupported_fs")), // invalid function, not supported
+            123 | 161 => Some((OpCode::Error, "bad_name_fs")), // invalid name, bad path name
+            206 => Some((OpCode::Error, "name_too_long")),
+            145 => Some((OpCode::Error, "not_empty")),
+            1392 | 1393 => Some((OpCode::Error, "corrupt")),
+            362..=399 => {
+                // ERROR_CLOUD_FILE_*: the sync program said no; its own words say why
+                let msg = fill(text("cloud"), &[("detail", strerror(e).into())]);
+                return Some((OpCode::Error, msg));
+            }
+            87 => {
+                // ERROR_INVALID_PARAMETER: what a file system answers to a call it does not
+                // implement that way (FAT, exFAT, network redirectors); the system's words too
+                let msg = fill(
+                    text("with_detail"),
+                    &[
+                        ("reason", text("unsupported_fs").into()),
+                        ("detail", strerror(e).into()),
+                    ],
+                );
+                return Some((OpCode::Error, msg));
+            }
+            _ => None,
+        },
+        #[cfg(unix)]
+        Some(code) => match code {
+            libc::EACCES | libc::EPERM => Some((OpCode::Denied, "denied")),
+            libc::EROFS => Some((OpCode::Denied, "read_only")),
+            libc::EBUSY | libc::ETXTBSY => Some((OpCode::Locked, "locked_unknown")),
+            libc::ENOSPC | libc::EDQUOT => Some((OpCode::Error, "disk_full")),
+            libc::EIO => Some((OpCode::Error, "io_error")),
+            libc::ENXIO | libc::ENODEV => Some((OpCode::Error, "not_ready")),
+            libc::ENOTCONN
+            | libc::ESTALE
+            | libc::EHOSTDOWN
+            | libc::EHOSTUNREACH
+            | libc::ENETDOWN
+            | libc::ENETUNREACH
+            | libc::ECONNRESET
+            | libc::ECONNABORTED
+            | libc::ETIMEDOUT => Some((OpCode::Error, "network")),
+            libc::ENOTSUP | libc::ENOSYS => Some((OpCode::Error, "unsupported_fs")),
+            #[allow(unreachable_patterns)] // EOPNOTSUPP is ENOTSUP on Linux
+            libc::EOPNOTSUPP => Some((OpCode::Error, "unsupported_fs")),
+            libc::EILSEQ => Some((OpCode::Error, "bad_name_fs")),
+            libc::ENAMETOOLONG => Some((OpCode::Error, "name_too_long")),
+            libc::ENOTEMPTY => Some((OpCode::Error, "not_empty")),
+            #[cfg(target_os = "linux")]
+            libc::EUCLEAN => Some((OpCode::Error, "corrupt")),
+            _ => None,
+        },
+        #[cfg(not(any(windows, unix)))]
+        Some(_) => None,
+        None => None,
+    };
+    match key {
+        Some((code, key)) => Some((code, reason(key))),
+        None if e.kind() == io::ErrorKind::PermissionDenied => {
+            Some((OpCode::Denied, reason("denied")))
+        }
+        None => None,
+    }
+}
+
 /// An I/O error as a result.
 pub fn os_error(path: &str, e: &io::Error) -> OpResult {
-    if e.kind() == io::ErrorKind::NotFound {
-        return result(path, OpCode::Missing);
-    }
-    let raw = e.raw_os_error();
-    if cfg!(windows) && matches!(raw, Some(32) | Some(33)) {
-        return result_msg(path, OpCode::Locked, text("locked_unknown"));
-    }
-    #[cfg(unix)]
-    let denied_errno = matches!(
-        raw,
-        Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EROFS)
-    );
-    #[cfg(not(unix))]
-    let denied_errno = false;
-    if e.kind() == io::ErrorKind::PermissionDenied || denied_errno {
-        return result(path, OpCode::Denied);
-    }
-    result_msg(
-        path,
-        OpCode::Error,
-        &fill(text("error"), &[("detail", strerror(e).into())]),
-    )
+    let (code, msg) = cause(e);
+    result_msg(path, code, &msg)
 }
 
 fn lexists(p: impl AsRef<Path>) -> bool {
@@ -581,12 +660,7 @@ pub fn trash_status(path: &str, usage: bool) -> TrashStatus {
             Ok(TrashStatus::unavailable(text("unsupported"), false))
         }
     };
-    run().unwrap_or_else(|e| {
-        TrashStatus::unavailable(
-            &fill(text("error"), &[("detail", strerror(&e).into())]),
-            true,
-        )
-    })
+    run().unwrap_or_else(|e| TrashStatus::unavailable(&cause(&e).1, true))
 }
 
 /// Move each path to the trash; one result per path, in order. Never deletes anything.
@@ -784,10 +858,11 @@ fn tree_result(path: &str, r: super::remove::Removed) -> OpResult {
     match error {
         None => result_msg(path, OpCode::Ok, text("deleted")),
         Some(e) if !deleted => os_error(path, &e),
+        // a part went: said so, with why the rest did not
         Some(e) => result_msg(
             path,
             OpCode::Error,
-            &fill(text("partly"), &[("detail", strerror(&e).into())]),
+            &fill(text("partly"), &[("detail", reason_of(&e).into())]),
         ),
     }
 }
@@ -948,6 +1023,10 @@ pub fn hr_result(path: &str, hr: i32) -> OpResult {
     if matches!(value, 0x8027_0000 | 0x8027_0001 | 0x8000_4004) {
         return result(path, OpCode::Cancelled);
     }
+    if win32 {
+        // a Win32 error: told as one ([`cause`])
+        return os_error(path, &io::Error::from_raw_os_error(code as i32));
+    }
     result_msg(
         path,
         OpCode::Error,
@@ -1002,11 +1081,7 @@ fn win_bin_at(root: String) -> io::Result<Result<Bin, &'static str>> {
     if nuke || max_bytes == 0 {
         return Ok(Err(text("no_bin_nuke")));
     }
-    let folder = Path::new(&root)
-        .join("$Recycle.Bin")
-        .join(win::user_sid()?)
-        .to_string_lossy()
-        .into_owned();
+    let folder = win::bin_folder(&root)?.to_string_lossy().into_owned();
     Ok(Ok(Bin {
         root,
         folder,
@@ -1642,21 +1717,22 @@ fn win_restore(r: &str) -> io::Result<OpResult> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    let volume_ok = || -> bool {
-        let Some(top) = bin_dir.parent() else {
+    let root = win::volume_root(&info.to_string_lossy()).ok();
+    // `bin` is the volume's own `$Recycle.Bin`
+    let the_bin = |bin: &Path| -> bool {
+        let (Some(top), Some(root)) = (bin.parent(), root.as_deref()) else {
             return false;
         };
         let top = top.to_string_lossy();
         let top = format!("{}\\", top.trim_end_matches('\\'));
-        win::volume_root(&info.to_string_lossy())
-            .map(|root| nt_normcase(&top) == nt_normcase(&root))
-            .unwrap_or(false)
+        base(bin).eq_ignore_ascii_case("$recycle.bin") && nt_normcase(&top) == nt_normcase(root)
     };
-    let valid = name.len() > 2
-        && name[..2].eq_ignore_ascii_case("$I")
-        && win::user_sid().is_ok_and(|sid| base(&folder).eq_ignore_ascii_case(&sid))
-        && base(&bin_dir).eq_ignore_ascii_case("$recycle.bin")
-        && volume_ok();
+    // `$Recycle.Bin\<SID>\$I…`, or `$Recycle.Bin\$I…` where the bin keeps no folder per user
+    // (FAT, exFAT)
+    let mine = win::user_sid().is_ok_and(|sid| base(&folder).eq_ignore_ascii_case(&sid))
+        && the_bin(&bin_dir);
+    let shared = the_bin(&folder) && root.as_deref().is_some_and(|r| !win::per_user_bin(r));
+    let valid = name.len() > 2 && name[..2].eq_ignore_ascii_case("$I") && (mine || shared);
     if !valid {
         return Ok(result_msg(r, OpCode::Error, text("bad_ref")));
     }
@@ -2532,17 +2608,29 @@ pub mod fd {
 
 #[cfg(target_os = "macos")]
 fn mac_status(path: &str) -> io::Result<TrashStatus> {
-    let remote = crate::volume::volume_for(Path::new(path)).is_ok_and(|v| v.is_remote);
-    if remote {
+    use std::os::unix::fs::MetadataExt;
+    let volume = crate::volume::volume_for(Path::new(path));
+    if volume.as_ref().is_ok_and(|v| v.is_remote) {
         return Ok(TrashStatus::unavailable(text("no_bin_remote"), false));
     }
+    // the home volume's trash is the user's `~/.Trash`; another volume's is its own
+    // `.Trashes/<uid>` (what NSFileManager moves into)
+    let home = crate::paths::home_dir();
+    let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
+    let location = match (dev(Path::new(path)), dev(&home), volume) {
+        (Some(a), Some(b), Ok(v)) if a != b => {
+            // SAFETY: always succeeds.
+            let uid = unsafe { libc::getuid() };
+            Path::new(&v.mount_point)
+                .join(".Trashes")
+                .join(uid.to_string())
+        }
+        _ => home.join(".Trash"),
+    };
     Ok(TrashStatus {
         available: true,
         reason: String::new(),
-        location: crate::paths::home_dir()
-            .join(".Trash")
-            .to_string_lossy()
-            .into_owned(),
+        location: location.to_string_lossy().into_owned(),
         used: -1,
         capacity: 0,
         same_volume: true,
@@ -2560,14 +2648,33 @@ fn mac_trash(path: &str) -> OpResult {
         let mut out: Option<objc2::rc::Retained<NSURL>> = None;
         let done = manager.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out));
         match done {
-            Err(err) => {
-                let detail = err.localizedDescription().to_string();
-                result_msg(
-                    path,
-                    OpCode::Error,
-                    &fill(text("error"), &[("detail", detail.into())]),
-                )
-            }
+            // what the error means where it is known (NSFileManager's codes, POSIX errors),
+            // else the system's own words
+            Err(err) => match (err.domain().to_string().as_str(), err.code()) {
+                // NSFeatureUnsupportedError: this volume has no trash
+                ("NSCocoaErrorDomain", 3328) => {
+                    result_msg(path, OpCode::NoTrash, text("no_bin_feature"))
+                }
+                // NSFileNoSuchFileError, NSFileReadNoSuchFileError
+                ("NSCocoaErrorDomain", 4 | 260) => result(path, OpCode::Missing),
+                // NSFileReadNoPermissionError, NSFileWriteNoPermissionError
+                ("NSCocoaErrorDomain", 257 | 513) => result(path, OpCode::Denied),
+                // NSFileWriteVolumeReadOnlyError
+                ("NSCocoaErrorDomain", 642) => result_msg(path, OpCode::Denied, text("read_only")),
+                // NSFileWriteOutOfSpaceError
+                ("NSCocoaErrorDomain", 640) => result_msg(path, OpCode::Error, text("disk_full")),
+                ("NSPOSIXErrorDomain", code) => {
+                    os_error(path, &io::Error::from_raw_os_error(code as i32))
+                }
+                _ => {
+                    let detail = err.localizedDescription().to_string();
+                    result_msg(
+                        path,
+                        OpCode::Error,
+                        &fill(text("error"), &[("detail", detail.into())]),
+                    )
+                }
+            },
             Ok(()) => {
                 let landed = out
                     .and_then(|u| u.path())
@@ -2640,6 +2747,83 @@ mod tests {
         for &(hr, code) in cases {
             assert_eq!(hr_result("p", hr as i32).code, code, "{hr:#x}");
         }
+    }
+
+    /// Errors whose cause is known are told in words (the tests run in the source language),
+    /// with the code the item gets; the rest keep the system's own words; a partly deleted item
+    /// says so, with the reason.
+    #[test]
+    fn errors_say_their_cause() {
+        let os = |code: i32| io::Error::from_raw_os_error(code);
+        #[cfg(windows)]
+        let cases: &[(i32, OpCode, &str)] = &[
+            (32, OpCode::Locked, "正被其他程序使用，需先关闭"),
+            (5, OpCode::Denied, "没有权限"),
+            (
+                19,
+                OpCode::Denied,
+                "介质是只读的（写保护或以只读方式挂载），不能改动",
+            ),
+            (112, OpCode::Error, "磁盘空间已满，无法完成"),
+            (21, OpCode::Error, "设备已断开或还没有就绪"),
+            (64, OpCode::Error, "与网络位置的连接断开了"),
+            (50, OpCode::Error, "这个文件系统不支持这个操作"),
+            (145, OpCode::Error, text("not_empty")),
+            (1392, OpCode::Error, text("corrupt")),
+        ];
+        #[cfg(unix)]
+        let cases: &[(i32, OpCode, &str)] = &[
+            (libc::EACCES, OpCode::Denied, "没有权限"),
+            (libc::EROFS, OpCode::Denied, text("read_only")),
+            (libc::EBUSY, OpCode::Locked, text("locked_unknown")),
+            (libc::ENOSPC, OpCode::Error, text("disk_full")),
+            (libc::EIO, OpCode::Error, text("io_error")),
+            (libc::ENOTCONN, OpCode::Error, text("network")),
+            (libc::ENOTSUP, OpCode::Error, text("unsupported_fs")),
+            (libc::ENAMETOOLONG, OpCode::Error, text("name_too_long")),
+            (libc::ENOTEMPTY, OpCode::Error, text("not_empty")),
+        ];
+        for &(code, want, msg) in cases {
+            let r = os_error("p", &os(code));
+            assert_eq!((r.code, r.message.as_str()), (want, msg), "{code}");
+        }
+        assert_eq!(os_error("p", &os(2)).code, OpCode::Missing);
+        // the system's words where the cause is not known, the item's "partly" with the reason
+        let odd = io::Error::other("something odd");
+        assert_eq!(os_error("p", &odd).message, "操作失败：something odd");
+        let partly = |e: io::Error| {
+            let r = super::super::remove::Removed {
+                first: Some(e),
+                cancelled: false,
+                deleted: true,
+            };
+            tree_result("p", r).message
+        };
+        assert_eq!(partly(odd), "部分内容未能删除：something odd");
+        assert_eq!(
+            partly(os(if cfg!(windows) { 32 } else { libc_ebusy() })),
+            "部分内容未能删除：正被其他程序使用，需先关闭"
+        );
+        #[cfg(windows)]
+        {
+            // 「参数错误」 alone said nothing: what it means here, and the system's words
+            let r = os_error("p", &os(87));
+            assert!(
+                r.message
+                    .starts_with("这个文件系统不支持这个操作（系统的说法："),
+                "{r:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    fn libc_ebusy() -> i32 {
+        libc::EBUSY
+    }
+
+    #[cfg(not(unix))]
+    fn libc_ebusy() -> i32 {
+        16
     }
 
     #[test]
