@@ -3530,6 +3530,90 @@ mod tests {
     }
 
     #[test]
+    fn every_published_layout_holds_what_spaceknifes_does() {
+        // the folders with common names as each release archive has them (read from the archives
+        // and the build scripts): a copy of each, on disk, has nothing foreign
+        let windows_034: &[&str] = &[
+            "SpaceKnife.exe",
+            "SpaceKnife.com",
+            "ffmpeg.dll",
+            "locales/en-US.pak",
+            "locales/zh-CN.pak",
+            "resources/app.asar",
+            "resources/elevate.exe",
+            "resources/backend/spaceknife-backend.exe",
+            "resources/licenses/LICENSE.txt",
+        ];
+        let linux_034: &[&str] = &[
+            "spaceknife",
+            "chrome-sandbox",
+            "locales/en-US.pak",
+            "locales/zh-CN.pak",
+            "resources/app.asar",
+            "resources/backend/spaceknife-backend",
+            "resources/licenses/LICENSE.txt",
+        ];
+        let windows_035: &[&str] = &[
+            "SpaceKnife.exe",
+            "SpaceKnife.com",
+            "spaceknife-cli.exe",
+            "resources/backend/spaceknife-backend.exe",
+            "licenses/LICENSE.txt",
+            "licenses/THIRD-PARTY-rust.txt",
+            "licenses/THIRD-PARTY-ui.txt",
+            "ui/index.html",
+            "ui/200.html",
+            "ui/_nuxt/entry.js",
+        ];
+        let tauri_linux_035: &[&str] = &[
+            "spaceknife",
+            "spaceknife-cli",
+            "resources/backend/spaceknife-backend",
+            "licenses/LICENSE.txt",
+            "licenses/THIRD-PARTY-rust.txt",
+            "licenses/THIRD-PARTY-ui.txt",
+            "ui/index.html",
+            "ui/_nuxt/entry.js",
+        ];
+        let electron_shell_035: &[&str] = &[
+            "spaceknife",
+            "spaceknife-cli",
+            "locales/en-US.pak",
+            "resources/app.asar",
+            "resources/backend/spaceknife-backend",
+            "resources/ui/index.html",
+            "resources/licenses/LICENSE.txt",
+        ];
+        for (os, layout) in [
+            ("windows", windows_034),
+            ("linux", linux_034),
+            ("windows", windows_035),
+            ("linux", tauri_linux_035),
+            ("linux", electron_shell_035),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let app = tmp.path().join("app");
+            let new = tmp.path().join("new");
+            for f in layout {
+                write(&app.join(f), "x");
+            }
+            write(&app.join("data/keep.txt"), "mine");
+            write(&new.join("NEW_ONLY.txt"), "x");
+            let plan = Plan {
+                pid: 1,
+                exe: app.join(layout[0]),
+                app: app.clone(),
+                new,
+                old: tmp.path().join("old"),
+                log: tmp.path().join("update-0.3.6.log"),
+                keep: vec!["data".into()],
+            };
+            let folder = plan.survey_on(os).unwrap();
+            assert!(folder.foreign.is_empty(), "{os} {layout:?}: {folder:?}");
+        }
+    }
+
+    #[test]
     fn a_users_folder_named_like_spaceknifes_stops_the_update() {
         let tmp = tempfile::tempdir().unwrap();
         let plan = tree(tmp.path());
