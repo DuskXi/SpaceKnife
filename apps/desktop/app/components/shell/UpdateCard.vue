@@ -21,7 +21,7 @@ import type { UpdateInfo, UpdateStatus } from "@/protocol/generated";
 import { type InstallHow, type InstallStep, stepQuits } from "@/shared/install";
 import { cancelUpdate, closeUpdate, downloadUpdate, installUpdate, muteUpdates } from "@/state/actions";
 import { useApp } from "@/state/store";
-import { downloading, downloadOf, downloadPct, installChoices, notesFor, releaseDate, seriesName, summarizeNotes, type UpdatePlacement } from "@/state/updates";
+import { downloading, downloadOf, downloadPct, installChoices, isPreview, notesFor, releaseDate, seriesName, summarizeNotes, type UpdatePlacement } from "@/state/updates";
 
 const props = defineProps<{ status: UpdateStatus & { latest: UpdateInfo }; placement: UpdatePlacement }>();
 
@@ -90,7 +90,7 @@ function go(path: string, how: InstallHow, step: InstallStep): void {
           <span v-if="date">{{ t("{date} 发布", { date }) }}</span>
           <span v-if="date" class="uc-dot" aria-hidden="true" />
           <span>{{ t("你在用 {current}", { current: status.current }) }}</span>
-          <span v-if="latest.prerelease" class="uc-tag">{{ t("预览版") }}</span>
+          <span v-if="isPreview(latest)" class="uc-tag">{{ t("预览版") }}</span>
         </div>
       </div>
       <button

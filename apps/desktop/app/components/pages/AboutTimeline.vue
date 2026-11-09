@@ -11,7 +11,7 @@ import type { UpdateInfo } from "@/protocol/generated";
 import { call, checkUpdates } from "@/state/actions";
 import { openHelpTab } from "@/state/help";
 import { useApp } from "@/state/store";
-import { notesFor, releaseDate } from "@/state/updates";
+import { isPreview, notesFor, releaseDate } from "@/state/updates";
 
 const checkedAt = useApp((s) => s.update?.checked_at ?? null);
 const current = useApp((s) => s.update?.current || window.sk.version);
@@ -90,7 +90,7 @@ const openUrl = (url: string) => window.sk.shell.openExternal(url);
           <span class="tl-version">{{ r.version }}</span>
           <span v-if="r.version === current" class="tl-tag current">{{ t("当前") }}</span>
           <span v-if="here > 0 && i < here" class="tl-tag new">{{ t("新") }}</span>
-          <span v-if="r.prerelease" class="tl-tag">{{ t("预览版") }}</span>
+          <span v-if="isPreview(r)" class="tl-tag">{{ t("预览版") }}</span>
           <span class="flex" />
           <span class="tl-date mono">{{ releaseDate(r.published_at) }}</span>
           <Icon :name="open.has(r.version) ? 'chevronDown' : 'chevronRight'" :size="14" />

@@ -212,7 +212,8 @@ try {
     const t = setTimeout(() => reject(new Error("--apply-update did not answer the folder with the user's files")), 60_000);
     let line = null;
     createInterface({ input: refusal.stdout }).once("line", (l) => (line = l));
-    refusal.once("exit", (code) => (clearTimeout(t), resolve({ code, line })));
+    // "close", not "exit": its output may still be on its way when it has exited
+    refusal.once("close", (code) => (clearTimeout(t), resolve({ code, line })));
   });
   const refusedSaid = JSON.parse(refused.line ?? "{}");
   if (refused.code !== 2 || refusedSaid.ok !== false || !refusedSaid.error?.includes("e2e-notes.txt") || !refusedSaid.error.includes(basename(foreign[1])))
