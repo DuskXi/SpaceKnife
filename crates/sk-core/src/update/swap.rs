@@ -1828,10 +1828,15 @@ pub fn main_hooked(
         }
     };
     if !foreign.is_empty() {
+        // a folder such as Downloads may hold thousands: the first ones and how many
+        const SHOWN: usize = 20;
+        let mut names = Folder::names(&foreign, SHOWN).join(", ");
+        if foreign.len() > SHOWN {
+            names.push_str(&format!(" … {} in all", foreign.len()));
+        }
         log.say(&format!(
-            "not started: {} holds what is not SpaceKnife's: {}",
-            plan.app.display(),
-            Folder::names(&foreign, usize::MAX).join(", ")
+            "not started: {} holds what is not SpaceKnife's: {names}",
+            plan.app.display()
         ));
         let error = foreign_message(lang, &foreign);
         say(out, &serde_json::json!({"ok": false, "error": error}));
@@ -1845,9 +1850,10 @@ pub fn main_hooked(
             if said.is_empty() { "no details" } else { &said }
         )),
         Err(e) => {
-            log.say(&format!("not started: {e}"));
             // before the answer: the app may end this helper as soon as it has read it
             problem(&plan, &log);
+            // the log's last line says how it ended (packaging/lib.mjs swapEnding)
+            log.say(&format!("not started: {e}"));
             let error = start_message(lang, &e.0);
             say(out, &serde_json::json!({"ok": false, "error": error}));
             return 2;
@@ -2847,10 +2853,12 @@ mod tests {
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
         assert!(plan.new.join("E2E_NEW_BUILD.txt").is_file());
         assert!(!plan.old.exists());
+        // the last line says how it ended (packaging/lib.mjs swapEnding: "refused")
         let lines = log_lines(&plan);
+        let last = lines.last().unwrap();
         assert!(
-            lines[0].starts_with("not started: the new version can't start on this computer: ")
-                && lines[0].contains("WebView2 Runtime"),
+            last.starts_with("not started: the new version can't start on this computer: ")
+                && last.contains("WebView2 Runtime"),
             "the reason is in the update's log: {lines:?}"
         );
         // Windows: the new version's program explains it in a window of its own
@@ -2861,7 +2869,7 @@ mod tests {
                 .unwrap();
             assert!(wait_gone(pid, Duration::from_secs(10)));
             assert_eq!(lines.len(), 2, "{lines:?}");
-            assert!(lines[1].ends_with(&format!("--startup-problem explains it (pid {pid})")));
+            assert!(lines[0].ends_with(&format!("--startup-problem explains it (pid {pid})")));
         } else {
             std::thread::sleep(Duration::from_millis(300));
             assert!(!explained.exists());
@@ -3022,6 +3030,29 @@ mod tests {
                 .last()
                 .unwrap()
                 .contains("asked: the folder")
+        );
+    }
+
+    #[test]
+    fn a_folder_full_of_the_users_things_is_named_in_part() {
+        // SpaceKnife unpacked into Downloads: the log names the first 20 and how many
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        for i in 0..25 {
+            write(&plan.app.join(format!("file-{i:02}.txt")), "the user's");
+        }
+        let file = write_plan(&plan, &tmp.path().join("update-0.3.4.json"), &[]);
+        let code = main_checked(
+            &[file.to_string_lossy().into_owned()],
+            &mut Vec::new(),
+            false,
+            &|_| panic!("the folder is refused first"),
+        );
+        assert_eq!(code, 2);
+        let lines = log_lines(&plan);
+        assert!(
+            lines[0].ends_with("file-18.txt, file-19.txt … 25 in all"),
+            "{lines:?}"
         );
     }
 
