@@ -154,8 +154,8 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 **各种安装方式怎样换上新版本**：
 
 - **NSIS**：「无缝更新」先停掉后端，再以 0.3.4 的参数 `--updated /S --force-run` 加范围（程序在 Program Files 下时 `/allusers`，在 `%LOCALAPPDATA%` 下时 `/currentuser`，别的目录不加；`install.rs` 的 `nsis_update_args`）运行新安装程序（静默、就地更新、装好后带 `--updated` 启动新版本），然后退出；安装程序做的事见第 5 节。「运行安装程序」不带参数运行新安装程序（显示向导），SpaceKnife 随即退出。
-- **AppImage**：「无缝更新」用新文件替换 `$APPIMAGE`，然后启动它；「自己替换」在文件夹中显示新的 AppImage。
-- **dmg / deb / rpm**：只有经典方式「打开磁盘映像」/「打开安装包」，交给系统打开，SpaceKnife 随即退出。
+- **AppImage**（Electron 外壳，`src/main/appimage.ts`）：「无缝更新」把新文件复制成 `$APPIMAGE.new`、设为可执行，先问它能不能在这台电脑上启动：`<新文件> --startup-check`，带着启动它时的同一套环境和开关——当前进程的环境去掉旧 AppImage 给自己设的 `APPDIR`、`APPIMAGE`、`ARGV0`、`OWD` 和各个路径列表（`PATH`、`LD_LIBRARY_PATH`、`XDG_DATA_DIRS` 等）里旧挂载点下的项（应用退出后那个挂载点就没了），当前进程带着 `--no-sandbox` 时也带上它——再加 `LD_BIND_NOW=1`，最多等 20 秒，判断与替换助手相同（第 3 步）。不能启动就删掉 `.new`，旧版本不动，更新卡片显示「新版本不能在这台电脑上启动，旧版本保持不变：…」。能启动时旧文件先硬链接成 `$APPIMAGE.previous`（文件系统不支持硬链接时改名过去），新文件再改名成 `$APPIMAGE`（有硬链接时 `$APPIMAGE` 一刻也不缺；运行中的旧版本照旧读它打开着的旧文件），然后以同样的环境带 `--updated` 启动新版本（进程都起不来时把 `.previous` 改回原名，应用照常运行）。`.previous` 只留一份，下一次更新时换成那时的旧版本；新版本通过了检查却仍起不来时，把它改回 `$APPIMAGE` 的名字就回到旧版本。「自己替换」在文件夹中显示新的 AppImage。
+- **dmg / deb / rpm**：只有经典方式「打开磁盘映像」/「打开安装包」，交给系统打开，SpaceKnife 随即退出。deb 先复制到用户的下载文件夹再打开（`install.rs` 的 `deb_open_dir`、`visible_copy`）：`user-dirs.dirs` 的 `XDG_DOWNLOAD_DIR`（`xdg-user-dir DOWNLOAD` 读的也是它），没有时 `~/Downloads`；updates 在隐藏的 `~/.local/share` 下，Ubuntu 23.10 起默认打开 deb 的 App Center 是 snap，读不到隐藏的文件夹。那里已有同名、内容相同的文件就直接用；同名的别的文件不覆盖，副本改叫 `<名字> (1).deb`、`(2)`…；先写成隐藏的临时文件再改名，安装程序看不到写了一半的文件。复制失败时照旧打开 updates 里的那个。副本像浏览器下载的文件一样留在下载文件夹里。
 - **便携版**：「自己替换」在文件夹中显示下载的压缩包，用户退出后自己解压覆盖，保留 `data`。「无缝更新」换文件的是**新版本自己的程序**（`<程序> --apply-update <计划>`，`sk_core::update::swap`），见下。
 
 **便携版的「无缝更新」**：

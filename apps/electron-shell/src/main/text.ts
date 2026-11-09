@@ -20,6 +20,10 @@ const TEXT = {
   updateStartFailed: { "zh-CN": "无法启动更新：{error}", en: "Can't start the update: {error}" },
   updateUnpackFailed: { "zh-CN": "无法解压更新：{error}", en: "Can't unpack the update: {error}" },
   updateReplaceFailed: { "zh-CN": "无法替换旧版本：{error}", en: "Can't replace the old version: {error}" },
+  updateCantStart: {
+    "zh-CN": "新版本不能在这台电脑上启动，旧版本保持不变：{error}",
+    en: "The new version can't start on this computer, so the old one stays: {error}",
+  },
 } as const;
 
 export type TextKey = keyof typeof TEXT;

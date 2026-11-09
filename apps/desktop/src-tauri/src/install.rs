@@ -10,7 +10,8 @@
 //!   folder, a plan is written, and *the new version's* program swaps the files once this one has
 //!   quit (`--apply-update <plan>`, sk_core::update::swap; main.rs). The classic way shows the file.
 //! - AppImage: the new file takes the old one's place and starts.
-//! - dmg / deb / rpm: the file opens in the system's installer and SpaceKnife quits.
+//! - dmg / deb / rpm: the file opens in the system's installer and SpaceKnife quits; the deb from
+//!   a copy in the user's download folder ([`deb_open_dir`]), which App Center can read.
 
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
@@ -337,7 +338,15 @@ pub fn install_update(app: &AppHandle, file: &Path, how: &str) -> String {
         Some(Step::Open) => {
             // a disk image mounts, a package opens in the system's installer: either replaces this
             // app's files, so it quits once the file is open
-            if let Err(e) = app.opener().open_path(file.to_string_lossy(), None::<&str>) {
+            let opened = if kind == "deb" {
+                deb_to_open(app, file)
+            } else {
+                file.to_path_buf()
+            };
+            if let Err(e) = app
+                .opener()
+                .open_path(opened.to_string_lossy(), None::<&str>)
+            {
                 return failed(&e);
             }
             let app = app.clone();
@@ -355,6 +364,106 @@ pub fn install_update(app: &AppHandle, file: &Path, how: &str) -> String {
             String::new()
         }
         None => mt(TextKey::UpdateNoInstall, &[]),
+    }
+}
+
+/// The deb as the system's installer gets it: a copy in the user's download folder
+/// ([`deb_open_dir`], [`visible_copy`]); the downloaded file itself when there is no such folder or
+/// the copy fails.
+fn deb_to_open(app: &AppHandle, file: &Path) -> PathBuf {
+    let paths = app.path();
+    let Some(dir) = deb_open_dir(paths.download_dir().ok(), paths.home_dir().ok()) else {
+        return file.to_path_buf();
+    };
+    match visible_copy(file, &dir) {
+        Ok(copy) => {
+            tracing::info!("[update] opening the copy {}", copy.display());
+            copy
+        }
+        Err(e) => {
+            tracing::warn!(
+                "[update] could not copy {} to {}: {e}; opening it where it is",
+                file.display(),
+                dir.display()
+            );
+            file.to_path_buf()
+        }
+    }
+}
+
+/// Where the downloaded deb is opened from: the user's download folder (`download`, Tauri's: the
+/// `XDG_DOWNLOAD_DIR` of `user-dirs.dirs`, the folder `xdg-user-dir DOWNLOAD` names), else
+/// `~/Downloads`. Not the updates folder: it lies under the hidden `~/.local/share`, which the usual
+/// handler of a .deb on Ubuntu 23.10 and later, App Center (a snap), can't read.
+pub fn deb_open_dir(download: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
+    download.filter(|d| d.is_absolute()).or_else(|| {
+        home.filter(|h| h.is_absolute())
+            .map(|h| h.join("Downloads"))
+    })
+}
+
+/// A copy of the downloaded `file` in `dir` for the system's installer to open: under the same
+/// name, or — when a different file has that name — `<name> (1).<ext>`, `<name> (2).<ext>`…, as a
+/// browser names a second download; a file there with the same bytes is used as it is. Written
+/// under a hidden temporary name first and then renamed, so the installer never sees half a file;
+/// nothing of the user's is overwritten.
+pub fn visible_copy(file: &Path, dir: &Path) -> std::io::Result<PathBuf> {
+    let name = file
+        .file_name()
+        .ok_or_else(|| std::io::Error::other("no file name"))?
+        .to_string_lossy()
+        .into_owned();
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_owned(), format!(".{e}")),
+        _ => (name.clone(), String::new()),
+    };
+    std::fs::create_dir_all(dir)?;
+    let bytes = std::fs::read(file)?;
+    for n in 0..100 {
+        let candidate = if n == 0 {
+            dir.join(&name)
+        } else {
+            dir.join(format!("{stem} ({n}){ext}"))
+        };
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(meta) => {
+                // the same package downloaded before (by hand, or by an earlier click): used as it is
+                if meta.is_file()
+                    && meta.len() == bytes.len() as u64
+                    && std::fs::read(&candidate).is_ok_and(|b| b == bytes)
+                {
+                    return Ok(candidate);
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let part = dir.join(format!(".{name}.{}.part", std::process::id()));
+                let placed =
+                    std::fs::write(&part, &bytes).and_then(|()| place_new(&part, &candidate));
+                let _ = std::fs::remove_file(&part);
+                match placed {
+                    Ok(()) => return Ok(candidate),
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other(format!(
+        "{name} and 99 other names are taken in {}",
+        dir.display()
+    )))
+}
+
+/// `part` under the name `to`, never over a file that has it (AlreadyExists then): a hard link,
+/// else (a file system without them) a rename.
+fn place_new(part: &Path, to: &Path) -> std::io::Result<()> {
+    match std::fs::hard_link(part, to) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists || to.exists() => {
+            Err(std::io::ErrorKind::AlreadyExists.into())
+        }
+        Err(_) => std::fs::rename(part, to),
     }
 }
 
@@ -969,6 +1078,78 @@ mod tests {
             install_refusal(&good, "nsis", &updates, os, "x64"),
             Some(TextKey::UpdateNotAnUpdate)
         );
+    }
+
+    #[test]
+    fn opens_the_deb_from_the_download_folder() {
+        // an absolute path on every platform the tests run on (/home/lenny on Linux)
+        let home = std::env::temp_dir().join("home").join("lenny");
+        // user-dirs.dirs names it (in any language), else ~/Downloads
+        assert_eq!(
+            deb_open_dir(Some(home.join("下载")), Some(home.clone())),
+            Some(home.join("下载"))
+        );
+        assert_eq!(
+            deb_open_dir(None, Some(home.clone())),
+            Some(home.join("Downloads"))
+        );
+        assert_eq!(
+            deb_open_dir(Some(PathBuf::from("Downloads")), Some(home.clone())),
+            Some(home.join("Downloads"))
+        );
+        assert_eq!(deb_open_dir(None, None), None);
+        assert_eq!(deb_open_dir(None, Some(PathBuf::from("lenny"))), None);
+    }
+
+    #[test]
+    fn copies_the_deb_where_the_installer_can_read_it_without_overwriting_anything() {
+        let tmp = tempfile::tempdir().unwrap();
+        let updates = tmp.path().join(".local").join("share").join("updates");
+        std::fs::create_dir_all(&updates).unwrap();
+        let name = "spaceknife_0.4.1_amd64.deb";
+        let deb = updates.join(name);
+        std::fs::write(&deb, b"the package").unwrap();
+        // a download folder that isn't there yet is made
+        let downloads = tmp.path().join("Downloads");
+        let copy = visible_copy(&deb, &downloads).unwrap();
+        assert_eq!(copy, downloads.join(name));
+        assert_eq!(std::fs::read(&copy).unwrap(), b"the package");
+        assert_eq!(std::fs::read(&deb).unwrap(), b"the package");
+        // the same package there already (an earlier click): used as it is
+        assert_eq!(visible_copy(&deb, &downloads).unwrap(), copy);
+        // a different file under that name is the user's: the copy takes the next free name
+        std::fs::write(&copy, b"something else").unwrap();
+        std::fs::write(downloads.join("spaceknife_0.4.1_amd64 (1).deb"), b"more").unwrap();
+        let second = visible_copy(&deb, &downloads).unwrap();
+        assert_eq!(second, downloads.join("spaceknife_0.4.1_amd64 (2).deb"));
+        assert_eq!(std::fs::read(&second).unwrap(), b"the package");
+        assert_eq!(std::fs::read(&copy).unwrap(), b"something else");
+        assert_eq!(
+            std::fs::read(downloads.join("spaceknife_0.4.1_amd64 (1).deb")).unwrap(),
+            b"more"
+        );
+        // nothing half-written is left behind
+        let mut names: Vec<String> = std::fs::read_dir(&downloads)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "spaceknife_0.4.1_amd64 (1).deb",
+                "spaceknife_0.4.1_amd64 (2).deb",
+                "spaceknife_0.4.1_amd64.deb"
+            ]
+        );
+        // a folder in the way is passed over too; a missing download is an error
+        std::fs::create_dir(downloads.join("spaceknife_0.4.1_amd64 (3).deb")).unwrap();
+        std::fs::write(&deb, b"a newer package").unwrap();
+        assert_eq!(
+            visible_copy(&deb, &downloads).unwrap(),
+            downloads.join("spaceknife_0.4.1_amd64 (4).deb")
+        );
+        assert!(visible_copy(&updates.join("gone.deb"), &downloads).is_err());
     }
 
     #[test]
