@@ -1824,6 +1824,19 @@ mod imp {
     /// Open by a `\\?\` path; `follow`: through a reparse point at the end (else the entry
     /// itself).
     fn open(path: &[u16], access: u32, follow: bool) -> io::Result<Handle> {
+        open_nt(path, access, follow).map_err(|(e, _)| e)
+    }
+
+    /// Whether an [`open_nt`] failed because what it opens is being deleted already (another
+    /// program holds it open, sharing its deletion: FAT, exFAT and network shares keep its name
+    /// until that program closes it, and so does NTFS where it was deleted the classic way).
+    /// Nothing can open it then, and its Win32 error says only 「没有权限」.
+    fn delete_pending((e, status): &(io::Error, i32)) -> bool {
+        e.raw_os_error() == Some(ERROR_ACCESS_DENIED) && *status == STATUS_DELETE_PENDING
+    }
+
+    /// [`open`]; failed, with the NTSTATUS it failed with too (finer than its Win32 error).
+    fn open_nt(path: &[u16], access: u32, follow: bool) -> Result<Handle, (io::Error, i32)> {
         probe::call(Call::Open);
         let mut w: Vec<u16> = path.to_vec();
         w.push(0);
@@ -1841,7 +1854,9 @@ mod imp {
             )
         };
         if h == INVALID_HANDLE_VALUE || h.is_null() {
-            return Err(last());
+            // SAFETY: this thread's status, read right after the call that set it.
+            let status = unsafe { RtlGetLastNtStatus() };
+            return Err((last(), status));
         }
         Ok(Handle(h))
     }
@@ -1914,27 +1929,29 @@ mod imp {
         }
     }
 
-    /// Open an entry for deletion and tell what it is; None: it is gone. Where deleting it is
-    /// refused (no right to, another program holds it open without sharing that), it is opened
-    /// to look only: a folder can still be emptied.
+    /// Open an entry for deletion and tell what it is; None: it is gone, or going (its deletion
+    /// is pending: nothing is left to do to it, and its folder says why it stays, if it does —
+    /// [`why_not_empty`]). Where deleting it is refused (no right to, another program holds it
+    /// open without sharing that), it is opened to look only: a folder can still be emptied.
     fn open_entry(path: &[u16], buf: &mut [u64]) -> io::Result<Option<(Handle, Facts)>> {
-        let (h, undeletable) = match open(path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, false)
-        {
-            Ok(h) => (h, None),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e)
-                if matches!(
-                    e.raw_os_error(),
-                    Some(ERROR_ACCESS_DENIED) | Some(ERROR_SHARING_VIOLATION)
-                ) =>
-            {
-                match open(path, FILE_READ_ATTRIBUTES | SYNCHRONIZE, false) {
-                    Ok(h) => (h, e.raw_os_error()),
-                    Err(_) => return Err(e),
+        let (h, undeletable) =
+            match open_nt(path, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, false) {
+                Ok(h) => (h, None),
+                Err((e, _)) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(failed) if delete_pending(&failed) => return Ok(None),
+                Err((e, _))
+                    if matches!(
+                        e.raw_os_error(),
+                        Some(ERROR_ACCESS_DENIED) | Some(ERROR_SHARING_VIOLATION)
+                    ) =>
+                {
+                    match open(path, FILE_READ_ATTRIBUTES | SYNCHRONIZE, false) {
+                        Ok(h) => (h, e.raw_os_error()),
+                        Err(_) => return Err(e),
+                    }
                 }
-            }
-            Err(e) => return Err(e),
-        };
+                Err((e, _)) => return Err(e),
+            };
         // the attributes come with the identity; the reparse tag is asked for only where there
         // is one (one query less for every plain file and folder)
         let (volume, index, attrs) = identity_attrs(&h)?;
@@ -2522,10 +2539,15 @@ mod imp {
         let (mut pending, mut there) = (0usize, 0usize);
         for name in names.iter().take(256) {
             let units: Vec<u16> = name.encode_wide().collect();
-            match open_status(&join(&dir.path, &units)) {
-                None => there += 1,
-                Some(STATUS_DELETE_PENDING) => pending += 1,
-                Some(_) => {}
+            // to look only, not following a link at its end
+            match open_nt(
+                &join(&dir.path, &units),
+                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                false,
+            ) {
+                Ok(_) => there += 1,
+                Err(failed) if delete_pending(&failed) => pending += 1,
+                Err(_) => {}
             }
         }
         if there > 0 {
@@ -2534,32 +2556,6 @@ mod imp {
             io::Error::other(text("pending_inside"))
         } else {
             generic()
-        }
-    }
-
-    /// Open `path` to look only (not following a link at its end): None when it opens, else the
-    /// NTSTATUS it failed with.
-    fn open_status(path: &[u16]) -> Option<i32> {
-        let mut w: Vec<u16> = path.to_vec();
-        w.push(0);
-        probe::call(Call::Open);
-        // SAFETY: a NUL-terminated path; the handle is closed; the status is this thread's,
-        // read right after the call that set it.
-        unsafe {
-            let h = CreateFileW(
-                w.as_ptr(),
-                FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-                SHARE_ALL,
-                null(),
-                OPEN_EXISTING,
-                BACKUP_SEMANTICS | OPEN_REPARSE_POINT,
-                null_mut(),
-            );
-            if h == INVALID_HANDLE_VALUE || h.is_null() {
-                return Some(RtlGetLastNtStatus());
-            }
-            CloseHandle(h);
-            None
         }
     }
 }

@@ -2072,10 +2072,18 @@ pub mod fd {
         meta.is_dir() && meta.uid() == uid
     }
 
-    /// Whether `path` is on a mount that is read-only (`statvfs`'s ST_RDONLY: mounted so, or a
-    /// write-protected medium).
+    /// Whether the entry `path` is on a mount that is read-only (`statvfs`'s ST_RDONLY: mounted
+    /// so, or a write-protected medium). A link is asked about through the folder it is in:
+    /// `statvfs` follows a link at the end, and a link to a read-only place (a snap, an ISO, a
+    /// read-only system folder) moves to the trash as any other entry.
     fn read_only_mount(path: &Path) -> bool {
-        let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        probe::call(Call::Stat);
+        let link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+        let at = match path.parent() {
+            Some(folder) if link && !folder.as_os_str().is_empty() => folder,
+            _ => path,
+        };
+        let Ok(c) = std::ffi::CString::new(at.as_os_str().as_bytes()) else {
             return false;
         };
         probe::call(Call::Stat);
@@ -2084,6 +2092,38 @@ pub mod fd {
             let mut st: libc::statvfs = std::mem::zeroed();
             libc::statvfs(c.as_ptr(), &mut st) == 0 && st.f_flag & libc::ST_RDONLY != 0
         }
+    }
+
+    /// A link into a read-only mount is not on it (it moves to the trash where it is); what is
+    /// on the mount is.
+    #[cfg(all(test, target_os = "linux"))]
+    #[test]
+    fn a_link_into_a_read_only_mount_is_not_on_it() {
+        // a read-only mount this process can look into (`ro` among a line's mount options)
+        let info = std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
+        let ro = info.lines().find_map(|line| {
+            let f: Vec<&str> = line.split(' ').collect();
+            let (point, options) = (*f.get(4)?, *f.get(5)?);
+            let usable = !point.contains('\\') // (no escaped characters to undo)
+                && options.split(',').any(|o| o == "ro")
+                && std::fs::read_dir(point).is_ok();
+            usable.then(|| PathBuf::from(point))
+        });
+        let Some(ro) = ro else {
+            eprintln!("skipped: a_link_into_a_read_only_mount_is_not_on_it: no read-only mount");
+            return;
+        };
+        assert!(read_only_mount(&ro), "{}", ro.display());
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!read_only_mount(dir.path()));
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&ro, &link).unwrap();
+        assert!(
+            !read_only_mount(&link),
+            "{} → {}",
+            link.display(),
+            ro.display()
+        );
     }
 
     fn make_subdirs(root: &Path) -> io::Result<()> {

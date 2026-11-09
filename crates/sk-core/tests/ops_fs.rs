@@ -1,4 +1,4 @@
-//! The file-system matrix (docs/manage.md §2.5, 「各文件系统」): moving to the trash and deleting
+//! The file-system matrix (docs/manage.md §2.3.2, 「各文件系统」): moving to the trash and deleting
 //! permanently on the file system that holds the temporary folder, end to end the way the backend
 //! runs a basket — scanned, put into the basket, its targets executed with the backend's options —
 //! with an exact result per item. CI's job `fs-matrix` runs this (and the other ops tests) with
@@ -393,6 +393,74 @@ fn a_file_held_open_by_another_program_sharing_its_deletion() {
         let r = sk_core::ops::delete_permanently(&[s(&sel)], no_locks()).remove(0);
         assert!(r.ok, "{r:?}");
     }
+}
+
+/// Windows: deleted again while a file in it is still being deleted (its deletion pending: another
+/// program holds it open, sharing that; FAT, exFAT and network shares keep its name until it is
+/// closed, NTFS too where it was deleted the classic way) — what the item was told the first time
+/// asks for. Nothing can open such a file, and its error alone says 「没有权限」: the folder says
+/// why it stays instead, and goes once the file is closed.
+#[cfg(windows)]
+#[test]
+fn deleting_again_while_a_deletion_is_still_pending() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    let _g = setup();
+    let dir = tempfile::tempdir().unwrap();
+    let sel = dir.path().join("sel");
+    std::fs::create_dir_all(sel.join("sub")).unwrap();
+    let file = sel.join("sub").join("held.bin");
+    std::fs::write(&file, b"h").unwrap();
+    // the other program: holds it open, sharing its deletion
+    let holder = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x7)
+        .open(&file)
+        .unwrap();
+    // deleted the classic way (what a file system without POSIX semantics does): pending
+    let deleter = std::fs::OpenOptions::new()
+        .access_mode(0x0001_0000) // DELETE
+        .share_mode(0x7)
+        .open(&file)
+        .unwrap();
+    let delete = 1u8; // FILE_DISPOSITION_INFO { DeleteFile: TRUE }
+    // SAFETY: an open handle; a one-byte FILE_DISPOSITION_INFO.
+    let marked = unsafe {
+        windows_sys::Win32::Storage::FileSystem::SetFileInformationByHandle(
+            deleter.as_raw_handle(),
+            windows_sys::Win32::Storage::FileSystem::FileDispositionInfo,
+            (&delete as *const u8).cast(),
+            1,
+        )
+    } != 0;
+    assert!(marked, "{}", std::io::Error::last_os_error());
+    drop(deleter);
+    assert!(std::fs::File::open(&file).is_err(), "deletion pending");
+    let r = sk_core::ops::delete_permanently(
+        &[s(&sel)],
+        OpOptions {
+            check_locks: false,
+            ..OpOptions::default()
+        },
+    )
+    .remove(0);
+    let pending = "里面的内容已删除，但还有程序（如杀毒软件、预览或同步程序）打开着其中的文件，这个文件系统要等它们关闭后才真正删掉，文件夹因此没能删除；稍后再删一次即可";
+    assert_eq!(
+        (r.code, r.message.as_str()),
+        (OpCode::Error, format!("操作失败：{pending}").as_str()),
+        "{} {r:?}",
+        fs_caps::fs_name(dir.path())
+    );
+    assert!(sel.join("sub").exists());
+    // closed now: it goes
+    drop(holder);
+    let r = sk_core::ops::delete_permanently(&[s(&sel)], OpOptions::default()).remove(0);
+    assert_eq!(
+        (r.code, r.message.as_str()),
+        (OpCode::Ok, "已永久删除"),
+        "{r:?}"
+    );
+    assert!(std::fs::symlink_metadata(&sel).is_err());
 }
 
 /// A file another program holds open without sharing its deletion: the item is reported held,
