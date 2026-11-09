@@ -171,6 +171,58 @@ jobs:
           node tools/gen_pinyin.mjs --check
           node tools/i18n_check.mjs --area core
 
+  # Moving to the trash and deleting permanently on every file system people keep files on
+  # (docs/manage.md §2.5 「各文件系统」): sk-core's ops tests (ops_trash, ops_basket, ops_case_twins,
+  # ops_paths, ops_locks, ops_fs) and two ops_bench runs per mode with the temporary folder on a
+  # small volume of each, made for the job — Windows: NTFS, ReFS, exFAT, FAT32 (virtual disks) and
+  # an SMB share; Linux: ext4, xfs, btrfs, vfat, exfat, ntfs3 (loop images); macOS: APFS, HFS+,
+  # FAT32, ExFAT (disk images). The real trash of each volume is used and emptied of what the run
+  # put there. What a file system cannot do (links, case-sensitive names, …) a test detects and
+  # skips, saying why: those notes are in the job summary. The scripts: .github/scripts/fs-matrix.*
+  fs-matrix:
+    name: File systems · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # ReFS can be formatted on a Server edition: windows-2025 is one
+        os: [windows-2025, ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Rust (rust-toolchain.toml)
+        shell: bash
+        run: rustup toolchain install --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fs-matrix
+
+      - name: File-system tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q dosfstools exfatprogs ntfs-3g xfsprogs btrfs-progs
+
+      - name: Build the ops tests and ops_bench
+        shell: bash
+        run: |
+          cargo test -p sk-core --locked --no-run --test ops_trash --test ops_basket --test ops_case_twins --test ops_paths --test ops_locks --test ops_fs
+          cargo build -p sk-core --locked --features probe --example ops_bench
+
+      - name: Run on each file system (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/scripts/fs-matrix.ps1
+
+      - name: Run on each file system (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash .github/scripts/fs-matrix.sh
+
   desktop:
     name: Desktop interface · ${{ matrix.os }}
     needs: changes
@@ -277,7 +329,7 @@ jobs:
   # name, so requiring each job would leave a pull request waiting forever.
   result:
     name: CI passed
-    needs: [changes, rust, desktop, electron]
+    needs: [changes, rust, fs-matrix, desktop, electron]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
