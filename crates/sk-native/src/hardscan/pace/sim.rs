@@ -8,6 +8,11 @@
 //! - Cache: per folder, warm or cold: all cold, all warm, half (the first half in preorder warm:
 //!   a scan that stopped half way), uneven (random subtrees warm, 30 % of the folders), or
 //!   read-ahead (all cold, but listing a cold folder brings half of its subfolders' records in).
+//! - Rough volumes (`Rough`, W: (ReFS on NVMe) cold): in a share of the subtrees a cold listing
+//!   reads many times more (metadata scattered over the volume), and now and then the volume
+//!   holds every read for tens of ms (a lock: reads in flight or issued meanwhile finish that much
+//!   later). One round of listings then lists ten times slower than the next, a scan's first
+//!   rounds included.
 //! - Device: reads served by `channels` at once, the rest queued; a read takes `base` (log-normal
 //!   jitter); a hard disk's reads get faster with the queue (NCQ reorders up to 32: base / (1 +
 //!   0.35 ln q)). A cold listing reads 1 + entries / `entries_per_read` times, one after the other,
@@ -147,6 +152,42 @@ fn tree(rng: &mut Rng, target: usize) -> Tree {
     Tree { f }
 }
 
+/// Subtrees whose cold listings read `reads` times as often, this share of the folders; stalls
+/// of every read, `stall_us` long (log-normal) every `gap_us` (exponential).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Rough {
+    share: f64,
+    reads: u32,
+    gap_us: f64,
+    stall_us: f64,
+}
+
+/// Per folder, how many times its cold listing reads (1 outside rough subtrees).
+fn roughness(tree: &Tree, rough: Option<Rough>, rng: &mut Rng) -> Vec<u32> {
+    let n = tree.f.len();
+    let mut times = vec![1u32; n];
+    let Some(r) = rough else {
+        return times;
+    };
+    let want = (r.share * n as f64) as usize;
+    let (mut count, mut tries) = (0usize, 0);
+    while count < want && tries < 100_000 {
+        tries += 1;
+        let i = (rng.next() % n as u64) as usize;
+        let size = tree.f[i].size as usize;
+        if !(2..=5).contains(&tree.f[i].depth) || times[i] > 1 || size > n / 8 {
+            continue;
+        }
+        for t in &mut times[i..i + size] {
+            if *t == 1 {
+                *t = r.reads;
+                count += 1;
+            }
+        }
+    }
+    times
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Cache {
     Cold,
@@ -224,6 +265,13 @@ const NVME: Device = Device {
     cold_us: 110.0,
     cold_entry_us: 1.5,
     counter: true,
+};
+
+/// W:: ReFS on NVMe: its metadata reads take longer (several dependent pages each).
+const REFS_NVME: Device = Device {
+    base_us: 400.0,
+    jitter: 0.5,
+    ..NVME
 };
 
 const SATA: Device = Device {
@@ -418,6 +466,12 @@ struct Sim<'a> {
     dev: Device,
     cpu: Cpu,
     warm: Vec<bool>,
+    /// Reads per cold listing, times (rough subtrees).
+    rough: Vec<u32>,
+    /// (every, long) of the stalls, µs; the current or next stall's [start, end).
+    stalls: Option<(f64, f64)>,
+    stall: (f64, f64),
+    stall_rng: Rng,
     read_ahead: f64,
     rng: Rng,
     now: f64, // µs
@@ -495,7 +549,8 @@ impl<'a> Sim<'a> {
         let mut reads = 0;
         if cold {
             work += self.dev.cold_us + self.dev.cold_entry_us * entries;
-            reads = 1 + (entries / self.dev.entries_per_read) as u32;
+            reads =
+                (1 + (entries / self.dev.entries_per_read) as u32) * self.rough[folder as usize];
         }
         work *= self.rng.lognormal(1.0, 0.25);
         let job = Job {
@@ -543,8 +598,30 @@ impl<'a> Sim<'a> {
             }
         };
         let took = base * self.rng.lognormal(1.0, self.dev.jitter);
-        let done = ((self.now + took) * 1000.0) as u64;
+        let done = (self.held(self.now, took) * 1000.0) as u64;
         self.reading.push(Reverse((done, id)));
+    }
+
+    /// When a read issued at `t` that takes `took` finishes, the volume's stalls counted.
+    fn held(&mut self, t: f64, took: f64) -> f64 {
+        let Some((gap, long)) = self.stalls else {
+            return t + took;
+        };
+        while self.stall.1 <= t {
+            // the first one early: a cold volume's own tables load on its first reads (every
+            // cold W: run traced had a round ten times slower within its first 100 ms)
+            let gap = if self.stall.1 == 0.0 { gap / 10.0 } else { gap };
+            let from = self.stall.1 + self.stall_rng.exp(gap);
+            self.stall = (from, from + long * self.stall_rng.lognormal(1.0, 0.5));
+        }
+        let (from, to) = self.stall;
+        if t >= from {
+            to + took
+        } else if t + took > from {
+            t + took + (to - from)
+        } else {
+            t + took
+        }
     }
 
     fn on_cpu_start(&mut self, id: u32) {
@@ -711,6 +788,9 @@ struct Scenario {
     cache: Cache,
     folders: usize,
     seed: u64,
+    rough: Option<Rough>,
+    /// Checked from this many seeds (`seed`, `seed` + 1000, …).
+    runs: u64,
 }
 
 fn simulate(sc: &Scenario, tree: &Tree, arm: Arm) -> Outcome {
@@ -721,6 +801,7 @@ fn simulate(sc: &Scenario, tree: &Tree, arm: Arm) -> Outcome {
 fn simulate_with(sc: &Scenario, tree: &Tree, arm: Arm, watch: &mut dyn FnMut(&mut Ctl)) -> Outcome {
     let mut rng = Rng(sc.seed ^ 0x5EED);
     let warm = warmth(tree, sc.cache, &mut rng);
+    let rough = roughness(tree, sc.rough, &mut rng);
     let n_cpu = sc.cpu.n as usize;
     let policy = match arm {
         Arm::New => Policy::New(Box::new(Ctl::new(
@@ -743,6 +824,10 @@ fn simulate_with(sc: &Scenario, tree: &Tree, arm: Arm, watch: &mut dyn FnMut(&mu
         dev: sc.dev,
         cpu: sc.cpu,
         warm,
+        rough,
+        stalls: sc.rough.map(|r| (r.gap_us, r.stall_us)),
+        stall: (0.0, 0.0),
+        stall_rng: Rng(sc.seed.wrapping_mul(7) ^ 0x57A11),
         read_ahead: match sc.cache {
             Cache::ReadAhead(p) => p,
             _ => 0.0,
@@ -850,38 +935,61 @@ fn report(sc: Scenario) -> Report {
 /// fast as the best fixed width, is never slower than v1 (3 % for the simulator's own noise), and
 /// reaches 80 % of the best fixed width's rate no later than that width itself did, give or take
 /// 5 % of its run.
-fn check(name: &str) -> Report {
-    let sc = *scenarios()
+/// A scenario's checks: the new arm lists at 90 % of the best fixed width's rate at least, no
+/// slower than v1 (3 % slack), and gets good (80 % of the best's rate) about as soon as the best
+/// fixed width (5 % of its time later at most). A scenario of `runs` seeds (the rough ones: rates
+/// ten times apart from round to round, where one tree's v1 or first stall can be lucky) is
+/// checked on each for the rate, on their sums for the rest.
+fn check(name: &str) {
+    let base = *scenarios()
         .iter()
         .find(|s| s.name == name)
         .expect("a scenario");
-    let r = report(sc);
-    let line = r.line();
-    println!("{line}");
-    let best = r.best();
+    let (mut new, mut v1) = (0.0, 0.0);
+    // when the new arm got good, and the bound: the best fixed width's time plus 5 % of its run
+    let (mut good, mut bound) = (0.0, 0.0);
+    for i in 0..base.runs {
+        let mut sc = base;
+        sc.seed += 1000 * i;
+        let r = report(sc);
+        let line = r.line();
+        println!("{line}");
+        let best = r.best();
+        assert!(
+            r.new.rate >= 0.9 * best.rate,
+            "{} (seed {}): new lists at {:.0}% of the best fixed width
+{line}",
+            sc.name,
+            sc.seed,
+            100.0 * r.new.rate / best.rate
+        );
+        good += r.good_after(&r.new).unwrap_or(f64::INFINITY);
+        bound += r.good_after(best).unwrap_or(best.secs) + 0.05 * best.secs;
+        new += r.new.secs;
+        v1 += r.v1.secs;
+    }
+    let seeds = base.runs;
     assert!(
-        r.new.rate >= 0.9 * best.rate,
-        "{}: new lists at {:.0}% of the best fixed width\n{line}",
-        sc.name,
-        100.0 * r.new.rate / best.rate
+        new <= 1.03 * v1,
+        "{name}: new {new:.3}s, v1 {v1:.3}s (over {seeds} seeds)"
     );
     assert!(
-        r.new.secs <= 1.03 * r.v1.secs,
-        "{}: new {:.3}s, v1 {:.3}s\n{line}",
-        sc.name,
-        r.new.secs,
-        r.v1.secs
+        good <= bound,
+        "{name}: good after {good:.3}s, at most {bound:.3}s (over {seeds} seeds)"
     );
-    let good = r.good_after(&r.new);
-    let bound = r.good_after(best).unwrap_or(best.secs) + 0.05 * best.secs;
-    assert!(
-        good.is_some_and(|t| t <= bound),
-        "{}: good after {good:?}, the best fixed width after {:?}\n{line}",
-        sc.name,
-        r.good_after(best)
-    );
-    r
+    if seeds > 1 {
+        println!(
+            "{name}: over {seeds} seeds new {new:.3}s, v1 {v1:.3}s; good after {good:.3}s (at most {bound:.3}s)"
+        );
+    }
 }
+
+const ROUGH: Rough = Rough {
+    share: 0.15,
+    reads: 10,
+    gap_us: 150_000.0,
+    stall_us: 30_000.0,
+};
 
 fn scenarios() -> Vec<Scenario> {
     let s = |name, dev, cpu, cache, folders, seed| Scenario {
@@ -891,6 +999,15 @@ fn scenarios() -> Vec<Scenario> {
         cache,
         folders,
         seed,
+        rough: None,
+        runs: 1,
+    };
+    // W: (ReFS on NVMe) cold: lock contention, slower metadata reads, subtrees whose listings
+    // read ten times as often and stalls of the volume: rounds ten times apart
+    let rough = |name, cache, seed| Scenario {
+        rough: Some(ROUGH),
+        runs: 12,
+        ..s(name, REFS_NVME, REFS_CPU, cache, 60_000, seed)
     };
     vec![
         s("nvme_cold", NVME, NTFS_CPU, Cache::Cold, 30_000, 1),
@@ -924,6 +1041,8 @@ fn scenarios() -> Vec<Scenario> {
             20_000,
             17,
         ),
+        rough("refs_cold_rough", Cache::Cold, 18),
+        rough("refs_uneven_rough", Cache::Uneven(0.4), 19),
     ]
 }
 
@@ -955,7 +1074,9 @@ scenario!(
     net_uneven,
     nvme_cold_4cpu,
     nvme_warm_4cpu,
-    nvme_uneven_4cpu
+    nvme_uneven_4cpu,
+    refs_cold_rough,
+    refs_uneven_rough
 );
 
 /// `cargo test -p sk-native --lib sim::seeds -- --ignored --nocapture`: every scenario from three
@@ -1018,6 +1139,8 @@ fn the_simulation_is_deterministic() {
         cache: Cache::Uneven(0.3),
         folders: 5_000,
         seed: 9,
+        rough: Some(ROUGH),
+        runs: 1,
     };
     let tree = tree(&mut Rng(sc.seed), sc.folders);
     let a = simulate(&sc, &tree, Arm::New);
@@ -1042,5 +1165,35 @@ fn trace() {
     let lines = traced(&sc, &tree);
     for l in lines {
         println!("{l}");
+    }
+}
+
+/// `SK_SIM=<scenario> SK_SIM_SEEDS=<n> cargo test -p sk-native --lib sim::sweep -- --ignored
+/// --nocapture`: that scenario from n seeds (the worst cases, not a check).
+#[test]
+#[ignore]
+fn sweep() {
+    let name = std::env::var("SK_SIM").unwrap_or_else(|_| "nvme_cold".to_owned());
+    let n: u64 = std::env::var("SK_SIM_SEEDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20);
+    let base = *scenarios()
+        .iter()
+        .find(|s| s.name == name)
+        .expect("a scenario");
+    for extra in 0..n {
+        let mut sc = base;
+        sc.seed += 1000 * extra;
+        let r = report(sc);
+        let best = r.best().rate;
+        println!(
+            "seed+{:<6} new {:4.0}% v1 {:4.0}% new/v1 {:.2} | {}",
+            1000 * extra,
+            100.0 * r.new.rate / best,
+            100.0 * r.v1.rate / best,
+            r.new.secs / r.v1.secs,
+            r.line()
+        );
     }
 }

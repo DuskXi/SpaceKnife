@@ -20,7 +20,8 @@ Cache states (`--state`):
 
 Before every purge the script looks for other disk benchmarks or scanners (gdu, dua, diskspd, fio,
 WizTree, WinDirStat, other spaceknife processes, anything with "bench" in its command line) and
-waits (up to `--wait` seconds) or skips the run. Before every scan and purge it checks the free
+waits (up to `--wait` seconds) or skips the run. A `tail -f` or `grep` of a log whose name has
+"bench" in it counts too: name the log otherwise, or read it without a process. Before every scan and purge it checks the free
 physical memory: below `--min-free` GB it waits (every 30 s, up to 10 minutes), then skips the run
 (a purge while memory is short would make other programs page from the disk). One scan at a time.
 Each run records the scan process's peak working set. Drive E: is refused.

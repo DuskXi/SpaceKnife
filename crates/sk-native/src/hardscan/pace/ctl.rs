@@ -23,9 +23,10 @@ const SHARE: f64 = 1.0 / 64.0;
 const IO_INFLIGHT: f64 = 1.0 / 16.0;
 /// IO lane samples older than this: none in flight any more, as far as the CPU budget goes.
 const IO_STALE_NS: u64 = 20_000_000;
-/// The CPU lane's width counts as the knee of the CPUs and the file system's locks when it was
-/// cruising with full rounds while the IO lane used hardly any CPU (an eighth of its width at
-/// most), for this long after.
+/// The CPU lane's width counts as the knee of the CPUs and the file system's locks when a probe
+/// cycle found it so (lane.rs: a wider width listed no faster) and it was cruising with full
+/// rounds while the IO lane used hardly any CPU (an eighth of its width at most), for this long
+/// after.
 const KNEE_FRESH_NS: u64 = 1_000_000_000;
 /// The IO lane's listings may keep this many times the CPU knee busy on the CPUs (they are not
 /// all on a CPU at the same moment their share says).
@@ -115,12 +116,13 @@ pub fn lane_cfgs(cfg: &Config, medium: Medium) -> [LaneCfg; 2] {
     // CPUs (ReFS warm: 8 of 32), and a ramp finds it in a few rounds where probes down from the
     // start width take many; at most 8 CPUs it starts at the start width (the knee is not far
     // below, and a ramp from 2 would cost a small machine more than it finds)
+    let cpu_start = if cfg.start > 8 {
+        (cfg.start / 2).max(8)
+    } else {
+        cfg.start
+    };
     let cpu = LaneCfg {
-        start: if cfg.start > 8 {
-            (cfg.start / 2).max(8)
-        } else {
-            cfg.start
-        },
+        start: cpu_start,
         lo: cfg.least.min(cfg.start),
         hi: cfg.cpu_most.max(cfg.start),
         grow: 1.5,
@@ -129,7 +131,9 @@ pub fn lane_cfgs(cfg: &Config, medium: Medium) -> [LaneCfg; 2] {
         gain: 1.0,
         fixed: false,
         startup_hi: usize::MAX,
-        home: cfg.start,
+        // its start, not 0.3.5's start width (16 of 32 CPUs): startup settles no narrower than
+        // home once there, and a contended file system's knee lies below 16 (ReFS warm: 8)
+        home: cpu_start,
     };
     let io = |start: usize| LaneCfg {
         start,
@@ -385,15 +389,17 @@ impl Ctl {
         }
     }
 
-    /// After a CPU lane round: its width is the knee if it cruises with full rounds and the IO
-    /// lane hardly uses the CPUs.
+    /// After a CPU lane round: its width is the knee if its probes found it so, it cruises with
+    /// full rounds and the IO lane hardly uses the CPUs. A width startup settled at, or the BDP
+    /// guard took it to, is none (on W: (ReFS) cold, 8 and 4 such capped the IO lane at 18).
     fn note_knee(&mut self, now: u64) {
         let cpu = &self.lanes[CPU];
-        if cpu.phase() == Phase::Cruise
+        if let Some(knee) = cpu.knee()
+            && cpu.phase() == Phase::Cruise
             && cpu.last_full() == Some(now)
-            && self.squeeze * 8 <= cpu.width()
+            && self.squeeze * 8 <= knee
         {
-            self.knee = Some((cpu.width(), now));
+            self.knee = Some((knee, now));
         }
     }
 

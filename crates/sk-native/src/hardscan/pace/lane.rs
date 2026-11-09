@@ -18,10 +18,13 @@
 //!   time (`may_step`, ctl.rs).
 //! - Startup: from the start width, ×`grow` per full round while the rate gains a quarter of
 //!   what the step would give on a straight line (×2: 25 %, ×1.5: 12.5 %), up to `startup_hi`
-//!   (wider only by probes); after two rounds that do not, clamp(1.25 × BDP, the best round's width, the width now). BDP = the highest own rate
-//!   × the lowest time per unit of the last 16 rounds: the listings in flight at the curve's knee
-//!   (Little's law). A first step that lists slower than the start width means the knee lies below
-//!   it: back to it, and narrower probes follow at once.
+//!   (wider only by probes); after two rounds that do not, clamp(1.25 × BDP, the best round's
+//!   width, the width now), but not below `home` (0.3.5's width) if the lane got that far. BDP =
+//!   the highest own rate × the lowest time per unit of the last 16 rounds: the listings in flight
+//!   at the curve's knee (Little's law). Startup never goes narrower: a round or two decide
+//!   nothing against rates that swing tenfold from round to round (W: (ReFS) cold: one 80 ms round
+//!   at 32 took the IO lane back to 16 for the whole scan, 1.5 times slower); narrower is the
+//!   probes' to find, against the noise.
 //! - Cruise: every 4 full rounds a probe: a round ×1.25 wider, a round back, a round ×0.8
 //!   narrower, a round back. Wider stays if its rate beat the mean of the rounds around it by
 //!   `keep_wider` − 1 plus twice the noise; else narrower stays if its rate was at least
@@ -29,9 +32,13 @@
 //!   same way; after a cycle that changed nothing the next waits twice as long (up to 64
 //!   rounds), back to 4 after a kept probe or a cruising round 3 × the noise off the last.
 //! - Too noisy to judge (the noise above 25 % even with the longest rounds): no probes; every 4
-//!   rounds a step (×1.25 / ×0.8) towards home — where startup settled, else what 0.3.5 listed
-//!   at — until the noise falls (W: (ReFS) cold: rates ten times apart from round to round, the
-//!   lanes drifted).
+//!   rounds a step (×1.25 / ×0.8) towards home — where startup settled — until the noise falls
+//!   (W: (ReFS) cold: rates ten times apart from round to round, the lanes drifted).
+//! - The knee (`knee`, the CPU lane's: ctl.rs bounds the IO lane by it): the width a probe cycle
+//!   ended at with a wider width measured no better; none until one did, none once the width
+//!   moved otherwise (the BDP guard, home, a cap). A width a lane merely settled at, or was
+//!   narrowed to for its small BDP, is no knee (on W: such a width, 4 or 8, capped the IO lane at
+//!   18 where 32 lists 1.5 times faster).
 //! - BDP guard: a width above 2 × gain × BDP goes down to 1.25 × gain × BDP at once.
 //! - Limited for 1 s: the next full round starts up again from the width now.
 
@@ -40,8 +47,6 @@ const MIN_ROUND_N: u32 = 32;
 const SLOW_ROUND_NS: u64 = 250_000_000;
 const SLOW_ROUND_N: u32 = 4;
 const LIMITED_BELOW: f64 = 0.8;
-/// A startup step this much slower (of the lane's rate): the knee lies below the start width.
-const STARTUP_LOSS: f64 = 0.05;
 const STARTUP_STALLS: u32 = 2;
 const CRUISE_ROUNDS: u32 = 4;
 /// After a probe cycle that changed nothing the next one waits twice as long, up to this many
@@ -85,9 +90,9 @@ pub struct LaneCfg {
     /// Startup grows no wider than this; beyond it only probes widen (a scan's first rounds also
     /// see its tree open up: the demand's ramp passes for the width's).
     pub startup_hi: usize,
-    /// The width the lane goes back to while its rounds are too noisy to judge (NOISE_UNSURE),
-    /// until its startup settled somewhere (then that width): what 0.3.5 would list at (the IO
-    /// lane: its cold width; the CPU lane: the start width).
+    /// What 0.3.5 would list at (the IO lane: its cold width; the CPU lane: its start width):
+    /// startup settles no narrower once it got this wide. A lane too noisy to judge
+    /// (NOISE_UNSURE) goes back to where startup settled (here before it did).
     pub home: usize,
 }
 
@@ -222,6 +227,8 @@ pub struct Lane {
     momentum: i8,
     /// Where startup settled (the noisy lane's home).
     settled: Option<usize>,
+    /// The width a probe cycle last ended at with a wider width measured no better.
+    probed: Option<usize>,
     /// The last two rounds at the cruising width.
     before: [Rates; 2],
     probe: Rates,
@@ -263,6 +270,7 @@ impl Lane {
             cruise: 0,
             due: CRUISE_ROUNDS,
             settled: None,
+            probed: None,
             momentum: 0,
             before: [Rates::NONE; 2],
             probe: Rates::NONE,
@@ -423,6 +431,10 @@ impl Lane {
             to.clamp(self.cfg.lo, self.hi())
         };
         if to != from {
+            // a knee holds until the width moves (a probe cycle names the new one at its end)
+            if self.probed != Some(to) {
+                self.probed = None;
+            }
             self.prev = None;
             self.w = to;
             self.skip = self.last_inflight;
@@ -462,6 +474,7 @@ impl Lane {
             return false;
         }
         self.w = self.hi();
+        self.probed = None;
         self.base = self.base.min(self.w);
         if !matches!(self.phase, Phase::Startup | Phase::Cruise) {
             self.cruise_on();
@@ -477,6 +490,12 @@ impl Lane {
     /// When this lane last had a full round (a knee it found is current).
     pub fn last_full(&self) -> Option<u64> {
         self.last_full
+    }
+
+    /// The width now if a probe cycle found it the knee (a wider width listed no faster) and
+    /// nothing moved it since.
+    pub fn knee(&self) -> Option<usize> {
+        self.probed.filter(|&k| k == self.w)
     }
 
     fn narrower(&self, w: usize) -> usize {
@@ -538,27 +557,18 @@ impl Lane {
                     self.settled = Some(w);
                     return ("top", w);
                 }
-                if self.best_w == cfg.start.clamp(cfg.lo, cfg.hi)
-                    && w > self.best_w
-                    && rates.own_gain(self.best) <= -STARTUP_LOSS
-                {
-                    // slower than the start width already: the knee lies below it
-                    self.cruise_on();
-                    self.settled = Some(self.best_w);
-                    self.momentum = -1;
-                    self.before = [Rates::NONE, self.best];
-                    return ("down", self.best_w);
-                }
+                // a round that did not gain is no proof of a knee below (the rates swing): only
+                // two in a row end the ramp, and not below where it was
                 self.stalls += 1;
                 if self.stalls < STARTUP_STALLS {
                     return ("hold", w);
                 }
                 self.cruise_on();
                 self.before = [Rates::NONE, rates];
-                let lo = self.best_w.min(w);
+                let lo = self.best_w.max(cfg.home.min(w)).min(w);
                 let to = self
                     .bdp()
-                    .map_or(w, |b| ((1.25 * b).round() as usize).clamp(lo, w));
+                    .map_or(lo, |b| ((1.25 * b).round() as usize).clamp(lo, w));
                 self.settled = Some(to);
                 ("settle", to)
             }
@@ -583,7 +593,10 @@ impl Lane {
                 }
                 self.before = [self.before[1], rates];
                 self.cruise += 1;
-                // too noisy to judge: towards home, a step per CRUISE_ROUNDS rounds, no probes
+                // too noisy to judge: towards home, a step per CRUISE_ROUNDS rounds, no probes;
+                // home is where startup settled (no narrower than the start width, nor than
+                // `cfg.home` if it got that far), not `cfg.home` itself: on 4 CPUs the IO lane's
+                // knee lies far below 0.3.5's 32, and a noisy tree drove it there
                 let home = self.settled.unwrap_or(cfg.home).clamp(cfg.lo, self.hi());
                 if self.noise > NOISE_UNSURE && w != home {
                     if self.cruise < CRUISE_ROUNDS || !may_step {
@@ -632,6 +645,7 @@ impl Lane {
                     self.cruise_on();
                     self.due = CRUISE_ROUNDS;
                     self.momentum = 1;
+                    self.probed = None;
                     self.before = [Rates::NONE, self.probe];
                     return ("wider", self.probe_w);
                 }
@@ -645,6 +659,7 @@ impl Lane {
                 self.momentum = 0;
                 self.due = (self.due * 2).min(CRUISE_ROUNDS_MAX);
                 self.before = [before, rates];
+                self.probed = Some(self.base);
                 ("stay", self.base)
             }
             Phase::Narrow => {
@@ -666,11 +681,13 @@ impl Lane {
                     self.due = CRUISE_ROUNDS;
                     self.momentum = -1;
                     self.before = [Rates::NONE, self.probe];
+                    self.probed = Some(self.probe_w);
                     return ("narrower", self.probe_w);
                 }
                 self.momentum = 0;
                 self.due = (self.due * 2).min(CRUISE_ROUNDS_MAX);
                 self.before = [before, rates];
+                self.probed = Some(self.base);
                 ("stay", self.base)
             }
         }
@@ -770,8 +787,25 @@ mod tests {
             total / 100e-6
         };
         let d = run(&mut lane, contended, 0.1);
-        assert_eq!(d.iter().find(|d| d.what == "down").map(|d| d.to), Some(16));
+        // startup settles at the start width (never below it) with no knee yet, the probes take
+        // it down and name the knee at the end of a cycle
+        let settle = d.iter().position(|d| d.what == "settle").expect("settled");
+        assert_eq!(d[settle].to, 16);
+        assert!(d.iter().all(|d| d.what != "down"));
+        let probed = d[settle..]
+            .iter()
+            .position(|d| d.what == "stay" || d.what == "narrower")
+            .expect("a probe cycle");
+        assert!(probed > 1, "{:?}", &d[settle..]);
         assert!((6..=9).contains(&lane.width()), "{}", lane.width());
+        let at = d
+            .iter()
+            .rposition(|d| d.what == "stay" || d.what == "narrower");
+        let last = &d[at.expect("a probe cycle")];
+        assert!((6..=9).contains(&last.to), "{last:?}");
+        if lane.phase() == Phase::Cruise && lane.width() == last.to {
+            assert_eq!(lane.knee(), Some(last.to));
+        }
     }
 
     #[test]
