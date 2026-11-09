@@ -1,6 +1,8 @@
 //! The app's program asked `--startup-check`, as the swap helper of a portable copy's new version
 //! asks it before it puts it in place (sk_core::update::swap::startup_check): it answers and ends,
 //! without a window and without touching the app's files; without a web view runtime it says so.
+//! And `--startup-problem` (what the helper starts when it refused) elsewhere than on Windows: the
+//! explanation on standard error, and the end (on Windows it is a dialog, not run by tests).
 
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -14,8 +16,13 @@ const APP: &str = env!("CARGO_BIN_EXE_spaceknife");
 /// The program asked the check with these variables; how it ended, and how long it took. Still
 /// running after 30 s, it is a window: it is ended and the test fails.
 fn ask(vars: &[(&str, &Path)]) -> (Output, Duration) {
+    run_with(STARTUP_CHECK, vars)
+}
+
+/// The program started with `flag` and these variables, as [`ask`].
+fn run_with(flag: &str, vars: &[(&str, &Path)]) -> (Output, Duration) {
     let mut cmd = Command::new(APP);
-    cmd.arg(STARTUP_CHECK)
+    cmd.arg(flag)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -31,7 +38,7 @@ fn ask(vars: &[(&str, &Path)]) -> (Output, Duration) {
         if started.elapsed() > Duration::from_secs(30) {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("{APP} {STARTUP_CHECK} still ran after 30 s: it opened its window");
+            panic!("{APP} {flag} still ran after 30 s: it opened its window");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -98,4 +105,26 @@ fn a_windows_without_webview2_is_told_so() {
     );
     let refused = startup_check(Path::new(APP), &env, STARTUP_CHECK_TIMEOUT).unwrap_err();
     assert_eq!(refused.0, error);
+}
+
+/// `--startup-problem` elsewhere than on Windows: the check passes here (the test above), so the
+/// general words, on standard error, in the system's language (this version's number in either);
+/// the end, with the check's 0. Nothing on stdout (it is not the check's answer), no file.
+#[cfg(not(windows))]
+#[test]
+fn the_startup_problem_is_told_on_standard_error_elsewhere() {
+    let home = tempfile::tempdir().unwrap();
+    let (out, took) = run_with(
+        spaceknife_desktop::startup_check::STARTUP_PROBLEM,
+        &[("SPACEKNIFE_HOME", home.path())],
+    );
+    assert!(took < Duration::from_secs(20), "{took:?}");
+    let told = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{told}");
+    assert!(
+        told.contains(&format!("SpaceKnife {}", env!("CARGO_PKG_VERSION"))),
+        "{told}"
+    );
+    assert!(out.stdout.is_empty(), "{:?}", out.stdout);
+    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
 }

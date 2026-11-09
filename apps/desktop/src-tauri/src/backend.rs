@@ -119,14 +119,20 @@ pub fn origin_of(url: &url::Url) -> String {
 
 static LOGGING: Once = Once::new();
 
-/// Start the backend: from setup, and again after an update could not start. The page hears
-/// "starting", then "ready" (or "failed" with the reason).
-pub fn start(app: &AppHandle) {
+/// Start logging, once: stderr (a console in development), the log bus of the 日志 panel, the
+/// rotating log file (in the data folder prepare_environment chose). main.rs starts it before the
+/// window, so that what keeps the window from opening is in the log; [`start`] makes sure.
+pub fn init_logging() {
     LOGGING.call_once(|| {
-        // stderr (a console in development), the log bus of the 日志 panel, the rotating log file
         sk_server::cli::serve::init_logging("INFO", "plain");
         sk_core::io::no_cloud_downloads(); // macOS: never fetch iCloud / File Provider contents
     });
+}
+
+/// Start the backend: from setup, and again after an update could not start. The page hears
+/// "starting", then "ready" (or "failed" with the reason).
+pub fn start(app: &AppHandle) {
+    init_logging();
     let facts = LaunchFacts::of(app);
     let backend = app.state::<Backend>();
     backend.set(app, BackendState::Starting);

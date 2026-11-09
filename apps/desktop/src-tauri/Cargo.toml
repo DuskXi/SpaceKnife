@@ -34,5 +34,9 @@ sk-server = { workspace = true }
 sk-core = { workspace = true }
 tracing = { workspace = true }
 
+# Windows: the dialog that says why the window can't open (dialog.rs)
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -9,6 +9,7 @@ pub mod backend;
 pub mod cli;
 pub mod commands;
 pub mod console;
+pub mod dialog;
 pub mod events;
 pub mod files;
 pub mod install;
@@ -53,10 +54,19 @@ pub fn prepare_environment() {
     }
 }
 
+/// The window could not be made (an old or broken web view runtime, most likely): the error in the
+/// log, the user told why (startup_check.rs window_failed, dialog.rs), and the end, with 1. Tauri
+/// panicked instead, without a word; nothing of the backend has started yet.
+fn window_failed(error: &str) -> ! {
+    tracing::error!("the window could not be made: {error}");
+    dialog::tell(&startup_check::window_failed(error), dialog::Context::Start);
+    std::process::exit(1)
+}
+
 pub fn run() {
     // Windows: grouped with the installer's (pinned) shortcuts, before any window exists
     window::set_app_user_model_id();
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -85,16 +95,22 @@ pub fn run() {
         ])
         .setup(|app| {
             console::set_app(app.handle());
-            window::create(app.handle())?;
+            // an error here would be Tauri's panic (setup runs in the event loop)
+            if let Err(err) = window::create(app.handle()) {
+                window_failed(&err.to_string());
+            }
             backend::start(app.handle());
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("SpaceKnife could not start its window")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                // sessions closed, scans stopped, the snapshot cache written
-                backend::stop(app, Duration::from_secs(5));
-            }
-        });
+        .build(tauri::generate_context!());
+    let app = match app {
+        Ok(app) => app,
+        Err(err) => window_failed(&err.to_string()),
+    };
+    app.run(|app, event| {
+        if let tauri::RunEvent::Exit = event {
+            // sessions closed, scans stopped, the snapshot cache written
+            backend::stop(app, Duration::from_secs(5));
+        }
+    });
 }
