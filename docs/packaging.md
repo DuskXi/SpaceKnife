@@ -122,7 +122,7 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 
 **便携版**（Windows zip、Linux tar.gz、macOS zip）：
 
-- 一个文件夹：程序（`SpaceKnife.exe`；Linux 上 `spaceknife`）、`spaceknife-cli[.exe]`（Windows 上还有 `SpaceKnife.com`）、`resources/backend/spaceknife-backend[.exe]`、`ui/`（Electron 外壳是 `resources/ui`）、`licenses/` 和一个空的 `data` 文件夹；macOS 上是 `SpaceKnife.app` 加旁边的 `data`。快照、设置、日志、缓存和 WebView 配置都存在 `data` 里，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。无头模式（`spaceknife-cli headless` 和 0.3.4 的 `--headless`）也这样找 `data`（`cli/headless.rs` 的 `portable_home`）；`spaceknife-cli` 的其他命令仍用用户目录，除非设了 `SPACEKNIFE_HOME`。
+- 一个文件夹：程序（`SpaceKnife.exe`；Linux 上 `spaceknife`）、`spaceknife-cli[.exe]`（Windows 上还有 `SpaceKnife.com`）、`resources/backend/spaceknife-backend[.exe]`、`ui/`（Electron 外壳是 `resources/ui`）、`licenses/` 和一个空的 `data` 文件夹；macOS 上是 `SpaceKnife.app` 加旁边的 `data`。快照、设置、日志、缓存和 WebView 配置都存在 `data` 里，不写进用户目录；macOS 的 WebView 数据例外：WKWebView 不接受指定的配置目录（Tauri 的 `data_directory` 在 macOS 上不起作用），页面存储等 WebKit 数据由系统按 bundle id 放在 `~/Library/WebKit/io.github.duskxi.spaceknife`，便携版也一样（第 10 节）。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。无头模式（`spaceknife-cli headless` 和 0.3.4 的 `--headless`）也这样找 `data`（`cli/headless.rs` 的 `portable_home`）；`spaceknife-cli` 的其他命令仍用用户目录，除非设了 `SPACEKNIFE_HOME`。
 - 解压到用户可写的位置（解压到 Program Files 之类的位置会写不进去）。Windows 的便携版要 WebView2 Runtime 89.0.774.44 或更新。
 - Linux 的 tar.gz 不需要 FUSE。Linux 有两种：沿用 0.3.4 名字的 `-portable.tar.gz` 是 Electron 外壳（第 4 节），glibc 2.34+ 就能用，0.3.4 的 Linux 便携版都更新到它；`-tauri.tar.gz` 是 Tauri 版，下载小得多，要系统的 WebKitGTK 4.1。两种都带替换助手、都回答 `--startup-check`，各自只更新到同一种。
 - 有 x64 和 arm64 两份（`win-arm64`、`linux-arm64`）。更新时按处理器的架构挑包（`asset_templates`），架构在运行时读（`machine`：Windows 用 `IsWow64Process2`，macOS 看 `hw.optional.arm64`，Linux 用 `uname`），所以在 ARM 上模拟运行的 x64 副本会换成 arm64 版：Windows on ARM 上先找 arm64 包，发布里没有时仍给 x64；ARM Linux 只取 arm64 包。arm64 版目前只在 GitHub 的 ARM 运行器上测过。没有 32 位 Windows 版。
@@ -131,7 +131,7 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 **macOS（dmg）**：
 
 - 打开 dmg，把 SpaceKnife 拖进「应用程序」。ad-hoc 签名、未公证：第一次打开会被 Gatekeeper 拦下，用户要去「系统设置 › 隐私与安全性」点「仍要打开」并输入密码，之后正常打开；每次更新后再来一次。终端里 `xattr -dr com.apple.quarantine /Applications/SpaceKnife.app` 也行。README 里有给用户的步骤。
-- 「完全磁盘访问权限」按应用的签名记：ad-hoc 签名每个版本都不同，每次更新后要在设置里关掉再打开一次（便携版也一样，等 Developer ID 签名之后才会记住）。不给的话，扫描到「桌面」「文稿」「下载」、云盘、照片图库、其他应用的数据、外接盘和网络盘时会逐个弹出授权提示，邮件、信息等受保护目录读不到，计入未知空间。应用在扫描前检查（`crates/sk-core/src/privacy.rs`：读用户的 TCC 数据库，不弹窗），没有时弹出说明框：打开系统设置的对应页面 / 跳过这些位置 / 照常逐个询问；设置「扫描范围 › 受保护的位置」记住选择。扫描在应用进程里做，授权和提示都记在 SpaceKnife 这个应用名下。
+- 「完全磁盘访问权限」按应用的签名记：ad-hoc 签名每个版本都不同，每次更新后开关仍显示打开、却不再起作用，要在设置里选中 SpaceKnife 用 − 删掉再用 + 加回（或把开关关掉再打开），再重新打开 SpaceKnife（便携版也一样，等 Developer ID 签名之后才会记住）；说明框里也这样写（`FullDiskAccessDialog.vue`）。不给的话，扫描到「桌面」「文稿」「下载」、云盘、照片图库、其他应用的数据、外接盘和网络盘时会逐个弹出授权提示，邮件、信息等受保护目录读不到，计入未知空间。应用在扫描前检查（`crates/sk-core/src/privacy.rs`：读用户的 TCC 数据库，不弹窗），没有时弹出说明框：打开系统设置的对应页面 / 跳过这些位置 / 照常逐个询问；设置「扫描范围 › 受保护的位置」记住选择。扫描在应用进程里做，授权和提示都记在 SpaceKnife 这个应用名下。
 - 扫描 `/` 时不进入 `/System/Volumes/Data`：同一 APFS 卷组的数据卷与系统卷报告同一个设备号，它的文件已经通过 firmlink 在树里（`crates/sk-core/src/volume.rs` 的 `volume_group_twins`）。云盘里「仅在云端」的文件（`SF_DATALESS`）按占用 0 计，这样的文件夹不进入，进程也设为不物化 dataless 文件，扫描不会触发下载。磁盘负载在进程内读 IOKit 的块设备统计（与 `iostat` 同源）。
 - 文件条目的属性用 `getattrlistbulk` 批量取（文件夹、挂载点、firmlink 仍逐个 `fstatat`）。读到的第一批文件与 `fstatat` 对照，有差异就整条退回 readdir + `fstatat`；`SPACEKNIFE_NO_BULK=1` 关掉。文件夹也能从它取（`SPACEKNIFE_BULK_DIRS=1`），但并不更快。`spaceknife-cli scan --profile` 打印耗时分解和它的状态。列目录的起步宽度是可用 CPU 数的两倍（4–16），读盘时加宽到冷宽度（[native.md](native.md) 2.2「列目录线程」）；`SPACEKNIFE_SCAN_THREADS` 可以固定。2026-10-20 在 GitHub 的 macOS 运行器上对比过（扫 /System/Library /usr，单位是项/秒；热缓存 6 轮，`sudo purge` 后 3 轮）：
 
@@ -197,9 +197,9 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 | 快照、标签、日志（数据） | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | 设置、文件类别、洞察规则 | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | 缓存 | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
-| 窗口外壳（主题、WebView 配置） | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife` | `~/Library/Application Support/io.github.duskxi.spaceknife` |
+| 窗口外壳（主题、WebView 配置） | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife` | 主题：`~/Library/Application Support/io.github.duskxi.spaceknife`；WebView：`~/Library/WebKit/io.github.duskxi.spaceknife` |
 
-最后一行是 Tauri 外壳的；设了 `SPACEKNIFE_HOME` 时，Tauri 外壳的文件在 `<SPACEKNIFE_HOME>/desktop`。Electron 外壳（rpm、AppImage、沿用 0.3.4 名字的 Linux 便携版）照旧用 0.3.x 的 Electron 配置目录（`~/.config/SpaceKnife/electron`，设了 `SPACEKNIFE_HOME` 或是便携版时是 `<那个目录>/electron`）；Tauri 外壳只在第一次启动时从那里读一次主题。
+最后一行是 Tauri 外壳的；设了 `SPACEKNIFE_HOME` 或是便携版时，Tauri 外壳的文件在 `<SPACEKNIFE_HOME 或便携版的 data>/desktop`。macOS 的 WebView 数据不跟着走：WKWebView 不接受指定的配置目录（`window.rs` 给的 `data_directory` 在 macOS 上不起作用），页面存储等 WebKit 数据总在系统按 bundle id 给的 `~/Library/WebKit/io.github.duskxi.spaceknife`，设了 `SPACEKNIFE_HOME` 和便携版也一样。Electron 外壳（rpm、AppImage、沿用 0.3.4 名字的 Linux 便携版）照旧用 0.3.x 的 Electron 配置目录（`~/.config/SpaceKnife/electron`，设了 `SPACEKNIFE_HOME` 或是便携版时是 `<那个目录>/electron`）；Tauri 外壳只在第一次启动时从那里读一次主题。
 
 ## 11. 测试
 
@@ -233,7 +233,7 @@ xvfb-run -a node packaging/update-e2e.mjs target/electron-shell/portable/SpaceKn
 node packaging/update-from-034.mjs portable|nsis|appimage|deb|rpm|dmg <0.3.4 的文件> <候选文件>
 ```
 
-[packaging/update-from-034.mjs](../packaging/update-from-034.mjs) 是从真实的 0.3.4 更新上来的端到端测试（工作流先 `gh release download v0.3.4`，用 0.3.4 发布自己的校验和与 `gh attestation verify` 核对）：在 127.0.0.1 上提供 v0.3.4 和候选版本两个预发布，打开 0.3.4（带 DevTools 端口，最小化），经 0.3.4 自己的后端改一个设置，等它自动检查、下载并校验，像用户一样点徽章和「无缝更新」（便携版、安装包、AppImage）；deb / rpm / dmg 的 0.3.4 只把文件交给系统，测试代做那一步。之后检查：0.3.4 退出、新版本以新进程起来（它的就绪文件），版本和安装方式对，0.3.4 里改的设置和 data / config / cache 里的标记文件逐字节都在，updates 里没有残留；便携版还查交换日志以「updated」结束、文件夹里除了 `data` 正好是候选版本的文件、逐字节相同、程序的架构（`--expect-machine`）；安装包查只有一个卸载项、目录和快捷方式不变、卸载后数据还在；deb / rpm 查只有一个包、`/usr/bin/spaceknife`、一个 desktop 文件、alternatives，像用户那样先退出应用再卸载、卸载干净（rpm 还查每次事务之后和应用运行时 `/opt/SpaceKnife` 里的一切都是包自己的，文件夹也算；卸载后留下什么就列出什么）；dmg 查 bundle id、版本、可执行文件名和签名。便携版之外的几种只在 GitHub Actions 上跑。失败或超时时先打印能看的东西，再结束它启动的进程和还在它的文件夹里运行的进程；每条腿都有总期限（`SK_E2E_DEADLINE_S`，默认 1200 秒）。本机在 Windows 上跑便携版那一种时，用 [packaging/hidden-desktop.ps1](../packaging/hidden-desktop.ps1) 把它放到一个不显示的桌面上。
+[packaging/update-from-034.mjs](../packaging/update-from-034.mjs) 是从真实的 0.3.4 更新上来的端到端测试（工作流先 `gh release download v0.3.4`，用 0.3.4 发布自己的校验和与 `gh attestation verify` 核对）：便携版、安装包和 AppImage 三条腿在 127.0.0.1 上提供 v0.3.4 和候选版本两个预发布，打开 0.3.4（带 DevTools 端口，最小化），经 0.3.4 自己的后端改一个设置，等它自动检查、下载并校验，像用户一样点徽章和「无缝更新」，之后检查：0.3.4 退出、新版本以新进程起来（它的就绪文件），版本和安装方式对，0.3.4 里改的设置和 data / config / cache 里的标记文件逐字节都在，updates 里没有残留。deb、rpm 和 dmg 不运行 0.3.4（它只把文件交给系统），测试代做系统那一步，查的也少：deb / rpm 装上 0.3.4 的包、放好标记文件，再把新包装在上面，查标记文件还在、新版本起来后版本和安装方式对（设置没经 0.3.4 改过，不查）；dmg 把 0.3.4 和候选版本的应用先后从各自的磁盘映像拷进一个临时的「应用程序」文件夹，只查下面列的 bundle 信息和签名，再启动新版本看版本和安装方式，不查设置、标记文件和 updates。便携版还查交换日志以「updated」结束、文件夹里除了 `data` 正好是候选版本的文件、逐字节相同、程序的架构（`--expect-machine`）；安装包查只有一个卸载项、目录和快捷方式不变、卸载后数据还在；deb / rpm 查只有一个包、`/usr/bin/spaceknife`、一个 desktop 文件、alternatives，像用户那样先退出应用再卸载、卸载干净（rpm 还查每次事务之后和应用运行时 `/opt/SpaceKnife` 里的一切都是包自己的，文件夹也算；卸载后留下什么就列出什么）；dmg 查 bundle id、版本、可执行文件名和签名。便携版之外的几种只在 GitHub Actions 上跑。失败或超时时先打印能看的东西，再结束它启动的进程和还在它的文件夹里运行的进程；每条腿都有总期限（`SK_E2E_DEADLINE_S`，默认 1200 秒）。本机在 Windows 上跑便携版那一种时，用 [packaging/hidden-desktop.ps1](../packaging/hidden-desktop.ps1) 把它放到一个不显示的桌面上。
 
 [tools/compat034.mjs](../tools/compat034.mjs)（Release 和 Release check 里跑）不开窗口、不安装，只用 0.3.4 的代码读发布：每种安装方式选中的文件名、读到的校验值、0.3.4 窗口的 `installRefusal` 是否接受、便携包的布局。
 
