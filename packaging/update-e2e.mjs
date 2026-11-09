@@ -15,7 +15,10 @@
 // what the window's 「无缝更新」 button does (src-tauri install.rs replace_portable; the Electron
 // shell's index.ts replacePortable): unpacks the file into the updates folder, writes the swap plan
 // and starts the new version's swap program with --apply-update (the Tauri app's own executable;
-// the Electron shell's spaceknife-cli), which answers {"ok": true}; the app is closed, the new
+// the Electron shell's spaceknife-cli). First with a file and another app of the user's next to the
+// program: the swap moves only SpaceKnife's own files, so it answers {"ok": false} naming them, and
+// nothing moves, the app runs on. Then without them, and with a file the system puts in folders
+// (desktop.ini, .DS_Store, .directory), which must stay where it is: it answers {"ok": true}; the app is closed, the new
 // program swaps the files (sk_core::update::swap) and starts the app again with --updated. The test
 // checks that the new files are in place, the data folder stayed, the app came back (a new backend)
 // and that the old files are cleared out of the updates folder (the new version's files stay there:
@@ -195,6 +198,36 @@ try {
   // the program the shell starts for it: the Tauri app's own executable, the Electron shell's
   // spaceknife-cli (update.ts swapHelpers)
   const swapper = electron ? cliIn(staged) : programIn(staged);
+
+  // a file and another app of the user's next to SpaceKnife (a folder of tools, ~/Desktop): the
+  // swap moves only SpaceKnife's own files, so it does not start at all and nothing moves
+  // (sk_core::update::swap sort_names); the answer names them
+  const foreign = [join(folder, "e2e-notes.txt"), join(folder, process.platform === "darwin" ? "Other.app" : "OtherTool")];
+  writeFileSync(foreign[0], "the user's notes\n");
+  mkdirSync(join(foreign[1], "Contents"), { recursive: true });
+  writeFileSync(join(foreign[1], "Contents", "Info.plist"), "another app\n");
+  const programBefore = sha256(programIn(folder));
+  const refusal = spawn(swapper, ["--apply-update", plan], { cwd: updates, env: appEnv, stdio: ["ignore", "pipe", "ignore"] });
+  const refused = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("--apply-update did not answer the folder with the user's files")), 60_000);
+    let line = null;
+    createInterface({ input: refusal.stdout }).once("line", (l) => (line = l));
+    refusal.once("exit", (code) => (clearTimeout(t), resolve({ code, line })));
+  });
+  const refusedSaid = JSON.parse(refused.line ?? "{}");
+  if (refused.code !== 2 || refusedSaid.ok !== false || !refusedSaid.error?.includes("e2e-notes.txt") || !refusedSaid.error.includes(basename(foreign[1])))
+    throw new Error(`with the user's files next to it --apply-update said ${refused.line} (exit ${refused.code})`);
+  const refusedLog = existsSync(log) ? readFileSync(log, "utf8") : "";
+  if (!refusedLog.includes("holds what is not SpaceKnife's")) throw new Error(`the swap's log does not say why it did not start:\n${refusedLog}`);
+  if (existsSync(previous) || existsSync(join(folder, "NEW_BUILD.txt")) || sha256(programIn(folder)) !== programBefore) throw new Error("the refused swap moved files");
+  if (!existsSync(foreign[0]) || !existsSync(join(foreign[1], "Contents", "Info.plist"))) throw new Error("the user's files next to the app did not stay");
+  if (app.exited) throw new Error(`the app quit: ${JSON.stringify(app.exited)}`);
+  console.log(`with the user's files next to it nothing moved: ${refusedSaid.error}`);
+  // without them it goes ahead; a file the system put there stays where it is
+  for (const f of foreign) rmSync(f, { recursive: true, force: true });
+  const systemFile = join(folder, process.platform === "win32" ? "desktop.ini" : process.platform === "darwin" ? ".DS_Store" : ".directory");
+  writeFileSync(systemFile, "the system's\n");
+
   const helper = spawn(swapper, ["--apply-update", plan], { cwd: updates, env: appEnv, detached: true, stdio: ["ignore", "pipe", "ignore"] });
   const said = await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("--apply-update did not answer")), 30_000);
@@ -217,7 +250,8 @@ try {
   if (!existsSync(join(folder, "NEW_BUILD.txt"))) throw new Error(`the new files are not in ${folder}`);
   if (!existsSync(marker)) throw new Error("the data folder did not stay");
   if (!existsSync(cliIn(folder))) throw new Error("spaceknife-cli is missing after the swap");
-  console.log(`new files in place, data kept; the app runs again (backend pid ${again.pid})`);
+  if (!existsSync(systemFile) || readFileSync(systemFile, "utf8") !== "the system's\n") throw new Error(`${basename(systemFile)} did not stay where it was`);
+  console.log(`new files in place, data and ${basename(systemFile)} kept; the app runs again (backend pid ${again.pid})`);
   const s2 = await hello(again.url, again.token);
   // a portable copy still: the next update finds its file (sk_core::update::swap::app_env)
   const kindNow = (await s2.call("update.status")).install_kind;
