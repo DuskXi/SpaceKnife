@@ -1965,6 +1965,69 @@ impl BindMount {
             at: at.to_path_buf(),
         })
     }
+
+    /// A small tmpfs (a device of its own, anyone may write to it) mounted at `at`.
+    fn tmpfs(prefix: &[&'static str], at: &Path) -> Option<BindMount> {
+        let mut c = match prefix.split_first() {
+            Some((cmd, rest)) => {
+                let mut c = std::process::Command::new(cmd);
+                c.args(rest).arg("mount");
+                c
+            }
+            None => std::process::Command::new("mount"),
+        };
+        c.args(["-t", "tmpfs", "-o", "size=4m,mode=0777", "tmpfs"])
+            .arg(at);
+        c.output()
+            .is_ok_and(|o| o.status.success())
+            .then(|| BindMount {
+                prefix: prefix.to_vec(),
+                at: at.to_path_buf(),
+            })
+    }
+}
+
+/// Two bind mounts of one file system (one device) are two top directories: an item of each
+/// goes into the `.Trash-$uid` of its own (the trash found for the first is not the second's: a
+/// rename into it would cross mounts and fail). Needs root, as above.
+#[cfg(target_os = "linux")]
+#[test]
+fn two_mounts_of_one_device_have_a_trash_each() {
+    let (_, _g) = setup();
+    let Some(root) = privileged() else {
+        eprintln!("skipped: mount needs root or passwordless sudo");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let fs = dir.path().join("fs");
+    std::fs::create_dir(&fs).unwrap();
+    let Some(_tmpfs) = BindMount::tmpfs(&root, &fs) else {
+        eprintln!("skipped: mount -t tmpfs failed (no CAP_SYS_ADMIN here)");
+        return;
+    };
+    let (a, b) = (fs.join("a"), fs.join("b"));
+    let (m1, m2) = (dir.path().join("m1"), dir.path().join("m2"));
+    for d in [&a, &b, &m1, &m2] {
+        std::fs::create_dir(d).unwrap();
+    }
+    let (Some(_m1), Some(_m2)) = (
+        BindMount::new(&root, &a, &m1),
+        BindMount::new(&root, &b, &m2),
+    ) else {
+        eprintln!("skipped: mount --bind failed");
+        return;
+    };
+    let (x, y) = (m1.join("x.txt"), m2.join("y.txt"));
+    std::fs::write(&x, b"x").unwrap();
+    std::fs::write(&y, b"y").unwrap();
+    let res = trash_all(&[s(&x), s(&y)]);
+    let mut trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
+    assert_eq!(codes(&res), [OpCode::Ok, OpCode::Ok], "{res:?}");
+    assert!(res[0].trash_ref.starts_with(&s(&m1)), "{res:?}");
+    assert!(res[1].trash_ref.starts_with(&s(&m2)), "{res:?}");
+    assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok, OpCode::Ok]);
+    trashed.0.clear();
+    assert!(x.exists() && y.exists());
 }
 
 #[cfg(target_os = "linux")]

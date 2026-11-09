@@ -2320,12 +2320,12 @@ pub mod fd {
                 found
             }
         };
-        let trash = match trash {
+        let mut trash = match trash {
             Ok(t) => t,
             Err(reason) => return result_msg(path, OpCode::NoTrash, reason),
         };
         let original = super::super::paths::absolute(os);
-        let recorded = match &trash.topdir {
+        let recorded = match trash.topdir.clone() {
             Some(top) => {
                 let parent = original.parent().unwrap_or(Path::new("/")).to_path_buf();
                 let real = trashes
@@ -2333,7 +2333,19 @@ pub mod fd {
                     .entry(parent)
                     .or_insert_with_key(|p| resolve_lenient(p))
                     .join(original.file_name().unwrap_or_default());
-                relpath(&real, top)
+                if !real.starts_with(&top) {
+                    // another mount of the same device (a bind mount): the trash of its own
+                    // top directory, looked up for it alone (the rename would cross mounts)
+                    trash = match find_on(os, meta.dev(), true) {
+                        Ok(Ok(t)) => std::sync::Arc::new(t),
+                        Ok(Err(reason)) => return result_msg(path, OpCode::NoTrash, reason),
+                        Err(e) => return os_error(path, &e),
+                    };
+                }
+                match &trash.topdir {
+                    Some(top) => relpath(&real, top),
+                    None => original.clone(),
+                }
             }
             None => original.clone(),
         };

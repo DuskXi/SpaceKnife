@@ -321,13 +321,18 @@ impl<'a, W: Walk> Engine<'a, W> {
         if self.workers == 1 || self.tops.is_empty() {
             self.worker();
         } else {
+            // the calling thread is one of them; a thread the system refuses to start leaves the
+            // work to those there are
             std::thread::scope(|s| {
-                for t in 0..self.workers {
-                    std::thread::Builder::new()
+                for t in 1..self.workers {
+                    let started = std::thread::Builder::new()
                         .name(format!("spaceknife-delete-{t}"))
-                        .spawn_scoped(s, || self.worker())
-                        .expect("a thread for deleting");
+                        .spawn_scoped(s, || self.worker());
+                    if started.is_err() {
+                        break;
+                    }
                 }
+                self.worker();
             });
         }
         // what a cancel left: stopped where it was
