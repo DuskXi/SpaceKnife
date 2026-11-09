@@ -128,10 +128,14 @@ pub fn lane_cfgs(cfg: &Config, medium: Medium) -> [LaneCfg; 2] {
         keep_narrower: 0.98,
         gain: 1.0,
         fixed: false,
+        startup_hi: usize::MAX,
+        home: cfg.start,
     };
     let io = |start: usize| LaneCfg {
         start,
-        lo: 2.min(cfg.io_most),
+        // at least half the start width: a lane that waits for the disk gains nothing from fewer,
+        // and on W: (ReFS) noisy rounds once took it down to 2 (1.5 times slower than 0.3.5)
+        lo: (cfg.start / 2).max(2).min(cfg.io_most),
         hi: io_hi(medium, cfg.io_most),
         grow: 2.0,
         keep_wider: 1.05,
@@ -140,6 +144,10 @@ pub fn lane_cfgs(cfg: &Config, medium: Medium) -> [LaneCfg; 2] {
         keep_narrower: 1.05,
         gain: 1.5,
         fixed: false,
+        // the ramp stops at 0.3.5's cold width (32 and more): a scan's first rounds see its tree
+        // open up, and on W: (ReFS) the ramp went straight to 64 on that, 13–29 % slower cold
+        startup_hi: cold_width(cfg.start, cfg.io_most),
+        home: cold_width(cfg.start, cfg.io_most),
     };
     match cfg.mode {
         Mode::Fixed => [LaneCfg::fixed(cfg.fixed), LaneCfg::fixed(cfg.fixed)],
@@ -157,10 +165,16 @@ pub fn lane_cfgs(cfg: &Config, medium: Medium) -> [LaneCfg; 2] {
     }
 }
 
+/// A folder this likely to wait for the disk goes to the IO lane. Below 0.5: the costs are not
+/// even — a cold folder in the CPU lane holds one of its few slots through a disk wait, a warm
+/// one in the IO lane only lists quickly — so a folder the model cannot tell goes to the IO lane
+/// (W: (ReFS) cold: posteriors around 0.5, half the cold folders in the narrow CPU lane).
+pub const IO_FROM: f32 = 0.3;
+
 /// The lane a folder of prior `prior` is listed in.
 pub fn lane_for(mode: Mode, prior: f32) -> usize {
     match mode {
-        Mode::Lanes if prior >= 0.5 => IO,
+        Mode::Lanes if prior >= IO_FROM => IO,
         Mode::Lanes => CPU,
         Mode::OneLane => IO,
         Mode::Fixed | Mode::Start => CPU,
@@ -640,7 +654,8 @@ mod tests {
         assert_eq!(lane_for(Mode::Fixed, 0.9), CPU);
         assert_eq!(lane_for(Mode::OneLane, 0.1), IO);
         assert_eq!(lane_for(Mode::Lanes, 0.5), IO);
-        assert_eq!(lane_for(Mode::Lanes, 0.49), CPU);
+        assert_eq!(lane_for(Mode::Lanes, 0.3), IO);
+        assert_eq!(lane_for(Mode::Lanes, 0.29), CPU);
     }
 
     #[test]

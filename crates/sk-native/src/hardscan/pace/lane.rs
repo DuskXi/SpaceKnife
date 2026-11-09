@@ -2,8 +2,8 @@
 //! the rate-against-listings-in-flight curve, BBR-like. Clock-free (times in nanoseconds from any
 //! origin): the controller (ctl.rs) feeds it, the simulator too.
 //!
-//! - A *round* is at least max(24, 2 × width) completions and 2 ms (or 250 ms and 4 completions
-//!   on slow devices). It measures this lane's rate (folders plus entries / 64 per second,
+//! - A *round* is at least max(32, 3 × width) completions and 3 ms, longer in proportion to the
+//!   noise past 10 % (up to 24 ms), or 250 ms and 4 completions on slow devices. It measures this lane's rate (folders plus entries / 64 per second,
 //!   `units`), every lane's together over the same time (the *total*), the mean listings in flight
 //!   (sampled at each completion) and the time per unit. A round whose mean in flight is below 0.8
 //!   of the width is *limited*: the lane had no more folders to list, or the disk's gate or the
@@ -17,8 +17,8 @@
 //!   comes in a burst), ±40 % from round to round in a mixed tree. Only one lane takes steps at a
 //!   time (`may_step`, ctl.rs).
 //! - Startup: from the start width, ×`grow` per full round while the rate gains a quarter of
-//!   what the step would give on a straight line (×2: 25 %, ×1.5: 12.5 %); after two rounds that
-//!   do not, clamp(1.25 × BDP, the best round's width, the width now). BDP = the highest own rate
+//!   what the step would give on a straight line (×2: 25 %, ×1.5: 12.5 %), up to `startup_hi`
+//!   (wider only by probes); after two rounds that do not, clamp(1.25 × BDP, the best round's width, the width now). BDP = the highest own rate
 //!   × the lowest time per unit of the last 16 rounds: the listings in flight at the curve's knee
 //!   (Little's law). A first step that lists slower than the start width means the knee lies below
 //!   it: back to it, and narrower probes follow at once.
@@ -28,6 +28,10 @@
 //!   `keep_narrower` of that mean plus twice the noise. A probe that stayed is followed at once by another one the
 //!   same way; after a cycle that changed nothing the next waits twice as long (up to 64
 //!   rounds), back to 4 after a kept probe or a cruising round 3 × the noise off the last.
+//! - Too noisy to judge (the noise above 25 % even with the longest rounds): no probes; every 4
+//!   rounds a step (×1.25 / ×0.8) towards home — where startup settled, else what 0.3.5 listed
+//!   at — until the noise falls (W: (ReFS) cold: rates ten times apart from round to round, the
+//!   lanes drifted).
 //! - BDP guard: a width above 2 × gain × BDP goes down to 1.25 × gain × BDP at once.
 //! - Limited for 1 s: the next full round starts up again from the width now.
 
@@ -58,6 +62,11 @@ const NOISE_MARGIN: f64 = 2.0;
 /// Round-to-round noise of the rates at one width (relative to the lane's rate, smoothed): a
 /// probe must beat it.
 const NOISE_START: f64 = 0.05;
+/// Above this noise rounds last longer, in proportion (MIN_ROUND_NS × noise / this, up to 8×).
+const NOISE_LONGER: f64 = 0.1;
+/// Above this noise (even with the longest rounds) a probe cannot tell a better width from
+/// luck: the lane steps towards its home width instead (`LaneCfg::home`).
+const NOISE_UNSURE: f64 = 0.25;
 const NOISE_MEMORY: f64 = 0.2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -73,6 +82,13 @@ pub struct LaneCfg {
     pub gain: f64,
     /// The width never changes (a hard disk's IO lane, the fixed modes).
     pub fixed: bool,
+    /// Startup grows no wider than this; beyond it only probes widen (a scan's first rounds also
+    /// see its tree open up: the demand's ramp passes for the width's).
+    pub startup_hi: usize,
+    /// The width the lane goes back to while its rounds are too noisy to judge (NOISE_UNSURE),
+    /// until its startup settled somewhere (then that width): what 0.3.5 would list at (the IO
+    /// lane: its cold width; the CPU lane: the start width).
+    pub home: usize,
 }
 
 impl LaneCfg {
@@ -87,6 +103,8 @@ impl LaneCfg {
             keep_narrower: 1.0,
             gain: 1.0,
             fixed: true,
+            startup_hi: w,
+            home: w,
         }
     }
 }
@@ -202,6 +220,8 @@ pub struct Lane {
     due: u32,
     /// +1 / -1: the last probe stayed that way, the next one goes the same way at once.
     momentum: i8,
+    /// Where startup settled (the noisy lane's home).
+    settled: Option<usize>,
     /// The last two rounds at the cruising width.
     before: [Rates; 2],
     probe: Rates,
@@ -242,6 +262,7 @@ impl Lane {
             stalls: 0,
             cruise: 0,
             due: CRUISE_ROUNDS,
+            settled: None,
             momentum: 0,
             before: [Rates::NONE; 2],
             probe: Rates::NONE,
@@ -345,8 +366,11 @@ impl Lane {
         acc.limit += limit.max(1) as u64;
         let span = now.saturating_sub(t0);
         let need = MIN_ROUND_N.max(3 * self.w as u32);
-        let full = (acc.n >= need && span >= MIN_ROUND_NS)
-            || (span >= SLOW_ROUND_NS && acc.n >= SLOW_ROUND_N);
+        // a noisy tree is judged on longer rounds (up to 8 times: the mean of a round's rate
+        // settles with the listings in it)
+        let min_ns = (MIN_ROUND_NS as f64 * (self.noise / NOISE_LONGER).clamp(1.0, 8.0)) as u64;
+        let full =
+            (acc.n >= need && span >= min_ns) || (span >= SLOW_ROUND_NS && acc.n >= SLOW_ROUND_N);
         if !full {
             return None;
         }
@@ -387,8 +411,17 @@ impl Lane {
             self.prev = Some(rates);
         }
         let from = self.w;
+        // a lane held below its width (the CPU lane while the IO lane's listings use the CPUs)
+        // takes no steps: they would change nothing it lists at, and drift by luck (on W: the
+        // CPU lane's drifted width then passed for a knee of 4 and capped the IO lane at 8)
+        let may_step = may_step && limit >= self.w;
         let (what, to) = self.decide(&round, now, may_step);
-        let to = to.clamp(self.cfg.lo, self.hi());
+        // a width within the cap's slack stays (set_cap); a step goes within the cap
+        let to = if to == from {
+            to
+        } else {
+            to.clamp(self.cfg.lo, self.hi())
+        };
         if to != from {
             self.prev = None;
             self.w = to;
@@ -418,11 +451,14 @@ impl Lane {
         self.cfg.hi.min(self.cap).max(self.cfg.lo)
     }
 
-    /// The widest this lane may go from now on (`usize::MAX`: no cap). A width above it comes
-    /// down at once (true: it did; a probe in progress goes back to cruising).
+    /// The widest this lane may go from now on (`usize::MAX`: no cap). A width more than an
+    /// eighth above it comes down to it at once (true: it did; a probe in progress goes back to
+    /// cruising); a cap that moves by a listing or two (it follows a smoothed CPU share) leaves
+    /// the width and its rounds alone, it only bounds the next steps up.
     pub fn set_cap(&mut self, cap: usize, now: u64) -> bool {
         self.cap = cap;
-        if self.cfg.fixed || self.w <= self.hi() {
+        let hi = self.hi();
+        if self.cfg.fixed || self.w <= hi + (hi / 8).max(1) {
             return false;
         }
         self.w = self.hi();
@@ -493,13 +529,13 @@ impl Lane {
                     self.best = rates;
                     self.best_w = w;
                     self.stalls = 0;
-                    if w < self.hi() {
-                        let to = ((w as f64 * cfg.grow).ceil() as usize)
-                            .max(w + 1)
-                            .min(self.hi());
+                    let top = self.hi().min(cfg.startup_hi.max(cfg.lo));
+                    if w < top {
+                        let to = ((w as f64 * cfg.grow).ceil() as usize).max(w + 1).min(top);
                         return ("grow", to);
                     }
                     self.cruise_on();
+                    self.settled = Some(w);
                     return ("top", w);
                 }
                 if self.best_w == cfg.start.clamp(cfg.lo, cfg.hi)
@@ -508,6 +544,7 @@ impl Lane {
                 {
                     // slower than the start width already: the knee lies below it
                     self.cruise_on();
+                    self.settled = Some(self.best_w);
                     self.momentum = -1;
                     self.before = [Rates::NONE, self.best];
                     return ("down", self.best_w);
@@ -522,10 +559,12 @@ impl Lane {
                 let to = self
                     .bdp()
                     .map_or(w, |b| ((1.25 * b).round() as usize).clamp(lo, w));
+                self.settled = Some(to);
                 ("settle", to)
             }
             Phase::Cruise => {
-                if let Some(b) = self.bdp()
+                if may_step
+                    && let Some(b) = self.bdp()
                     && w as f64 > 2.0 * cfg.gain * b
                 {
                     let to = ((1.25 * cfg.gain * b).ceil() as usize).max(cfg.lo);
@@ -544,6 +583,21 @@ impl Lane {
                 }
                 self.before = [self.before[1], rates];
                 self.cruise += 1;
+                // too noisy to judge: towards home, a step per CRUISE_ROUNDS rounds, no probes
+                let home = self.settled.unwrap_or(cfg.home).clamp(cfg.lo, self.hi());
+                if self.noise > NOISE_UNSURE && w != home {
+                    if self.cruise < CRUISE_ROUNDS || !may_step {
+                        return ("unsure", w);
+                    }
+                    self.cruise = 0;
+                    self.momentum = 0;
+                    let to = if w < home {
+                        self.wider(w).min(home)
+                    } else {
+                        self.narrower(w).max(home)
+                    };
+                    return ("home", to);
+                }
                 let due = if self.momentum != 0 { 1 } else { self.due };
                 if self.cruise >= due && may_step {
                     self.base = w;
@@ -637,6 +691,8 @@ mod tests {
             keep_narrower: 1.0,
             gain: 1.5,
             fixed: false,
+            startup_hi: 64,
+            home: 4,
         }
     }
 
@@ -702,6 +758,8 @@ mod tests {
             keep_narrower: 0.98,
             gain: 1.0,
             fixed: false,
+            startup_hi: 32,
+            home: 16,
         });
         let contended = |w: f64| {
             let total = if w <= 8.0 {
