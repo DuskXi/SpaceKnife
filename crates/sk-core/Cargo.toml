@@ -4,6 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# file operations count their calls, time their phases and can sit behind a simulated slow device
+# (ops::probe; benchmarks only, never in a release build)
+probe = []
+
+[[example]]
+name = "ops_bench"
+required-features = ["probe"]
+
 [dependencies]
 sk-store = { workspace = true }
 sk-protocol = { workspace = true }

@@ -21,7 +21,8 @@
 //! would otherwise run out of them: 1024 on Linux, 256 for a macOS program); a level closed on
 //! the way down is opened again on the way back, as `..` of the level below it or, failing that,
 //! by the names from the nearest open level, and it must still be that folder (device and inode)
-//! or it is left alone (`moved_inside`).
+//! or it is left alone (`moved_inside`). A folder is removed from its parent by name only while
+//! that name still is the folder (device and inode).
 //!
 //! Windows: every entry is opened by its full `\\?\` path (no Win32 rewriting of trailing dots or
 //! spaces, no MAX_PATH) without following a reparse point, and checked on that handle: on the same
@@ -34,12 +35,31 @@
 //! semantics where the file system has them; a read-only item loses the flag first, as Explorer
 //! does after asking). A folder is listed through a handle to it, checked to be the same folder.
 //!
-//! `cancel` is polled before each folder is entered.
+//! **Several threads at once** ([`remove_trees`], as many as the device takes:
+//! [`super::par`]): every item is a task, and so is every folder of a tree whose listing an idle
+//! thread can take — a folder found while another thread waits is handed over, and a folder with
+//! many names left lends half of them. Each step is the same as one thread's: the checks above
+//! are made on each entry as it is opened. A folder counts what is still to do in it (its own
+//! names, its subfolders, the names it lent); it is removed when that reaches zero, by whichever
+//! thread finished the last of it, and only then does its parent count it done: children always
+//! go before their folder, and a folder's handle is closed before its parent is removed. On
+//! POSIX the threads work on the top [`PAR_DEPTH`] levels; a folder below is deleted in place by
+//! the thread that met it, as one thread does it (the descriptors stay few). Items nested in each
+//! other (never from the basket) wait for the items inside them.
+//!
+//! `cancel` is polled before each item and before each folder is entered; once it said stop, no
+//! thread starts anything new and no folder is removed any more.
 
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsString;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use parking_lot::{Condvar, Mutex};
+
+use super::probe::{self, Call};
 use super::text::trash_text as text;
 use super::trash::{CancelFn, seams};
 
@@ -59,6 +79,16 @@ impl Removed {
             self.first = Some(e);
         }
     }
+
+    /// What one thread did in place, into the item's record.
+    #[cfg_attr(windows, allow(dead_code))]
+    fn fail_from(&mut self, other: Removed) {
+        if let Some(e) = other.first {
+            self.fail(e);
+        }
+        self.deleted |= other.deleted;
+        self.cancelled |= other.cancelled;
+    }
 }
 
 pub(super) fn mount_inside() -> io::Error {
@@ -73,20 +103,25 @@ fn moved_inside() -> io::Error {
     io::Error::other(text("moved_inside"))
 }
 
-fn cancelled(cancel: Option<CancelFn<'_>>) -> bool {
-    cancel.is_some_and(|c| c())
-}
-
 /// POSIX: folder levels below the deleted folder that keep their descriptor open at a time.
 #[cfg(unix)]
 const OPEN_FOLDERS: usize = 32;
 
-/// [`OPEN_FOLDERS`], or what a test set.
+/// POSIX: the levels of a tree (its top is 0) whose folders several threads work on; a folder
+/// deeper is deleted by one thread as a whole, keeping its descriptors few.
 #[cfg(unix)]
-fn open_folders() -> usize {
-    match seams::OPEN_FOLDERS.load(std::sync::atomic::Ordering::Relaxed) {
-        0 => OPEN_FOLDERS,
-        n => n,
+pub(super) const PAR_DEPTH: usize = 4;
+
+/// A folder with more names than this left lends half of them to a thread that has nothing to do.
+const LEND_ABOVE: usize = 64;
+
+/// [`OPEN_FOLDERS`] for one of `workers` threads (they share what one thread had), or what a test
+/// set; whether a test set it.
+#[cfg(unix)]
+fn open_folders(workers: usize) -> (usize, bool) {
+    match seams::OPEN_FOLDERS.load(Ordering::Relaxed) {
+        0 => ((OPEN_FOLDERS / workers.max(1)).max(4), false),
+        n => (n, true),
     }
 }
 
@@ -111,9 +146,409 @@ fn seam_names(folder: &Path, mut names: Vec<OsString>) -> Vec<OsString> {
     names
 }
 
-/// Delete the folder `top` (a real folder, not a link: the caller looked) and everything in it.
-pub(super) fn remove_tree(top: &Path, cancel: Option<CancelFn<'_>>) -> Removed {
-    imp::remove_tree(top, cancel)
+/// Delete the folders `tops` (real folders, not links: the caller looked), each with everything
+/// in it, on `workers` threads together; `done(k, what)` as each is finished (or, after a cancel,
+/// at the end for those it stopped). Each is called once.
+pub(super) fn remove_trees(
+    tops: &[PathBuf],
+    workers: usize,
+    cancel: Option<CancelFn<'_>>,
+    done: &(dyn Fn(usize, Removed) + Sync),
+) {
+    #[cfg(unix)]
+    let walk = {
+        let (keep, set) = open_folders(workers);
+        imp::Posix {
+            keep,
+            // a test that sets how many levels stay open is about one thread's way down
+            par_depth: if set { 0 } else { PAR_DEPTH },
+        }
+    };
+    #[cfg(windows)]
+    let walk = imp::Win;
+    Engine::new(&walk, tops, workers, cancel, done).run();
+}
+
+// --------------------------------------------------------------------------- the threads
+
+/// One platform's way through a tree ([`Engine`] runs it on several threads).
+trait Walk: Sync {
+    /// A folder opened, checked and listed, being emptied.
+    type Dir: Send + Sync;
+    /// Per thread (Windows: its listing buffer).
+    type Scratch;
+    fn scratch(&self) -> Self::Scratch;
+    /// The whole item at once when this walk takes no threads for it (None: [`Walk::start`]).
+    fn whole(&self, _top: &Path, _cancel: &dyn Fn() -> bool) -> Option<Removed> {
+        None
+    }
+    /// Open the item's top folder, check it is one, list it.
+    fn start(&self, top: &Path, s: &mut Self::Scratch) -> io::Result<(Self::Dir, Vec<OsString>)>;
+    /// One name listed in `dir` (`depth` levels below the top).
+    fn visit(
+        &self,
+        dir: &Self::Dir,
+        depth: usize,
+        name: OsString,
+        s: &mut Self::Scratch,
+        cancel: &dyn Fn() -> bool,
+    ) -> Visit<Self::Dir>;
+    /// Remove `dir`, emptied: from `parent` (None: the item's top, `top`).
+    fn remove(&self, dir: &Self::Dir, parent: Option<&Self::Dir>, top: &Path) -> io::Result<()>;
+}
+
+/// What became of one listed name.
+enum Visit<D> {
+    Deleted,
+    /// gone meanwhile
+    Gone,
+    Failed(io::Error),
+    /// a folder to empty first: opened, checked, listed
+    Folder(D, Vec<OsString>),
+    /// a folder deleted in place, as one thread does it
+    #[cfg_attr(windows, allow(dead_code))]
+    Whole(Removed),
+    /// cancelled before entering a folder
+    Stop,
+}
+
+/// A folder being emptied; shared by the threads working in it.
+struct Node<D> {
+    dir: D,
+    /// what is still to do in it: its own names (1), each subfolder not removed yet, each share
+    /// of its names lent out
+    pending: AtomicUsize,
+    parent: Option<Arc<Node<D>>>,
+    item: usize,
+    depth: usize,
+}
+
+/// A folder being worked through by one thread: its node and its names still to do (reversed).
+type Frame<D> = (Arc<Node<D>>, Vec<OsString>);
+
+enum Task<D> {
+    /// start an item
+    Item(usize),
+    /// names of a folder (all its own, or a share lent out), in reverse: the next one last
+    Names(Arc<Node<D>>, Vec<OsString>),
+}
+
+struct Engine<'a, W: Walk> {
+    walk: &'a W,
+    tops: &'a [PathBuf],
+    workers: usize,
+    cancel: Option<CancelFn<'a>>,
+    done: &'a (dyn Fn(usize, Removed) + Sync),
+    queue: Mutex<VecDeque<Task<W::Dir>>>,
+    wake: Condvar,
+    /// tasks queued or running
+    outstanding: AtomicUsize,
+    queued: AtomicUsize,
+    /// threads waiting for a task
+    idle: AtomicUsize,
+    stop: AtomicBool,
+    items: Vec<Mutex<Removed>>,
+    finished: Vec<AtomicBool>,
+    /// items inside this one (nested paths) not finished yet
+    waits: Vec<AtomicUsize>,
+    /// the items waiting for this one
+    waiters: Vec<Vec<usize>>,
+}
+
+impl<'a, W: Walk> Engine<'a, W> {
+    fn new(
+        walk: &'a W,
+        tops: &'a [PathBuf],
+        workers: usize,
+        cancel: Option<CancelFn<'a>>,
+        done: &'a (dyn Fn(usize, Removed) + Sync),
+    ) -> Self {
+        let n = tops.len();
+        // an item inside another one goes first: the nearest item above each waits for it
+        let keys: Vec<String> = tops
+            .iter()
+            .map(|t| super::basket::path_key(&t.to_string_lossy()))
+            .collect();
+        let at: HashMap<&str, usize> = keys
+            .iter()
+            .enumerate()
+            .map(|(k, s)| (s.as_str(), k))
+            .collect();
+        let waits: Vec<AtomicUsize> = (0..n).map(|_| AtomicUsize::new(0)).collect();
+        let mut waiters: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (k, key) in keys.iter().enumerate() {
+            let mut up = key.clone();
+            loop {
+                let next = parent_key(&up);
+                if next == up || next.is_empty() {
+                    break;
+                }
+                if let Some(&a) = at.get(next.as_str())
+                    && a != k
+                {
+                    waits[a].fetch_add(1, Ordering::Relaxed);
+                    waiters[k].push(a);
+                    break;
+                }
+                up = next;
+            }
+        }
+        Engine {
+            walk,
+            tops,
+            workers: workers.max(1),
+            cancel,
+            done,
+            queue: Mutex::new(VecDeque::new()),
+            wake: Condvar::new(),
+            outstanding: AtomicUsize::new(0),
+            queued: AtomicUsize::new(0),
+            idle: AtomicUsize::new(0),
+            stop: AtomicBool::new(false),
+            items: (0..n).map(|_| Mutex::new(Removed::default())).collect(),
+            finished: (0..n).map(|_| AtomicBool::new(false)).collect(),
+            waits,
+            waiters,
+        }
+    }
+
+    fn run(&self) {
+        for k in 0..self.tops.len() {
+            if self.waits[k].load(Ordering::Relaxed) == 0 {
+                self.push(Task::Item(k));
+            }
+        }
+        if self.workers == 1 || self.tops.is_empty() {
+            self.worker();
+        } else {
+            std::thread::scope(|s| {
+                for t in 0..self.workers {
+                    std::thread::Builder::new()
+                        .name(format!("spaceknife-delete-{t}"))
+                        .spawn_scoped(s, || self.worker())
+                        .expect("a thread for deleting");
+                }
+            });
+        }
+        // what a cancel left: stopped where it was
+        for k in 0..self.tops.len() {
+            if !self.finished[k].swap(true, Ordering::AcqRel) {
+                let mut r = std::mem::take(&mut *self.items[k].lock());
+                r.cancelled = true;
+                (self.done)(k, r);
+            }
+        }
+    }
+
+    fn push(&self, t: Task<W::Dir>) {
+        self.outstanding.fetch_add(1, Ordering::AcqRel);
+        self.queued.fetch_add(1, Ordering::AcqRel);
+        self.queue.lock().push_back(t);
+        self.wake.notify_one();
+    }
+
+    /// A thread waits with nothing to do (and no task queued for it yet).
+    fn someone_idle(&self) -> bool {
+        self.workers > 1 && self.idle.load(Ordering::Acquire) > self.queued.load(Ordering::Acquire)
+    }
+
+    fn cancelled(&self) -> bool {
+        if self.stop.load(Ordering::Acquire) {
+            return true;
+        }
+        if self.cancel.is_some_and(|c| c()) {
+            self.stop.store(true, Ordering::Release);
+            let _q = self.queue.lock();
+            self.wake.notify_all();
+            return true;
+        }
+        false
+    }
+
+    fn worker(&self) {
+        let mut scratch = self.walk.scratch();
+        loop {
+            let task = {
+                let mut q = self.queue.lock();
+                loop {
+                    if self.stop.load(Ordering::Acquire) {
+                        self.wake.notify_all(); // the others stop too
+                        return;
+                    }
+                    if let Some(t) = q.pop_back() {
+                        self.queued.fetch_sub(1, Ordering::AcqRel);
+                        break t;
+                    }
+                    if self.outstanding.load(Ordering::Acquire) == 0 {
+                        return;
+                    }
+                    self.idle.fetch_add(1, Ordering::AcqRel);
+                    self.wake.wait(&mut q);
+                    self.idle.fetch_sub(1, Ordering::AcqRel);
+                }
+            };
+            match task {
+                Task::Item(k) => self.item(k, &mut scratch),
+                Task::Names(node, names) => self.names(node, names, &mut scratch),
+            }
+            if self.outstanding.fetch_sub(1, Ordering::AcqRel) == 1 {
+                let _q = self.queue.lock();
+                self.wake.notify_all(); // all done
+            }
+        }
+    }
+
+    fn item(&self, k: usize, scratch: &mut W::Scratch) {
+        if self.cancelled() {
+            return;
+        }
+        let top = &self.tops[k];
+        if let Some(r) = self.walk.whole(top, &|| self.cancelled()) {
+            if r.cancelled {
+                *self.items[k].lock() = r;
+                self.stop.store(true, Ordering::Release);
+                return;
+            }
+            *self.items[k].lock() = r;
+            self.finish(k);
+            return;
+        }
+        match self.walk.start(top, scratch) {
+            Ok((dir, mut names)) => {
+                names.reverse();
+                let node = Arc::new(Node {
+                    dir,
+                    pending: AtomicUsize::new(1),
+                    parent: None,
+                    item: k,
+                    depth: 0,
+                });
+                self.names(node, names, scratch);
+            }
+            Err(e) => {
+                self.items[k].lock().fail(e);
+                self.finish(k);
+            }
+        }
+    }
+
+    /// Work through names of folders, depth first; folders and shares of names go to idle threads.
+    fn names(&self, node: Arc<Node<W::Dir>>, names: Vec<OsString>, scratch: &mut W::Scratch) {
+        let mut stack: Vec<Frame<W::Dir>> = vec![(node, names)];
+        while !stack.is_empty() {
+            if self.stop.load(Ordering::Acquire) {
+                return; // what is left stays, its folders too
+            }
+            let top = stack.len() - 1;
+            if stack[top].1.len() > LEND_ABOVE && self.someone_idle() {
+                let (node, names) = &mut stack[top];
+                let lent: Vec<OsString> = names.drain(..names.len() / 2).collect();
+                node.pending.fetch_add(1, Ordering::AcqRel);
+                self.push(Task::Names(node.clone(), lent));
+            }
+            let Some(name) = stack[top].1.pop() else {
+                let (node, _) = stack.pop().unwrap();
+                self.release(node);
+                continue;
+            };
+            let node = stack[top].0.clone();
+            let item = node.item;
+            match self
+                .walk
+                .visit(&node.dir, node.depth, name, scratch, &|| self.cancelled())
+            {
+                Visit::Deleted => self.items[item].lock().deleted = true,
+                Visit::Gone => {}
+                Visit::Failed(e) => self.items[item].lock().fail(e),
+                Visit::Whole(r) => {
+                    let stop = r.cancelled;
+                    self.items[item].lock().fail_from(r);
+                    if stop {
+                        self.stop.store(true, Ordering::Release);
+                        return;
+                    }
+                }
+                Visit::Stop => return,
+                Visit::Folder(dir, mut names) => {
+                    names.reverse();
+                    node.pending.fetch_add(1, Ordering::AcqRel);
+                    let child = Arc::new(Node {
+                        dir,
+                        pending: AtomicUsize::new(1),
+                        parent: Some(node.clone()),
+                        item,
+                        depth: node.depth + 1,
+                    });
+                    if self.someone_idle() {
+                        self.push(Task::Names(child, names));
+                    } else {
+                        stack.push((child, names));
+                    }
+                }
+            }
+        }
+    }
+
+    /// One thing less to do in `node`: when nothing is left, it is removed, and its parent has
+    /// one thing less (the item is finished at its top).
+    fn release(&self, node: Arc<Node<W::Dir>>) {
+        let mut cur = node;
+        loop {
+            if cur.pending.fetch_sub(1, Ordering::AcqRel) != 1 {
+                return;
+            }
+            if self.stop.load(Ordering::Acquire) {
+                return; // nothing is removed after a cancel
+            }
+            let item = cur.item;
+            let gone = self.walk.remove(
+                &cur.dir,
+                cur.parent.as_deref().map(|p| &p.dir),
+                &self.tops[item],
+            );
+            {
+                let mut it = self.items[item].lock();
+                match gone {
+                    Ok(()) => it.deleted = true,
+                    Err(e) => it.fail(e),
+                }
+            }
+            match cur.parent.clone() {
+                Some(p) => cur = p,
+                None => {
+                    drop(cur);
+                    self.finish(item);
+                    return;
+                }
+            }
+        }
+    }
+
+    fn finish(&self, k: usize) {
+        if self.finished[k].swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let r = std::mem::take(&mut *self.items[k].lock());
+        (self.done)(k, r);
+        for &a in &self.waiters[k] {
+            if self.waits[a].fetch_sub(1, Ordering::AcqRel) == 1 {
+                self.push(Task::Item(a));
+            }
+        }
+    }
+}
+
+/// The folder above a path key (empty above the top).
+fn parent_key(key: &str) -> String {
+    let trimmed = key.trim_end_matches(['\\', '/']);
+    match trimmed.rfind(['\\', '/']) {
+        Some(0) => key[..1].to_string(),
+        Some(i) if cfg!(windows) && i == 2 && trimmed.as_bytes().get(1) == Some(&b':') => {
+            key[..3].to_string()
+        }
+        Some(i) => trimmed[..i].to_string(),
+        None => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +568,316 @@ mod tests {
             assert_eq!(super::joinable(&w(name)), !cfg!(windows), "{name}");
         }
     }
+
+    #[test]
+    fn parent_keys() {
+        if cfg!(windows) {
+            assert_eq!(super::parent_key("c:\\a\\b"), "c:\\a");
+            assert_eq!(super::parent_key("c:\\a"), "c:\\");
+            assert_eq!(super::parent_key("c:\\"), "");
+        } else {
+            assert_eq!(super::parent_key("/a/b"), "/a");
+            assert_eq!(super::parent_key("/a"), "/");
+            assert_eq!(super::parent_key("/"), "");
+        }
+    }
+
+    // ------------------------------------------------------------ the threads, on a tree in memory
+
+    use super::{Engine, Removed, Visit, Walk};
+    use std::collections::{HashMap, HashSet};
+    use std::ffi::OsString;
+    use std::io;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    struct Entry {
+        name: String,
+        folder: bool,
+        children: Vec<usize>,
+    }
+
+    /// A tree in memory that checks what the engine does to it: no folder removed before what
+    /// it holds, how many entries are worked on at once.
+    #[derive(Default)]
+    struct Fake {
+        tree: Vec<Entry>,
+        tops: HashMap<PathBuf, usize>,
+        /// entries whose deletion fails (held open)
+        held: HashSet<usize>,
+        gone: Mutex<HashSet<usize>>,
+        /// removals asked for after the stop
+        late: AtomicUsize,
+        stopped: AtomicBool,
+        wrong_order: AtomicBool,
+        busy: AtomicUsize,
+        most_busy: AtomicUsize,
+        visits: AtomicUsize,
+        /// (item, its top) in the order items started
+        started: Mutex<Vec<usize>>,
+        pause: Duration,
+    }
+
+    impl Fake {
+        fn add(&mut self, parent: Option<usize>, name: &str, folder: bool) -> usize {
+            self.tree.push(Entry {
+                name: name.into(),
+                folder,
+                children: Vec::new(),
+            });
+            let k = self.tree.len() - 1;
+            if let Some(p) = parent {
+                self.tree[p].children.push(k);
+            }
+            k
+        }
+
+        /// A folder `top` with `folders` folders of `files` files each, `depth` levels down.
+        fn grow(&mut self, at: usize, folders: usize, files: usize, depth: usize) {
+            for f in 0..files {
+                self.add(Some(at), &format!("f{f}"), false);
+            }
+            if depth == 0 {
+                return;
+            }
+            for d in 0..folders {
+                let sub = self.add(Some(at), &format!("d{d}"), true);
+                self.grow(sub, folders, files, depth - 1);
+            }
+        }
+
+        fn top(&mut self, path: &str) -> usize {
+            let k = self.add(None, path, true);
+            self.tops.insert(PathBuf::from(path), k);
+            k
+        }
+
+        fn names(&self, k: usize) -> Vec<OsString> {
+            self.tree[k]
+                .children
+                .iter()
+                .map(|&c| OsString::from(&self.tree[c].name))
+                .collect()
+        }
+
+        fn all_gone(&self, k: usize) -> bool {
+            let gone = self.gone.lock().unwrap();
+            fn walk(f: &Fake, k: usize, gone: &HashSet<usize>) -> bool {
+                gone.contains(&k) && f.tree[k].children.iter().all(|&c| walk(f, c, gone))
+            }
+            walk(self, k, &gone)
+        }
+    }
+
+    impl Walk for Fake {
+        type Dir = usize;
+        type Scratch = ();
+
+        fn scratch(&self) {}
+
+        fn start(&self, top: &Path, _: &mut ()) -> io::Result<(usize, Vec<OsString>)> {
+            let k = self.tops[top];
+            self.started.lock().unwrap().push(k);
+            Ok((k, self.names(k)))
+        }
+
+        fn visit(
+            &self,
+            dir: &usize,
+            _depth: usize,
+            name: OsString,
+            _: &mut (),
+            cancel: &dyn Fn() -> bool,
+        ) -> Visit<usize> {
+            let now = self.busy.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most_busy.fetch_max(now, Ordering::SeqCst);
+            self.visits.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(self.pause);
+            let child = *self.tree[*dir]
+                .children
+                .iter()
+                .find(|&&c| OsString::from(&self.tree[c].name) == name)
+                .unwrap();
+            let got = if self.tree[child].folder {
+                if cancel() {
+                    self.stopped.store(true, Ordering::SeqCst);
+                    Visit::Stop
+                } else {
+                    Visit::Folder(child, self.names(child))
+                }
+            } else if self.held.contains(&child) {
+                Visit::Failed(io::Error::other("held"))
+            } else {
+                self.gone.lock().unwrap().insert(child);
+                Visit::Deleted
+            };
+            self.busy.fetch_sub(1, Ordering::SeqCst);
+            got
+        }
+
+        fn remove(&self, dir: &usize, _parent: Option<&usize>, _top: &Path) -> io::Result<()> {
+            if self.stopped.load(Ordering::SeqCst) {
+                self.late.fetch_add(1, Ordering::SeqCst);
+            }
+            let mut gone = self.gone.lock().unwrap();
+            let left: Vec<usize> = self.tree[*dir]
+                .children
+                .iter()
+                .copied()
+                .filter(|c| !gone.contains(c))
+                .collect();
+            // a folder that is still being emptied must never be asked to go
+            if left
+                .iter()
+                .any(|&c| self.tree[c].folder && !self.held_below(c))
+            {
+                self.wrong_order.store(true, Ordering::SeqCst);
+            }
+            if !left.is_empty() {
+                return Err(io::Error::other("not empty"));
+            }
+            gone.insert(*dir);
+            Ok(())
+        }
+    }
+
+    impl Fake {
+        /// Something below `k` cannot go (so `k` stays, rightly).
+        fn held_below(&self, k: usize) -> bool {
+            self.held.contains(&k) || self.tree[k].children.iter().any(|&c| self.held_below(c))
+        }
+    }
+
+    fn run(
+        fake: &Fake,
+        tops: &[&str],
+        workers: usize,
+        cancel: Option<&(dyn Fn() -> bool + Sync)>,
+    ) -> Vec<(usize, Removed)> {
+        let tops: Vec<PathBuf> = tops.iter().map(PathBuf::from).collect();
+        let done: Mutex<Vec<(usize, Removed)>> = Mutex::new(Vec::new());
+        Engine::new(fake, &tops, workers, cancel, &|k, r| {
+            done.lock().unwrap().push((k, r))
+        })
+        .run();
+        done.into_inner().unwrap()
+    }
+
+    /// A wide tree on four threads: all of it goes, every folder after what it held, with several
+    /// entries worked on at once; each item is reported once.
+    #[test]
+    fn a_tree_goes_children_first_on_several_threads() {
+        let mut fake = Fake {
+            pause: Duration::from_micros(200),
+            ..Fake::default()
+        };
+        let top = fake.top("r");
+        fake.grow(top, 4, 6, 3);
+        let other = fake.top("q");
+        fake.grow(other, 2, 3, 1);
+        let done = run(&fake, &["r", "q"], 4, None);
+        assert_eq!(done.len(), 2);
+        for (_, r) in &done {
+            assert!(r.first.is_none() && r.deleted && !r.cancelled, "{r:?}");
+        }
+        assert!(fake.all_gone(top) && fake.all_gone(other));
+        assert!(!fake.wrong_order.load(Ordering::SeqCst));
+        assert!(
+            fake.most_busy.load(Ordering::SeqCst) > 1,
+            "never in parallel"
+        );
+        // one thread: the same, one at a time
+        let mut one = Fake::default();
+        let t = one.top("r");
+        one.grow(t, 3, 2, 2);
+        let done = run(&one, &["r"], 1, None);
+        assert!(done[0].1.first.is_none() && one.all_gone(t));
+        assert_eq!(one.most_busy.load(Ordering::SeqCst), 1);
+    }
+
+    /// A folder of many names lends them out: several threads delete in it at once.
+    #[test]
+    fn a_flat_folder_is_shared() {
+        let mut fake = Fake {
+            pause: Duration::from_micros(300),
+            ..Fake::default()
+        };
+        let top = fake.top("flat");
+        fake.grow(top, 0, 600, 0);
+        let done = run(&fake, &["flat"], 4, None);
+        assert!(done[0].1.first.is_none());
+        assert!(fake.all_gone(top));
+        assert!(fake.most_busy.load(Ordering::SeqCst) > 1);
+    }
+
+    /// What cannot be deleted stays with every folder above it, and is the item's error; the
+    /// rest goes.
+    #[test]
+    fn a_held_entry_keeps_its_folders_and_the_rest_goes() {
+        let mut fake = Fake::default();
+        let top = fake.top("r");
+        let a = fake.add(Some(top), "a", true);
+        let deep = fake.add(Some(a), "deep", true);
+        let held = fake.add(Some(deep), "held.docx", false);
+        fake.add(Some(deep), "free.txt", false);
+        let b = fake.add(Some(top), "b", true);
+        fake.grow(b, 2, 5, 2);
+        fake.held.insert(held);
+        let done = run(&fake, &["r"], 4, None);
+        let r = &done[0].1;
+        assert_eq!(r.first.as_ref().map(|e| e.to_string()), Some("held".into()));
+        assert!(r.deleted && !r.cancelled);
+        assert!(fake.all_gone(b));
+        let gone = fake.gone.lock().unwrap();
+        assert!(!gone.contains(&top) && !gone.contains(&a) && !gone.contains(&deep));
+        assert!(!fake.wrong_order.load(Ordering::SeqCst));
+    }
+
+    /// An item inside another one goes first; the outer one starts only once it is finished.
+    #[test]
+    fn an_item_inside_another_goes_first() {
+        let mut fake = Fake::default();
+        let outer = fake.top("r/a");
+        let inner = fake.top("r/a/b");
+        fake.grow(inner, 2, 3, 1);
+        fake.add(Some(outer), "x.txt", false);
+        let done = run(&fake, &["r/a", "r/a/b"], 4, None);
+        assert_eq!(done.iter().map(|d| d.0).collect::<Vec<_>>(), [1, 0]);
+        assert_eq!(*fake.started.lock().unwrap(), [inner, outer]);
+        assert!(done.iter().all(|d| d.1.first.is_none()));
+    }
+
+    /// Once the cancel says stop, nothing new starts and no folder is removed any more; what
+    /// was not finished is reported cancelled.
+    #[test]
+    fn a_cancel_stops_every_thread() {
+        let mut fake = Fake {
+            pause: Duration::from_micros(200),
+            ..Fake::default()
+        };
+        let mut tops = Vec::new();
+        for i in 0..6 {
+            let t = fake.top(&format!("t{i}"));
+            fake.grow(t, 3, 4, 2);
+            tops.push(format!("t{i}"));
+        }
+        let cancel = || fake.visits.load(Ordering::SeqCst) >= 40;
+        let names: Vec<&str> = tops.iter().map(String::as_str).collect();
+        let done = run(&fake, &names, 4, Some(&cancel));
+        assert_eq!(done.len(), 6);
+        assert!(fake.stopped.load(Ordering::SeqCst));
+        // at most what a thread had begun as the stop came (one each)
+        assert!(fake.late.load(Ordering::SeqCst) <= 4, "{:?}", fake.late);
+        assert!(done.iter().any(|d| d.1.cancelled));
+        // a thread goes on to its next folder at most (four files each here), then stops
+        assert!(
+            fake.visits.load(Ordering::SeqCst) <= 40 + 4 * 6,
+            "{:?}",
+            fake.visits
+        );
+    }
 }
 
 // --------------------------------------------------------------------------- POSIX
@@ -144,6 +889,8 @@ mod imp {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
     use std::path::{Path, PathBuf};
+
+    use std::collections::HashSet;
 
     use super::*;
 
@@ -160,6 +907,8 @@ mod imp {
         /// below the top resolved: what the mount table lists (only without mount ids)
         real: Option<PathBuf>,
         names: std::vec::IntoIter<OsString>,
+        /// names the listing told are not folders (`d_type`): unlinked without a look first
+        files: HashSet<OsString>,
     }
 
     impl Frame {
@@ -189,6 +938,7 @@ mod imp {
     }
 
     fn open_dir_at(dir: RawFd, name: &CStr) -> io::Result<OwnedFd> {
+        probe::call(Call::Open);
         // SAFETY: a NUL-terminated name; the descriptor is owned from here on.
         let fd = unsafe {
             libc::openat(
@@ -205,6 +955,7 @@ mod imp {
     }
 
     fn stat_at(dir: RawFd, name: &CString) -> io::Result<libc::stat> {
+        probe::call(Call::Stat);
         // SAFETY: zeroed is a valid stat; the name is NUL-terminated.
         unsafe {
             let mut st: libc::stat = std::mem::zeroed();
@@ -216,6 +967,7 @@ mod imp {
     }
 
     fn stat_fd(fd: RawFd) -> io::Result<libc::stat> {
+        probe::call(Call::Query);
         // SAFETY: zeroed is a valid stat.
         unsafe {
             let mut st: libc::stat = std::mem::zeroed();
@@ -230,8 +982,21 @@ mod imp {
         st.st_mode & libc::S_IFMT == libc::S_IFDIR
     }
 
+    /// Unlink an entry its folder's listing said is no folder: None when it is one now (looked
+    /// at then as any entry is), else whether it was deleted (false: gone meanwhile).
+    fn unlink_listed(dir: RawFd, name: &CString) -> Option<io::Result<bool>> {
+        match unlink_at(dir, name, false) {
+            Ok(()) => Some(Ok(true)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Some(Ok(false)),
+            // a folder: EISDIR on Linux, EPERM on macOS (EPERM may be a flag too: looked at)
+            Err(e) if matches!(e.raw_os_error(), Some(libc::EISDIR) | Some(libc::EPERM)) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }
+
     fn unlink_at(dir: RawFd, name: &CString, folder: bool) -> io::Result<()> {
         let flags = if folder { libc::AT_REMOVEDIR } else { 0 };
+        probe::call(Call::Delete);
         // SAFETY: a NUL-terminated name.
         if unsafe { libc::unlinkat(dir, name.as_ptr(), flags) } != 0 {
             return Err(last());
@@ -254,8 +1019,10 @@ mod imp {
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn clear_errno() {}
 
-    /// The names in the folder open as `fd` (`.` and `..` left out).
-    fn list(fd: RawFd) -> io::Result<Vec<OsString>> {
+    /// The names in the folder open as `fd` (`.` and `..` left out), and those of them the
+    /// listing tells are not folders (`d_type`; `DT_UNKNOWN` tells nothing).
+    fn list(fd: RawFd) -> io::Result<(Vec<OsString>, HashSet<OsString>)> {
+        probe::call(Call::List);
         // SAFETY: the duplicate belongs to the DIR stream, closed below; each entry is copied
         // before the next readdir.
         unsafe {
@@ -270,6 +1037,7 @@ mod imp {
                 return Err(e);
             }
             let mut names = Vec::new();
+            let mut files = HashSet::new();
             let result = loop {
                 clear_errno();
                 let ent = libc::readdir(dir);
@@ -282,11 +1050,15 @@ mod imp {
                 }
                 let name = std::ffi::CStr::from_ptr((*ent).d_name.as_ptr()).to_bytes();
                 if name != b"." && name != b".." {
+                    let t = (*ent).d_type;
+                    if t != libc::DT_DIR && t != libc::DT_UNKNOWN {
+                        files.insert(OsString::from_vec(name.to_vec()));
+                    }
                     names.push(OsString::from_vec(name.to_vec()));
                 }
             };
             libc::closedir(dir);
-            result.map(|()| names)
+            result.map(|()| (names, files))
         }
     }
 
@@ -297,7 +1069,8 @@ mod imp {
         path: PathBuf,
         real: Option<PathBuf>,
     ) -> io::Result<Frame> {
-        let names = super::seam_names(&path, list(fd.as_raw_fd())?);
+        let (listed, files) = list(fd.as_raw_fd())?;
+        let names = super::seam_names(&path, listed);
         Ok(Frame {
             fd: Some(fd),
             dev: st.st_dev,
@@ -306,6 +1079,7 @@ mod imp {
             path,
             real,
             names: names.into_iter(),
+            files,
         })
     }
 
@@ -352,49 +1126,91 @@ mod imp {
         mounts: Option<Mounts>,
     }
 
-    pub(super) fn remove_tree(top: &Path, cancel: Option<CancelFn<'_>>) -> Removed {
-        let mut out = Removed::default();
-        if super::cancelled(cancel) {
-            out.cancelled = true;
-            return out;
-        }
-        seams::entering(top);
-        let start = (|| -> io::Result<(Frame, Tree)> {
-            let c = CString::new(top.as_os_str().as_bytes())
-                .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-            let fd = open_dir_at(libc::AT_FDCWD, &c).map_err(|e| match e.raw_os_error() {
-                Some(libc::ELOOP) | Some(libc::ENOTDIR) => super::moved_inside(),
-                _ => e,
-            })?;
-            let st = stat_fd(fd.as_raw_fd())?;
-            let mount = mount_id(fd.as_raw_fd());
-            let mounts = if mount.is_none() {
-                Mounts::read()
-            } else {
-                None
-            };
-            let real = mounts
-                .as_ref()
-                .map(|_| super::super::paths::resolve_lenient(top));
-            let f = frame(fd, &st, CString::default(), top.to_path_buf(), real)?;
-            Ok((
-                f,
-                Tree {
-                    dev: st.st_dev,
-                    mount,
-                    mounts,
-                },
-            ))
-        })();
-        let (first, tree) = match start {
-            Ok(s) => s,
-            Err(e) => {
-                out.fail(e);
-                return out;
-            }
+    /// Open the folder `top` (by its path, not following a link at the end) and list it; what
+    /// the tree below must stay on.
+    fn open_top(top: &Path) -> io::Result<(Frame, Tree)> {
+        let c = CString::new(top.as_os_str().as_bytes())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let fd = open_dir_at(libc::AT_FDCWD, &c).map_err(|e| match e.raw_os_error() {
+            Some(libc::ELOOP) | Some(libc::ENOTDIR) => super::moved_inside(),
+            _ => e,
+        })?;
+        let st = stat_fd(fd.as_raw_fd())?;
+        let mount = mount_id(fd.as_raw_fd());
+        let mounts = if mount.is_none() {
+            Mounts::read()
+        } else {
+            None
         };
-        let keep = super::open_folders().max(1);
-        let mut stack = vec![first];
+        let real = mounts
+            .as_ref()
+            .map(|_| super::super::paths::resolve_lenient(top));
+        let f = frame(fd, &st, CString::default(), top.to_path_buf(), real)?;
+        Ok((
+            f,
+            Tree {
+                dev: st.st_dev,
+                mount,
+                mounts,
+            },
+        ))
+    }
+
+    /// Open the folder `c` of the folder open as `dirfd` (`st`: what `fstatat` saw of it) and
+    /// list it: it must be the very folder `fstatat` saw, on the tree's own mount.
+    fn open_child(
+        dirfd: RawFd,
+        c: &CString,
+        st: &libc::stat,
+        path: &Path,
+        real: Option<&PathBuf>,
+        tree: &Tree,
+    ) -> io::Result<Frame> {
+        let cfd = open_dir_at(dirfd, c).map_err(|e| match e.raw_os_error() {
+            Some(libc::ELOOP) | Some(libc::ENOTDIR) => super::moved_inside(),
+            _ => e,
+        })?;
+        let now = stat_fd(cfd.as_raw_fd())?;
+        if now.st_dev != st.st_dev || now.st_ino != st.st_ino {
+            return Err(super::moved_inside()); // replaced since it was looked at
+        }
+        let elsewhere = match (tree.mount, mount_id(cfd.as_raw_fd())) {
+            (Some(a), Some(b)) => a != b,
+            _ => match (&tree.mounts, real) {
+                (Some(m), Some(r)) => m.contains(r),
+                _ => false,
+            },
+        };
+        if elsewhere {
+            return Err(super::mount_inside());
+        }
+        frame(cfd, &now, c.clone(), path.to_path_buf(), real.cloned())
+    }
+
+    /// Remove the folder `name` from the folder open as `dirfd` while that name still is the
+    /// folder `(dev, ino)`: a folder that took its name meanwhile stays.
+    fn unlink_checked(
+        dirfd: RawFd,
+        name: &CString,
+        id: (libc::dev_t, libc::ino_t),
+    ) -> io::Result<()> {
+        let st = stat_at(dirfd, name)?;
+        if (st.st_dev, st.st_ino) != id {
+            return Err(super::moved_inside());
+        }
+        unlink_at(dirfd, name, true)
+    }
+
+    /// One thread's way through what `stack` holds, depth first (its bottom is never closed);
+    /// the bottom, emptied, is removed last by `remove_bottom`.
+    fn run_stack(
+        mut stack: Vec<Frame>,
+        tree: &Tree,
+        keep: usize,
+        cancel: &dyn Fn() -> bool,
+        out: &mut Removed,
+        remove_bottom: &mut dyn FnMut(Frame) -> io::Result<()>,
+    ) {
         loop {
             // back at a level closed on the way down (its own folder below could not reach it)
             if stack.last().is_some_and(|f| f.fd.is_none())
@@ -420,8 +1236,7 @@ mod imp {
                     }
                     unlink_at(stack.last().unwrap().raw(), &done.name, true)
                 } else {
-                    drop(done.fd);
-                    std::fs::remove_dir(top)
+                    remove_bottom(done)
                 };
                 match gone {
                     Ok(()) => out.deleted = true,
@@ -441,6 +1256,21 @@ mod imp {
             let real = f.real.as_ref().map(|r| r.join(&name));
             seams::entering(&path);
             let dirfd = f.raw();
+            // listed as no folder: unlinked without a look first (never a folder, never through
+            // a link); one that turned into a folder meanwhile is looked at below
+            if f.files.contains(&name) {
+                match unlink_listed(dirfd, &c) {
+                    Some(Ok(deleted)) => {
+                        out.deleted |= deleted;
+                        continue;
+                    }
+                    Some(Err(e)) => {
+                        out.fail(e);
+                        continue;
+                    }
+                    None => {}
+                }
+            }
             let st = match stat_at(dirfd, &c) {
                 Ok(st) => st,
                 Err(e) if e.kind() == io::ErrorKind::NotFound => continue, // gone meanwhile
@@ -462,32 +1292,11 @@ mod imp {
                 out.fail(super::mount_inside());
                 continue;
             }
-            if super::cancelled(cancel) {
+            if cancel() {
                 out.cancelled = true;
-                return out;
+                return;
             }
-            let opened = (|| -> io::Result<Frame> {
-                let cfd = open_dir_at(dirfd, &c).map_err(|e| match e.raw_os_error() {
-                    Some(libc::ELOOP) | Some(libc::ENOTDIR) => super::moved_inside(),
-                    _ => e,
-                })?;
-                let now = stat_fd(cfd.as_raw_fd())?;
-                if now.st_dev != st.st_dev || now.st_ino != st.st_ino {
-                    return Err(super::moved_inside()); // replaced since it was looked at
-                }
-                let elsewhere = match (tree.mount, mount_id(cfd.as_raw_fd())) {
-                    (Some(a), Some(b)) => a != b,
-                    _ => match (&tree.mounts, &real) {
-                        (Some(m), Some(r)) => m.contains(r),
-                        _ => false,
-                    },
-                };
-                if elsewhere {
-                    return Err(super::mount_inside());
-                }
-                frame(cfd, &now, c.clone(), path.clone(), real.clone())
-            })();
-            match opened {
+            match open_child(dirfd, &c, &st, &path, real.as_ref(), tree) {
                 Ok(child) => {
                     stack.push(child);
                     // the deleted folder and the `keep` deepest levels stay open
@@ -499,12 +1308,173 @@ mod imp {
                 Err(e) => out.fail(e),
             }
         }
+    }
+
+    /// Delete the folder `top` and everything in it, one thread (as before there were several).
+    fn remove_tree(top: &Path, keep: usize, cancel: &dyn Fn() -> bool) -> Removed {
+        let mut out = Removed::default();
+        if cancel() {
+            out.cancelled = true;
+            return out;
+        }
+        seams::entering(top);
+        let (first, tree) = match open_top(top) {
+            Ok(s) => s,
+            Err(e) => {
+                out.fail(e);
+                return out;
+            }
+        };
+        run_stack(vec![first], &tree, keep, cancel, &mut out, &mut |done| {
+            drop(done.fd);
+            std::fs::remove_dir(top)
+        });
         out
+    }
+
+    /// A folder of the top levels, which several threads empty.
+    pub(in super::super) struct Dir {
+        fd: OwnedFd,
+        dev: libc::dev_t,
+        ino: libc::ino_t,
+        /// its name in its parent's folder (the top: empty)
+        name: CString,
+        path: PathBuf,
+        real: Option<PathBuf>,
+        tree: Arc<Tree>,
+        files: HashSet<OsString>,
+    }
+
+    fn into_dir(f: Frame, tree: Arc<Tree>) -> (Dir, Vec<OsString>) {
+        let Frame {
+            fd,
+            dev,
+            ino,
+            name,
+            path,
+            real,
+            names,
+            files,
+        } = f;
+        let dir = Dir {
+            fd: fd.expect("a folder just opened"),
+            dev,
+            ino,
+            name,
+            path,
+            real,
+            tree,
+            files,
+        };
+        (dir, names.collect())
+    }
+
+    /// POSIX: the top `par_depth` levels on several threads, deeper folders by the thread that
+    /// met them, keeping `keep` levels open.
+    pub(in super::super) struct Posix {
+        pub keep: usize,
+        pub par_depth: usize,
+    }
+
+    impl Walk for Posix {
+        type Dir = Dir;
+        type Scratch = ();
+
+        fn scratch(&self) {}
+
+        fn whole(&self, top: &Path, cancel: &dyn Fn() -> bool) -> Option<Removed> {
+            (self.par_depth == 0).then(|| remove_tree(top, self.keep, cancel))
+        }
+
+        fn start(&self, top: &Path, _: &mut ()) -> io::Result<(Dir, Vec<OsString>)> {
+            seams::entering(top);
+            let (f, tree) = open_top(top)?;
+            Ok(into_dir(f, Arc::new(tree)))
+        }
+
+        fn visit(
+            &self,
+            dir: &Dir,
+            depth: usize,
+            name: OsString,
+            _: &mut (),
+            cancel: &dyn Fn() -> bool,
+        ) -> Visit<Dir> {
+            if !super::joinable(name.as_bytes()) {
+                return Visit::Failed(super::bad_name_inside());
+            }
+            let Ok(c) = CString::new(name.as_bytes()) else {
+                return Visit::Failed(super::bad_name_inside());
+            };
+            let path = dir.path.join(&name);
+            let real = dir.real.as_ref().map(|r| r.join(&name));
+            seams::entering(&path);
+            let dirfd = dir.fd.as_raw_fd();
+            if dir.files.contains(&name) {
+                match unlink_listed(dirfd, &c) {
+                    Some(Ok(true)) => return Visit::Deleted,
+                    Some(Ok(false)) => return Visit::Gone,
+                    Some(Err(e)) => return Visit::Failed(e),
+                    None => {}
+                }
+            }
+            let st = match stat_at(dirfd, &c) {
+                Ok(st) => st,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Visit::Gone,
+                Err(e) => return Visit::Failed(e),
+            };
+            if !is_dir(&st) {
+                // a file or a link: the entry itself, never what it points to
+                return match unlink_at(dirfd, &c, false) {
+                    Ok(()) => Visit::Deleted,
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => Visit::Gone,
+                    Err(e) => Visit::Failed(e),
+                };
+            }
+            if st.st_dev != dir.tree.dev {
+                return Visit::Failed(super::mount_inside());
+            }
+            if cancel() {
+                return Visit::Stop;
+            }
+            let child = match open_child(dirfd, &c, &st, &path, real.as_ref(), &dir.tree) {
+                Ok(f) => f,
+                Err(e) => return Visit::Failed(e),
+            };
+            if depth + 1 >= self.par_depth {
+                // deeper down: this thread, the way one thread does it
+                let mut out = Removed::default();
+                let id = (child.dev, child.ino);
+                run_stack(
+                    vec![child],
+                    &dir.tree,
+                    self.keep,
+                    cancel,
+                    &mut out,
+                    &mut |done| {
+                        let name = done.name.clone();
+                        drop(done);
+                        unlink_checked(dirfd, &name, id)
+                    },
+                );
+                return Visit::Whole(out);
+            }
+            let (d, names) = into_dir(child, dir.tree.clone());
+            Visit::Folder(d, names)
+        }
+
+        fn remove(&self, dir: &Dir, parent: Option<&Dir>, top: &Path) -> io::Result<()> {
+            match parent {
+                Some(p) => unlink_checked(p.fd.as_raw_fd(), &dir.name, (dir.dev, dir.ino)),
+                None => std::fs::remove_dir(top),
+            }
+        }
     }
 
     /// The id of the mount the open `fd` is on (Linux 5.8+), else None.
     #[cfg(target_os = "linux")]
     fn mount_id(fd: RawFd) -> Option<u64> {
+        probe::call(Call::Query);
         // SAFETY: zeroed is a valid statx; an empty path with AT_EMPTY_PATH is `fd` itself.
         unsafe {
             let mut stx: libc::statx = std::mem::zeroed();
@@ -673,6 +1643,11 @@ mod imp {
 
     struct Handle(HANDLE);
 
+    // SAFETY: a kernel handle is the process's, used from any thread; closed once, when dropped.
+    unsafe impl Send for Handle {}
+    // SAFETY: as above; the calls made through a shared one only read what it is open on.
+    unsafe impl Sync for Handle {}
+
     impl Drop for Handle {
         fn drop(&mut self) {
             // SAFETY: a handle this owns.
@@ -687,6 +1662,7 @@ mod imp {
     /// Open by a `\\?\` path; `follow`: through a reparse point at the end (else the entry
     /// itself).
     fn open(path: &[u16], access: u32, follow: bool) -> io::Result<Handle> {
+        probe::call(Call::Open);
         let mut w: Vec<u16> = path.to_vec();
         w.push(0);
         let flags = BACKUP_SEMANTICS | if follow { 0 } else { OPEN_REPARSE_POINT };
@@ -734,6 +1710,12 @@ mod imp {
     }
 
     fn identity(h: &Handle) -> io::Result<(u32, u64)> {
+        identity_attrs(h).map(|(volume, index, _)| (volume, index))
+    }
+
+    /// (volume, file index, attributes) of what `h` is open on: one query.
+    fn identity_attrs(h: &Handle) -> io::Result<(u32, u64, u32)> {
+        probe::call(Call::Query);
         // SAFETY: zeroed is a valid BY_HANDLE_FILE_INFORMATION; the handle is open.
         unsafe {
             let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
@@ -743,12 +1725,14 @@ mod imp {
             Ok((
                 info.dwVolumeSerialNumber,
                 (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+                info.dwFileAttributes,
             ))
         }
     }
 
     /// The name `h` was opened under, below its volume, after reparse points on the way.
     fn opened_name(h: &Handle, buf: &mut [u64]) -> Option<Vec<u16>> {
+        probe::call(Call::Query);
         let bytes = (buf.len() * 8) as u32;
         // SAFETY: the buffer holds `bytes` bytes, 8-aligned (FILE_NAME_INFO: a u32 length in
         // bytes, then the name).
@@ -789,20 +1773,25 @@ mod imp {
             }
             Err(e) => return Err(e),
         };
-        let mut tag = [0u32; 2];
-        // SAFETY: FILE_ATTRIBUTE_TAG_INFO is two u32s.
-        if unsafe {
-            GetFileInformationByHandleEx(
-                h.0,
-                FILE_ATTRIBUTE_TAG_INFO,
-                tag.as_mut_ptr() as *mut c_void,
-                8,
-            )
-        } == 0
-        {
-            return Err(last());
+        // the attributes come with the identity; the reparse tag is asked for only where there
+        // is one (one query less for every plain file and folder)
+        let (volume, index, attrs) = identity_attrs(&h)?;
+        let mut tag = [attrs, 0u32];
+        if attrs & ATTR_REPARSE_POINT != 0 {
+            probe::call(Call::Query);
+            // SAFETY: FILE_ATTRIBUTE_TAG_INFO is two u32s.
+            if unsafe {
+                GetFileInformationByHandleEx(
+                    h.0,
+                    FILE_ATTRIBUTE_TAG_INFO,
+                    tag.as_mut_ptr() as *mut c_void,
+                    8,
+                )
+            } == 0
+            {
+                return Err(last());
+            }
         }
-        let (volume, index) = identity(&h)?;
         let name = opened_name(&h, buf).map(|mut n| {
             seams::opened_name(&mut n);
             n
@@ -863,6 +1852,7 @@ mod imp {
     }
 
     fn set_disposition(h: &Handle, ex_flags: Option<u32>) -> io::Result<()> {
+        probe::call(Call::Delete);
         // SAFETY: FILE_DISPOSITION_INFO_EX is one u32, FILE_DISPOSITION_INFO one BOOLEAN.
         let ok = unsafe {
             match ex_flags {
@@ -971,6 +1961,7 @@ mod imp {
     ) -> io::Result<()> {
         let bytes = (buf.len() * 8) as u32;
         let malformed = || io::Error::other("malformed directory listing");
+        probe::call(Call::List);
         let mut query = class.restart;
         loop {
             // SAFETY: the buffer holds `bytes` bytes, 8-aligned.
@@ -1042,17 +2033,17 @@ mod imp {
         unsafe { CompareStringOrdinal(a.as_ptr(), la, b.as_ptr(), lb, 1) == CSTR_EQUAL }
     }
 
-    /// The file id each name of the folder `f` lists has (FileIdBothDirectoryInformation, the id
+    /// The file id each name of the folder `d` lists has (FileIdBothDirectoryInformation, the id
     /// a handle's file index is), through a listing handle checked to be that folder. Ids that
     /// say nothing (0, all ones) are left out; a folder that cannot be listed so has none.
-    fn listed_ids(f: &Frame, buf: &mut [u64]) -> HashMap<Vec<u16>, u64> {
+    fn listed_ids(d: &Dir, buf: &mut [u64]) -> HashMap<Vec<u16>, u64> {
         let mut ids = HashMap::new();
         let lister = match open(
-            &f.path,
+            &d.path,
             FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            f.facts.reparse(),
+            d.facts.reparse(),
         ) {
-            Ok(h) if identity(&h).ok() == Some((f.facts.volume, f.facts.index)) => h,
+            Ok(h) if identity(&h).ok() == Some((d.facts.volume, d.facts.index)) => h,
             _ => return ids,
         };
         let listed = entries(&lister, buf, &ID_BOTH, |units, id| {
@@ -1096,21 +2087,31 @@ mod imp {
         PathBuf::from(OsString::from_wide(w))
     }
 
-    struct Frame {
-        /// what is deleted once its entries are gone
-        h: Handle,
+    /// A folder being emptied (by one thread or several).
+    pub(in super::super) struct Dir {
+        /// what deletes it once it is empty: taken then, and closed right away (before its
+        /// parent is deleted: a folder deleted without POSIX semantics goes when it is closed)
+        h: Mutex<Option<Handle>>,
         facts: Facts,
         path: Vec<u16>,
-        names: std::vec::IntoIter<OsString>,
+        /// the item's volume, and whether its file system tells what a handle was opened as
+        volume: u32,
+        names_known: bool,
         /// the file ids it lists its names with, read once a handle reports a name of it in
         /// another case ([`listed_ids`])
-        ids: Option<HashMap<Vec<u16>, u64>>,
+        ids: Mutex<Option<HashMap<Vec<u16>, u64>>>,
     }
 
     /// List the folder `h` is open on: through a listing handle checked to be the same folder
     /// (for a folder that is a reparse point other than a link, cloud files, one its filter may
     /// fill in).
-    fn frame(h: Handle, facts: Facts, path: Vec<u16>, buf: &mut [u64]) -> io::Result<Frame> {
+    fn frame(
+        h: Handle,
+        facts: Facts,
+        path: Vec<u16>,
+        (volume, names_known): (u32, bool),
+        buf: &mut [u64],
+    ) -> io::Result<(Dir, Vec<OsString>)> {
         let lister = open(
             &path,
             FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
@@ -1120,108 +2121,109 @@ mod imp {
             return Err(super::moved_inside());
         }
         let names = super::seam_names(&as_path(&path), list(&lister, buf)?);
-        Ok(Frame {
-            h,
-            facts,
-            path,
-            names: names.into_iter(),
-            ids: None,
-        })
+        Ok((
+            Dir {
+                h: Mutex::new(Some(h)),
+                facts,
+                path,
+                volume,
+                names_known,
+                ids: Mutex::new(None),
+            },
+            names,
+        ))
     }
 
-    pub(super) fn remove_tree(top: &Path, cancel: Option<CancelFn<'_>>) -> Removed {
-        let mut out = Removed::default();
-        if super::cancelled(cancel) {
-            out.cancelled = true;
-            return out;
+    /// Windows: every level on several threads.
+    pub(in super::super) struct Win;
+
+    impl Walk for Win {
+        type Dir = Dir;
+        type Scratch = Vec<u64>;
+
+        fn scratch(&self) -> Vec<u64> {
+            // 64 KiB exactly: WinBtrfs refuses a name buffer of a few bytes more
+            vec![0u64; 65536 / 8]
         }
-        // 64 KiB exactly: WinBtrfs refuses a name buffer of a few bytes more
-        let mut buf = vec![0u64; 65536 / 8];
-        seams::entering(top);
-        let top_w = verbatim(top);
-        let start = (|| -> io::Result<Frame> {
-            let Some((h, f)) = open_entry(&top_w, &mut buf)? else {
+
+        fn start(&self, top: &Path, buf: &mut Vec<u64>) -> io::Result<(Dir, Vec<OsString>)> {
+            seams::entering(top);
+            let top_w = verbatim(top);
+            let Some((h, f)) = open_entry(&top_w, buf)? else {
                 return Err(io::Error::from(io::ErrorKind::NotFound));
             };
             if !f.dir() || f.link() {
                 return Err(super::moved_inside()); // replaced since the caller looked
             }
-            frame(h, f, top_w.clone(), &mut buf)
-        })();
-        let first = match start {
-            Ok(f) => f,
-            Err(e) => {
-                out.fail(e);
-                return out;
-            }
-        };
-        let (volume, names_known) = (first.facts.volume, first.facts.name.is_some());
-        let mut stack = vec![first];
-        while let Some(f) = stack.last_mut() {
-            let Some(name) = f.names.next() else {
-                let done = stack.pop().unwrap();
-                match delete(&done.h, &done.path, &done.facts) {
-                    Ok(()) => out.deleted = true,
-                    Err(e) => out.fail(e),
-                }
-                continue;
-            };
+            let item = (f.volume, f.name.is_some());
+            frame(h, f, top_w, item, buf)
+        }
+
+        fn visit(
+            &self,
+            dir: &Dir,
+            _depth: usize,
+            name: OsString,
+            buf: &mut Vec<u64>,
+            cancel: &dyn Fn() -> bool,
+        ) -> Visit<Dir> {
             let units: Vec<u16> = name.encode_wide().collect();
             if !super::joinable(&units) {
-                out.fail(super::bad_name_inside());
-                continue;
+                return Visit::Failed(super::bad_name_inside());
             }
-            let path = join(&f.path, &units);
-            let expected = f.facts.name.as_ref().map(|n| join(n, &units));
+            let path = join(&dir.path, &units);
+            let expected = dir.facts.name.as_ref().map(|n| join(n, &units));
             seams::entering(&as_path(&path));
-            let (h, facts) = match open_entry(&path, &mut buf) {
+            let (h, facts) = match open_entry(&path, buf) {
                 Ok(Some(found)) => found,
-                Ok(None) => continue, // gone meanwhile
-                Err(e) => {
-                    out.fail(e);
-                    continue;
-                }
+                Ok(None) => return Visit::Gone,
+                Err(e) => return Visit::Failed(e),
             };
             // the very entry listed: on this volume, under this folder, by this name; a name
             // reported in another case (SMB redirectors, WinFsp and Dokan report the case the
             // first program to open it used) only as the entry the folder lists under the name,
             // by its file id (in a case-sensitive folder another case is another entry)
             let named = match (&facts.name, &expected) {
-                _ if !names_known => true,
+                _ if !dir.names_known => true,
                 (Some(got), Some(want)) if got == want => true,
                 (Some(got), Some(want)) if same_but_case(got, want) => {
-                    if f.ids.is_none() {
-                        f.ids = Some(listed_ids(f, &mut buf));
+                    let mut ids = dir.ids.lock();
+                    if ids.is_none() {
+                        *ids = Some(listed_ids(dir, buf));
                     }
-                    f.ids.as_ref().and_then(|ids| ids.get(&units)) == Some(&facts.index)
+                    ids.as_ref().and_then(|ids| ids.get(&units)) == Some(&facts.index)
                 }
                 _ => false,
             };
-            if facts.volume != volume || !named {
-                out.fail(super::moved_inside());
-                continue;
+            if facts.volume != dir.volume || !named {
+                return Visit::Failed(super::moved_inside());
             }
             if facts.dir() && !facts.link() {
-                if super::cancelled(cancel) {
-                    out.cancelled = true;
-                    return out;
+                if cancel() {
+                    return Visit::Stop;
                 }
-                match frame(h, facts, path, &mut buf) {
-                    Ok(child) => stack.push(child),
-                    Err(e) => out.fail(e),
-                }
-                continue;
+                return match frame(h, facts, path, (dir.volume, dir.names_known), buf) {
+                    Ok((d, names)) => Visit::Folder(d, names),
+                    Err(e) => Visit::Failed(e),
+                };
             }
             if facts.dir() && facts.tag == TAG_MOUNT_POINT && mounts_a_volume(&h, &path) {
-                out.fail(super::mount_inside());
-                continue;
+                return Visit::Failed(super::mount_inside());
             }
             // a file, or a link of any kind: the entry itself, never what it points to
             match delete(&h, &path, &facts) {
-                Ok(()) => out.deleted = true,
-                Err(e) => out.fail(e),
+                Ok(()) => Visit::Deleted,
+                Err(e) => Visit::Failed(e),
             }
         }
-        out
+
+        fn remove(&self, dir: &Dir, _parent: Option<&Dir>, _top: &Path) -> io::Result<()> {
+            let Some(h) = dir.h.lock().take() else {
+                return Ok(());
+            };
+            let gone = delete(&h, &dir.path, &dir.facts);
+            drop(h);
+            gone
+        }
     }
 }

@@ -109,6 +109,8 @@ pub struct OpRun {
     sizes: HashMap<String, i64>,
     /// folder path -> the longest path below it as last scanned (trash: no walk when it fits)
     longest: HashMap<String, usize>,
+    /// path -> logical bytes as last scanned (what the trash records for it)
+    bytes: HashMap<String, i64>,
     /// item path -> freeable bytes (what a success frees)
     alloc: HashMap<String, i64>,
     /// path -> scan id (refresh the tree afterwards)
@@ -204,6 +206,8 @@ pub struct OpsService {
     dirty_at: Mutex<Option<Instant>>,
     refreshing: AtomicBool,
     locking: AtomicBool,
+    /// items whose holders are still to be asked about
+    lock_queue: Mutex<Vec<String>>,
     delay: Mutex<Duration>,
     hooks: Mutex<TestHooks>,
 }
@@ -222,6 +226,7 @@ impl OpsService {
             dirty_at: Mutex::new(None),
             refreshing: AtomicBool::new(false),
             locking: AtomicBool::new(false),
+            lock_queue: Mutex::new(Vec::new()),
             delay: Mutex::new(DELETE_DELAY),
             hooks: Mutex::new(TestHooks::default()),
         }
@@ -446,8 +451,9 @@ impl OpsService {
             .await??;
         }
         result.refused.splice(0..0, refused);
+        let new_items = result.added.clone();
         let out = self.added(server, result).await;
-        self.check_locks(server);
+        self.check_locks(server, new_items);
         out
     }
 
@@ -529,21 +535,46 @@ impl OpsService {
         self.broadcast(server).await
     }
 
-    /// Who holds basket items open (UI-W5-37), in the background; the drawer updates.
-    fn check_locks(&self, server: &Arc<Server>) {
+    /// Who holds the items `ids` open (UI-W5-37), in the background; the drawer updates. Only
+    /// the items just added are asked about: the others were when they came (asking about the
+    /// whole basket after every add read every file of it again each time). Items added while a
+    /// check runs are checked by it next.
+    fn check_locks(&self, server: &Arc<Server>, ids: Vec<String>) {
+        if ids.is_empty() {
+            return;
+        }
+        self.lock_queue.lock().extend(ids);
         if self.locking.swap(true, Ordering::SeqCst) {
             return;
         }
         let srv = server.clone();
         server.rt.spawn(async move {
             let ops = &srv.ops;
-            let paths = ops.basket.lock_targets();
-            if !paths.is_empty() {
+            loop {
+                let ids: Vec<String> = std::mem::take(&mut *ops.lock_queue.lock());
+                if ids.is_empty() {
+                    ops.locking.store(false, Ordering::SeqCst);
+                    // asked for between the take and the store: this check takes it after all
+                    if ops.lock_queue.lock().is_empty() || ops.locking.swap(true, Ordering::SeqCst)
+                    {
+                        break;
+                    }
+                    continue;
+                }
+                let paths: Vec<String> = ops
+                    .basket
+                    .targets(Some(&ids))
+                    .into_iter()
+                    .map(|t| t.path)
+                    .collect();
+                if paths.is_empty() {
+                    continue;
+                }
                 let before = ops.basket.version();
                 let basket = ops.basket.clone();
                 let ok = tokio::task::spawn_blocking(move || {
                     let lockers = sk_core::ops::locks::find_lockers(&paths);
-                    basket.set_lockers(&lockers);
+                    basket.set_lockers_for(&paths, &lockers);
                 })
                 .await;
                 if ok.is_err() {
@@ -552,7 +583,6 @@ impl OpsService {
                     let _ = ops.broadcast(&srv).await;
                 }
             }
-            ops.locking.store(false, Ordering::SeqCst);
         });
     }
 
@@ -678,6 +708,10 @@ impl OpsService {
                 .iter()
                 .filter_map(|t| t.longest.map(|l| (t.path.clone(), l)))
                 .collect(),
+            bytes: targets
+                .iter()
+                .filter_map(|t| t.bytes.map(|b| (t.path.clone(), b)))
+                .collect(),
             alloc,
             scans,
             roots: targets
@@ -772,6 +806,7 @@ impl OpsService {
                 cancel: Some(&cancel),
                 sizes: (r.mode == OpMode::Trash).then_some(&r.sizes),
                 longest: (r.mode == OpMode::Trash).then_some(&r.longest),
+                bytes: (r.mode == OpMode::Trash).then_some(&r.bytes),
                 roots: Some(&r.roots),
                 ..OpOptions::default()
             };

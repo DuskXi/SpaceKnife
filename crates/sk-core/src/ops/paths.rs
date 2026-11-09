@@ -148,7 +148,7 @@ fn nt_sep(c: char) -> bool {
 }
 
 /// `ntpath.splitroot`: (drive, root, rest).
-fn nt_splitroot(p: &str) -> (&str, &str, &str) {
+pub(crate) fn nt_splitroot(p: &str) -> (&str, &str, &str) {
     let b = p.as_bytes();
     if b.len() >= 2 && nt_sep(b[0] as char) && nt_sep(b[1] as char) {
         // UNC: \\server\share
@@ -749,6 +749,7 @@ pub fn current_rules() -> Arc<Rules> {
 /// A path with its links resolved where it exists, without the `\\?\` prefix Windows adds;
 /// unchanged where it cannot be resolved (Python's non-strict `realpath`).
 pub fn resolve_lenient(p: &Path) -> PathBuf {
+    super::probe::call(super::probe::Call::Stat);
     match std::fs::canonicalize(p) {
         Ok(real) => match real.to_str() {
             Some(s) if strip_verbatim(s).len() != s.len() => {
@@ -806,6 +807,7 @@ pub fn resolved(path: &Path) -> PathBuf {
 
 /// Whether `path` is a mount point (only folders can be: files skip the volume lookup).
 pub fn is_mount(path: &Path) -> bool {
+    super::probe::call(super::probe::Call::Stat);
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return false;
     };

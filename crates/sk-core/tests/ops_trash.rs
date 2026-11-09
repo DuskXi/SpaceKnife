@@ -132,6 +132,23 @@ fn trash_all(paths: &[String]) -> Vec<OpResult> {
     move_to_trash(paths, OpOptions::default())
 }
 
+/// One thread for every operation while it lives (what a test of the order of things
+/// counts on), as many as the device takes again when dropped.
+struct Threads;
+
+impl Threads {
+    fn set(n: usize) -> Threads {
+        sk_core::ops::par::seams::WORKERS.store(n, Ordering::SeqCst);
+        Threads
+    }
+}
+
+impl Drop for Threads {
+    fn drop(&mut self) {
+        sk_core::ops::par::seams::WORKERS.store(0, Ordering::SeqCst);
+    }
+}
+
 // --------------------------------------------------------------------------- round trips
 
 #[test]
@@ -286,6 +303,7 @@ fn cancel_midway() {
         return;
     }
     let (_, _g) = setup();
+    let _one = Threads::set(1); // one item after the other: the first is done when it stops
     let dir = tempfile::tempdir().unwrap();
     let files: Vec<String> = (0..3)
         .map(|i| {
@@ -532,6 +550,76 @@ mod windows {
         trashed.0.clear();
         assert_eq!(std::fs::read(&other).unwrap(), b"o");
         std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
+    }
+
+    /// Moved into the bin by a rename of its own (the user's own bin folder, room in it): the
+    /// `$I` record is what Windows 10 writes — version 2, the size the scan gave, the original
+    /// path — beside its `$R`, and a restore puts it back.
+    #[test]
+    fn a_folder_goes_into_the_bin_by_a_rename() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("photos.2024");
+        std::fs::create_dir_all(folder.join("sub")).unwrap();
+        std::fs::write(folder.join("sub").join("a.jpg"), b"jpeg").unwrap();
+        let recorded = shell_name(&folder);
+        let key = s(&folder);
+        let sizes = HashMap::from([(key.clone(), 4096i64)]);
+        let longest = HashMap::from([(key.clone(), 10usize)]);
+        let bytes = HashMap::from([(key.clone(), 4i64)]);
+        let r = move_to_trash(
+            &[s(&folder)],
+            OpOptions {
+                sizes: Some(&sizes),
+                longest: Some(&longest),
+                bytes: Some(&bytes),
+                ..OpOptions::default()
+            },
+        )
+        .remove(0);
+        let mut trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!((r.code, r.message.clone()), (OpCode::Ok, text("trashed")));
+        assert!(!folder.exists());
+        let info = PathBuf::from(&r.trash_ref);
+        let name = info.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("$I") && name.ends_with(".2024"), "{name}");
+        let data = std::fs::read(&info).unwrap();
+        assert_eq!(i64::from_le_bytes(data[..8].try_into().unwrap()), 2);
+        let (size, when, path) = parse_recycle_info(&data).unwrap();
+        assert!(same(&path, &recorded), "{path} / {recorded}");
+        assert_eq!(size, 4); // what the scan measured, not walked again
+        assert!(when > 1.7e9);
+        let payload = info.with_file_name(format!("$R{}", &name[2..]));
+        assert_eq!(
+            std::fs::read(payload.join("sub").join("a.jpg")).unwrap(),
+            b"jpeg"
+        );
+        assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok]);
+        trashed.0.clear();
+        assert_eq!(
+            std::fs::read(folder.join("sub").join("a.jpg")).unwrap(),
+            b"jpeg"
+        );
+    }
+
+    /// A folder with a file open inside cannot be renamed: it is reported held (by this test
+    /// process, the Restart Manager says) and stays where it is, whole.
+    #[test]
+    fn a_folder_with_an_open_file_stays_whole() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("busy");
+        std::fs::create_dir(&folder).unwrap();
+        let held = folder.join("doc.docx");
+        std::fs::write(&held, b"d").unwrap();
+        std::fs::write(folder.join("free.txt"), b"f").unwrap();
+        let handle = held_open(&held);
+        let r = trash_all(&[s(&folder)]).remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        drop(handle);
+        assert_eq!(r.code, OpCode::Locked, "{r:?}");
+        assert!(r.message.contains("使用"), "{r:?}");
+        assert!(held.exists() && folder.join("free.txt").exists());
     }
 
     #[test]
@@ -794,6 +882,95 @@ mod freedesktop {
         assert_eq!((r.code, r.message), (OpCode::NoTrash, text("no_trash_dir")));
         assert!(f.exists() && !trash_available(&s(&f)));
     }
+
+    #[test]
+    fn directorysizes_lines() {
+        use trash::fd::{DirSize, format_directorysizes, parse_directorysizes};
+        let entries = vec![
+            DirSize {
+                size: 4096,
+                mtime: 1_290_678_378,
+                name: b"Untitled Folder".to_vec(),
+            },
+            DirSize {
+                size: 12,
+                mtime: 7,
+                name: "报告 %".as_bytes().to_vec(),
+            },
+        ];
+        let text = format_directorysizes(&entries);
+        assert!(text.starts_with(b"4096 1290678378 Untitled%20Folder\n"));
+        assert_eq!(parse_directorysizes(&text), entries);
+        // malformed lines and names with a slash are left out
+        let odd = b"x 1 a\n10 2\n5 6 a%2Fb\n3 4 ok\n";
+        assert_eq!(
+            parse_directorysizes(odd),
+            [DirSize {
+                size: 3,
+                mtime: 4,
+                name: b"ok".to_vec()
+            }]
+        );
+    }
+
+    /// A folder moved to the trash with its scanned size gets its `directorysizes` line; the
+    /// trash's size is told from that line without walking the folder (while the `.trashinfo`
+    /// is unchanged), and from a walk once it is not (the line is written again).
+    #[test]
+    fn trashed_folders_are_sized_from_the_cache() {
+        let (base, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("big folder");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("x.bin"), vec![b'x'; 10_000]).unwrap();
+        let sizes = HashMap::from([(s(&folder), 777_777i64)]);
+        let r = move_to_trash(
+            &[s(&folder)],
+            OpOptions {
+                sizes: Some(&sizes),
+                ..OpOptions::default()
+            },
+        )
+        .remove(0);
+        let mut trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(r.code, OpCode::Ok, "{r:?}");
+        let trash_root = base.join("xdg").join("Trash");
+        let lines = trash::fd::parse_directorysizes(
+            &std::fs::read(trash_root.join("directorysizes")).unwrap(),
+        );
+        let mine = lines
+            .iter()
+            .find(|e| e.name == b"big folder")
+            .expect("a line for the folder");
+        assert_eq!(mine.size, 777_777);
+        let used = trash_status(&s(dir.path()), true).used;
+        assert!(used >= 777_777, "{used}"); // the line's size, not the folder's 10 kB
+        // the .trashinfo changed: walked again, the line rewritten with what is there
+        let info = PathBuf::from(&r.trash_ref);
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&info)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        let used = trash_status(&s(dir.path()), true).used;
+        assert!((10_000..777_777).contains(&used), "{used}");
+        let lines = trash::fd::parse_directorysizes(
+            &std::fs::read(trash_root.join("directorysizes")).unwrap(),
+        );
+        let mine = lines.iter().find(|e| e.name == b"big folder").unwrap();
+        assert!(mine.size < 777_777 && mine.size >= 10_000, "{mine:?}");
+        assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok]);
+        trashed.0.clear();
+        assert!(folder.join("x.bin").exists());
+        // gone from the trash: its line goes too
+        trash_status(&s(dir.path()), true);
+        let lines = trash::fd::parse_directorysizes(
+            &std::fs::read(trash_root.join("directorysizes")).unwrap(),
+        );
+        assert!(!lines.iter().any(|e| e.name == b"big folder"), "{lines:?}");
+    }
 }
 
 // --------------------------------------------------------------------------- pure helpers
@@ -939,6 +1116,7 @@ fn delete_permanently_trees_links_files() {
 #[test]
 fn delete_permanently_cancel() {
     let (_, _g) = setup();
+    let _one = Threads::set(1); // one item after the other: the first is done when it stops
     let dir = tempfile::tempdir().unwrap();
     let files: Vec<String> = (0..3)
         .map(|i| {
@@ -971,6 +1149,7 @@ fn delete_permanently_cancel() {
 #[test]
 fn delete_inside_a_folder_can_be_cancelled() {
     let (_, _g) = setup();
+    let _one = Threads::set(1); // the polls counted below are one thread's
     let dir = tempfile::tempdir().unwrap();
     let tree = dir.path().join("t");
     for i in 0..3 {
@@ -994,6 +1173,166 @@ fn delete_inside_a_folder_can_be_cancelled() {
         (OpCode::Cancelled, text("cancelled_partly"))
     );
     assert!(tree.exists());
+}
+
+// --------------------------------------------------------------------------- several threads
+
+/// `folders` folders of `files` files below `top`, two levels deep.
+fn wide_tree(top: &Path, folders: usize, files: usize) {
+    for a in 0..folders {
+        for b in 0..2 {
+            let d = top.join(format!("a{a}")).join(format!("b{b}"));
+            std::fs::create_dir_all(&d).unwrap();
+            for f in 0..files {
+                std::fs::write(d.join(format!("f{f}.txt")), b"w").unwrap();
+            }
+        }
+        std::fs::write(top.join(format!("a{a}")).join("top.txt"), b"t").unwrap();
+    }
+}
+
+/// Several items and the folders inside them go on several threads at once: all of it, each
+/// item reported once, as itself.
+#[test]
+fn trees_are_deleted_on_several_threads() {
+    let (_, _g) = setup();
+    let _four = Threads::set(4);
+    let dir = tempfile::tempdir().unwrap();
+    let items: Vec<PathBuf> = (0..5)
+        .map(|i| dir.path().join(format!("item{i}")))
+        .collect();
+    for it in &items {
+        wide_tree(it, 12, 15);
+    }
+    let file = dir.path().join("single.txt");
+    std::fs::write(&file, b"s").unwrap();
+    let mut asked: Vec<String> = items.iter().map(|p| s(p)).collect();
+    asked.insert(2, s(&file));
+    let seen = std::sync::Mutex::new(Vec::new());
+    let mut progress = |done: usize, total: usize, r: &OpResult| {
+        seen.lock().unwrap().push((done, total, r.path.clone()));
+    };
+    let res = delete_permanently(
+        &asked,
+        OpOptions {
+            progress: Some(&mut progress),
+            ..OpOptions::default()
+        },
+    );
+    assert_eq!(codes(&res), vec![OpCode::Ok; 6], "{res:?}");
+    assert_eq!(
+        res.iter().map(|r| r.path.clone()).collect::<Vec<_>>(),
+        asked
+    );
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(
+        seen.iter().map(|s| s.0).collect::<Vec<_>>(),
+        (1..=6).collect::<Vec<_>>()
+    );
+    let mut reported: Vec<String> = seen.into_iter().map(|s| s.2).collect();
+    reported.sort();
+    let mut want = asked.clone();
+    want.sort();
+    assert_eq!(reported, want);
+    assert!(items.iter().all(|p| std::fs::symlink_metadata(p).is_err()) && !file.exists());
+}
+
+/// What cannot be deleted (held open on Windows, in a folder without write permission
+/// elsewhere) stays with each folder above it; on several threads the rest of the item goes.
+#[test]
+fn what_cannot_go_stays_with_its_folders_the_rest_goes() {
+    let (_, _g) = setup();
+    #[cfg(unix)]
+    // SAFETY: a plain query.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root deletes in a read-only folder");
+        return;
+    }
+    let _four = Threads::set(4);
+    let dir = tempfile::tempdir().unwrap();
+    let top = dir.path().join("sel");
+    wide_tree(&top, 8, 10);
+    let stuck_dir = top.join("a3").join("b1");
+    let stuck = stuck_dir.join("f4.txt");
+    #[cfg(windows)]
+    let handle = held_open(&stuck);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stuck_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    }
+    let r = delete_permanently(&[s(&top)], no_locks()).remove(0);
+    #[cfg(windows)]
+    drop(handle);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stuck_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    assert_eq!(r.code, OpCode::Error, "{r:?}");
+    assert!(r.message.starts_with("部分内容未能删除"), "{r:?}");
+    assert!(stuck.exists());
+    for a in (0..8).filter(|&a| a != 3) {
+        assert!(!top.join(format!("a{a}")).exists(), "a{a} left");
+    }
+    assert!(!top.join("a3").join("b0").exists() && !top.join("a3").join("top.txt").exists());
+}
+
+/// An item inside another one (never from the basket, but the call allows it) is deleted first,
+/// then the one around it: both are done, nothing is left.
+#[test]
+fn an_item_inside_another_is_deleted_first() {
+    let (_, _g) = setup();
+    let _four = Threads::set(4);
+    let dir = tempfile::tempdir().unwrap();
+    let outer = dir.path().join("outer");
+    wide_tree(&outer, 4, 5);
+    let inner = outer.join("a1");
+    let res = delete_permanently(&[s(&outer), s(&inner)], no_locks());
+    assert_eq!(codes(&res), [OpCode::Ok, OpCode::Ok], "{res:?}");
+    assert!(std::fs::symlink_metadata(&outer).is_err());
+}
+
+/// On several threads a cancel stops what has not started: an item reported done is gone, one
+/// reported cancelled is (partly) still there, and not every item ran.
+#[test]
+fn a_cancel_stops_deleting_on_several_threads() {
+    let (_, _g) = setup();
+    let _four = Threads::set(4);
+    let dir = tempfile::tempdir().unwrap();
+    let items: Vec<PathBuf> = (0..16).map(|i| dir.path().join(format!("c{i}"))).collect();
+    for it in &items {
+        wide_tree(it, 3, 6);
+    }
+    let seen = AtomicUsize::new(0);
+    let mut progress = |_: usize, _: usize, _: &OpResult| {
+        seen.fetch_add(1, Ordering::SeqCst);
+    };
+    let cancel = || seen.load(Ordering::SeqCst) > 0;
+    let asked: Vec<String> = items.iter().map(|p| s(p)).collect();
+    let res = delete_permanently(
+        &asked,
+        OpOptions {
+            progress: Some(&mut progress),
+            cancel: Some(&cancel),
+            check_locks: false,
+            ..OpOptions::default()
+        },
+    );
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        16,
+        "every item gets its final result"
+    );
+    let done = res.iter().filter(|r| r.code == OpCode::Ok).count();
+    assert!((1..16).contains(&done), "{done} of 16 done");
+    for (r, p) in res.iter().zip(&items) {
+        match r.code {
+            OpCode::Ok => assert!(!p.exists(), "{r:?}"),
+            OpCode::Cancelled => assert!(p.exists(), "{r:?}"),
+            other => panic!("{other:?}: {r:?}"),
+        }
+    }
 }
 
 #[test]
