@@ -738,6 +738,12 @@ pub fn default_threads() -> usize {
     pace::start_width(pace::get().n_cpu)
 }
 
+/// Calls a scanner should keep in flight on the shared carriers now (both lanes' widths over the
+/// folders a call lists there at once; cheap: an atomic read).
+pub fn wanted_calls() -> usize {
+    pace::get().calls()
+}
+
 /// How listings on the shared carriers are paced (pace/, docs/native.md 2.2 「列目录线程」).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ListingThreads {

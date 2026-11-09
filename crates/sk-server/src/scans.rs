@@ -635,7 +635,7 @@ impl ScanManager {
         let (gated, concurrency) = match workers {
             Some(0) => (false, 1), // one listing at a time, no governor (tests, tiny scans)
             Some(w) => (true, (w as usize).min(threads)),
-            None => (true, threads),
+            None => (true, 0), // as many calls as the walker wants (scanner.rs)
         };
         let links_each = st.get_str("scan.hardlinks") == "each";
         let skip_protected = params.skip_protected.unwrap_or_else(|| {

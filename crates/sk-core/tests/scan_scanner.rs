@@ -412,8 +412,32 @@ fn profile_accounts_for_the_scan() {
     assert!(prof.slices as usize >= 1 && prof.slices as usize <= facts.dirs + 1);
     assert!(prof.wall_s > 0.0 && prof.ingest_s > 0.0 && prof.ingest_s < prof.wall_s);
     assert_eq!(prof.limited_s, 0.0);
-    assert_eq!(prof.threads, s.concurrency());
-    assert!(prof.text().contains("listing threads busy"));
+    // the calls follow the walker (docs/native.md 2.2 「列目录线程」): at most `concurrency` in
+    // flight, as many as it wanted on average; its lanes and the cold fraction are reported
+    assert!(
+        prof.threads >= 1 && prof.threads <= s.concurrency(),
+        "{prof:?}"
+    );
+    assert!(prof.calls_mean > 0.0, "{prof:?}");
+    if s.calls_follow_the_walker() {
+        let lanes = prof.lanes.as_ref().expect("the lanes");
+        assert!(lanes.io.1 >= 1 && lanes.cpu.1 >= 1, "{lanes:?}");
+        assert!(lanes.cold.iter().all(|&(_, c)| (0.0..=1.0).contains(&c)));
+        assert!(prof.text().contains("io lane"), "{}", prof.text());
+    }
+    assert!(prof.text().contains("listing calls busy"));
+    // fixed calls: as many as asked
+    let (_t, root, _) = tree();
+    let fixed = scanner(
+        &root,
+        ScanOptions {
+            concurrency: 3,
+            ..opts(0)
+        },
+    );
+    run(&fixed);
+    assert!(!fixed.calls_follow_the_walker());
+    assert_eq!(fixed.profile().threads, 3);
 }
 
 #[test]
