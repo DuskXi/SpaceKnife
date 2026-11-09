@@ -69,6 +69,14 @@ fn make_items(top: &Path) -> Vec<PathBuf> {
                 perm.set_readonly(true);
                 std::fs::set_permissions(&ro, perm).unwrap();
             }
+            if i == 1 && cfg!(windows) {
+                // a folder with the read-only attribute (Explorer marks customised folders so;
+                // FAT refuses to delete it as it is)
+                let ro = item.join("a");
+                let mut perm = std::fs::metadata(&ro).unwrap().permissions();
+                perm.set_readonly(true);
+                std::fs::set_permissions(&ro, perm).unwrap();
+            }
             item
         })
         .collect()
@@ -246,6 +254,7 @@ fn nineteen_folders_to_the_trash_and_back() {
     let dir = tempfile::tempdir().unwrap();
     let top = dir.path().join("scan");
     let items = make_items(&top);
+    let _cleanup = Cleanup(top.clone());
     let before = contents(&top);
     let status = sk_core::ops::trash_status(&s(&top), false);
     if status.available && !real_trash_allowed() {
@@ -304,6 +313,18 @@ fn nineteen_folders_to_the_trash_and_back() {
         "{restored:#?}"
     );
     assert_eq!(contents(&top), before);
+}
+
+/// Deletes the test tree when dropped, read-only entries too (what the temporary folder's own
+/// removal does not take on every file system).
+struct Cleanup(PathBuf);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        if std::fs::symlink_metadata(&self.0).is_ok() {
+            sk_core::ops::delete_permanently(&[&self.0], OpOptions::default());
+        }
+    }
 }
 
 /// Windows: a file deleted while another program holds it open sharing its deletion (an

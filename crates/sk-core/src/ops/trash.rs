@@ -2072,6 +2072,20 @@ pub mod fd {
         meta.is_dir() && meta.uid() == uid
     }
 
+    /// Whether `path` is on a mount that is read-only (`statvfs`'s ST_RDONLY: mounted so, or a
+    /// write-protected medium).
+    fn read_only_mount(path: &Path) -> bool {
+        let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return false;
+        };
+        probe::call(Call::Stat);
+        // SAFETY: zeroed is a valid statvfs; a NUL-terminated path.
+        unsafe {
+            let mut st: libc::statvfs = std::mem::zeroed();
+            libc::statvfs(c.as_ptr(), &mut st) == 0 && st.f_flag & libc::ST_RDONLY != 0
+        }
+    }
+
     fn make_subdirs(root: &Path) -> io::Result<()> {
         for sub in ["files", "info"] {
             probe::call(Call::Write);
@@ -2108,6 +2122,10 @@ pub mod fd {
                 root: home,
                 topdir: None,
             }));
+        }
+        if read_only_mount(path) {
+            // no trash folder can be made there, nor anything moved: said as it is
+            return Ok(Err(text("read_only")));
         }
         let uid = uid();
         let top = mount_top(path, dev);
