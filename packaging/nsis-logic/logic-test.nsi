@@ -21,8 +21,11 @@
 ; writes it, packaging/nsis-logic.mjs runs it with _?= so that it runs where it is, "removedata"):
 ; its folders (SK_LOCALAPPDATA, SK_APPDATA) are the sandbox's Local and Roaming here, never the
 ; user's. Its un.onInit does only that, its Uninstall section is empty. The WebView2 processes it
-; may end (un.SkWebView2In: --user-data-dir in the shell's folder, here the sandbox's) are the
-; runner's stand-ins.
+; waits for and ends are a list of stand-ins the runner writes (un.TestWebView2In: no process is
+; looked at or ended, their command lines go through spaceknife.nsh's own un.SkWebView2Ours), or,
+; in two cases, the system's (un.SkWebView2In: --user-data-dir in the shell's folder, here the
+; sandbox's, so only the runner's stand-in processes). The "wv2lines" case gives un.SkUserDataDir
+; and un.SkWebView2Ours command lines and folders to judge.
 ;
 ;   makensis -DSK_HELPERS=<spaceknife.nsh> -DSK_UTILS=<Tauri's utils.nsh> -DSK_PLUGINS=<dir> -DSK_OUT=<exe> logic-test.nsi
 
@@ -102,6 +105,10 @@ Var TestLocal
 Var TestRoaming
 !define SK_LOCALAPPDATA "$TestLocal"
 !define SK_APPDATA "$TestRoaming"
+; the WebView2 processes of the shell's folder: 3 s for them to go by themselves; the list of
+; stand-ins the runner gives (SK_LOGIC_WV2_FAKE), else the system's processes (un.TestWebView2In)
+!define SK_WEBVIEW2_POLLS 12
+!define SK_WEBVIEW2_SCAN un.TestWebView2In
 
 !include "${SK_HELPERS}"
 LangString skAppRunning 1033 "running"
@@ -1117,6 +1124,165 @@ Function un.Keys
   StrCpy $INSTDIR $R9
 FunctionEnd
 
+; un.SkEndWebView2In's processes in the "removedata" cases (${SK_WEBVIEW2_SCAN}, as un.SkWebView2In
+; is called: $R0 the folder, $R2 "list" or "end" -> $R1, $R3). With SK_LOGIC_WV2_FAKE, the list of
+; stand-ins the runner wrote there, and no process of the system's is looked at or ended: a line
+; each (UTF-16 LE), "<pid>|<file name>|<1: it can be ended, 0: ending it fails with error 5>|<its
+; command line>". One runs while <the list's folder>\<pid>.alive is there (the runner deletes it
+; when the stand-in exits by itself); ending one deletes that file and writes <pid>.ended (the
+; runner then writes nothing more for it). Which ones are SpaceKnife's is spaceknife.nsh's own
+; un.SkWebView2Ours. Without SK_LOGIC_WV2_FAKE, the system's processes (un.SkWebView2In): the
+; runner's stand-ins (cmd.exe under msedgewebview2.exe's name) are the only ones whose profile is in
+; the sandbox. Registers but $R1 and $R3 are kept.
+Function un.TestWebView2In
+  Push $0
+  ReadEnvStr $0 SK_LOGIC_WV2_FAKE
+  ${If} $0 == ""
+    Pop $0
+    Call un.SkWebView2In
+    Return
+  ${EndIf}
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  Push $6
+  Push $7
+  Push $8
+  Push $R4
+  Push $R5
+  Push $R6
+  StrCpy $R1 0
+  StrCpy $R3 ""
+  ${GetParent} "$0" $1
+  ClearErrors
+  FileOpen $2 "$0" r
+  ${IfNot} ${Errors}
+    ${Do}
+      ClearErrors
+      FileReadUTF16LE $2 $3
+      ${If} ${Errors}
+        ${ExitDo}
+      ${EndIf}
+      ${Do}
+        StrCpy $4 $3 1 -1
+        ${If} $4 == "$\r"
+        ${OrIf} $4 == "$\n"
+          StrCpy $3 $3 -1
+        ${Else}
+          ${ExitDo}
+        ${EndIf}
+      ${Loop}
+      ${If} $3 == ""
+        ${Continue}
+      ${EndIf}
+      ${WordFind} "$3" "|" "+1" $4
+      ${WordFind} "$3" "|" "+2" $5
+      ${WordFind} "$3" "|" "+3" $6
+      ${WordFind} "$3" "|" "+3}" $7
+      ClearErrors
+      ${If} ${FileExists} "$1\$4.alive"
+        StrCpy $R5 $5
+        StrCpy $R6 $7
+        Call un.SkWebView2Ours
+        ${If} $R4 = 1
+        ${AndIf} $R2 == "end"
+          ${If} $6 == "1"
+            ; as TerminateProcess and the wait for it: gone once this returns (the runner may be
+            ; reading the marker that moment)
+            StrCpy $8 0
+            ${Do}
+              Delete "$1\$4.alive"
+              ${IfNot} ${FileExists} "$1\$4.alive"
+              ${OrIf} $8 >= 40
+                ${ExitDo}
+              ${EndIf}
+              Sleep 50
+              IntOp $8 $8 + 1
+            ${Loop}
+            FileOpen $8 "$1\$4.ended" w
+            FileClose $8
+            !insertmacro SK_WV2_ENDED "$4" "$R5"
+          ${Else}
+            IntOp $R1 $R1 + 1
+            ${If} $R3 != ""
+              StrCpy $R3 "$R3, "
+            ${EndIf}
+            StrCpy $R3 "$R3$4: error 5"
+          ${EndIf}
+        ${ElseIf} $R4 = 1
+          IntOp $R1 $R1 + 1
+          ${If} $R3 != ""
+            StrCpy $R3 "$R3, "
+          ${EndIf}
+          StrCpy $R3 "$R3$4"
+        ${EndIf}
+      ${EndIf}
+    ${Loop}
+    FileClose $2
+  ${EndIf}
+  ClearErrors
+  Pop $R6
+  Pop $R5
+  Pop $R4
+  Pop $8
+  Pop $7
+  Pop $6
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; un.SkUserDataDir and un.SkWebView2Ours on command lines and folders the runner gives
+; (SK_LOGIC_WV2_LINES: a file of lines "<key>|<folder>|<file name>|<command line>", UTF-16 LE):
+; "wv2dir_<key>=<the folder its --user-data-dir names>", "wv2ours_<key>=<1 or 0>". Nothing else is
+; read and no process is looked at.
+Function un.Wv2Lines
+  ReadEnvStr $0 SK_LOGIC_WV2_LINES
+  ClearErrors
+  FileOpen $2 "$0" r
+  ${If} ${Errors}
+    !insertmacro OUT "error=no SK_LOGIC_WV2_LINES"
+    Return
+  ${EndIf}
+  ${Do}
+    ClearErrors
+    FileReadUTF16LE $2 $3
+    ${If} ${Errors}
+      ${ExitDo}
+    ${EndIf}
+    ${Do}
+      StrCpy $4 $3 1 -1
+      ${If} $4 == "$\r"
+      ${OrIf} $4 == "$\n"
+        StrCpy $3 $3 -1
+      ${Else}
+        ${ExitDo}
+      ${EndIf}
+    ${Loop}
+    ${If} $3 == ""
+      ${Continue}
+    ${EndIf}
+    ${WordFind} "$3" "|" "+1" $4
+    ${WordFind} "$3" "|" "+2" $R0
+    ${WordFind} "$3" "|" "+3" $5
+    ${WordFind} "$3" "|" "+3}" $6
+    ClearErrors
+    StrCpy $R5 $6
+    Call un.SkUserDataDir
+    !insertmacro OUT "wv2dir_$4=$R5"
+    StrCpy $R5 $5
+    StrCpy $R6 $6
+    Call un.SkWebView2Ours
+    !insertmacro OUT "wv2ours_$4=$R4"
+  ${Loop}
+  FileClose $2
+FunctionEnd
+
 ; un.SkRemoveData in the sandbox's Local and Roaming: the flags as the command line says
 ; (un.SkParseFlags), the 「你的数据」 box as SK_LOGIC_BOX says (1 ticked, 0 not, "" no page: a silent
 ; run), something else in %APPDATA%\SpaceKnife when SK_LOGIC_ROAMING_OTHER = 1, the program's
@@ -1189,6 +1355,8 @@ Function un.onInit
     Call un.RemoveData
   ${ElseIf} $R9 == "keys"
     Call un.Keys
+  ${ElseIf} $R9 == "wv2lines"
+    Call un.Wv2Lines
   ${Else}
     !insertmacro OUT "error=the uninstaller has no case $R9"
   ${EndIf}
