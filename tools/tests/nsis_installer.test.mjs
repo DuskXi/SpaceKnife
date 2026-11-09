@@ -135,7 +135,7 @@ test("an older WebView2 that can't be updated stops the installer before anythin
   const section = body(installer, "WebView2");
   const minimum = at(section, "Call SkWebView2Minimum");
   assert.ok(minimum >= 0, "the WebView2 section does not check the minimum version");
-  assert.ok(at(section.slice(minimum), 'Abort "$(webview2AbortError)"') >= 0);
+  assert.ok(at(section.slice(minimum), '${SkAbort} "$(webview2AbortError)"') >= 0);
   assert.equal(at(section, "IDIGNORE"), -1, "a silent run ignores the failed update");
   assert.equal(at(section, "Quit"), -1, "Quit skips .onInstFailed, which starts the installed version again");
   // the section comes before Install, where the installed copy is first touched
@@ -150,6 +150,113 @@ test("0.3.4's folder stays on record until this version's keys replace it", () =
   assert.ok(removed >= 0 && removed < record && record < placed, "the record of 0.3.4's folder is not written again after its uninstaller");
   assert.equal(at(install, 'DeleteRegKey SHCTX "${SK_INSTKEY}"'), -1, "the installer deletes the record of the folder");
   assert.ok(at(install, 'WriteRegStr SHCTX "${SK_INSTKEY}" "InstallLocation" "$INSTDIR"') > placed);
+});
+
+test("the uninstaller deletes the GUID keys only when they name its own folder", () => {
+  const uninstall = body(installer, "Uninstall");
+  const owned = at(uninstall, "Call un.SkKeysOurs");
+  assert.ok(owned >= 0, "the uninstaller does not ask whose the keys are");
+  assert.equal(uninstall[owned + 1], "${If} $R0 = 1");
+  const keys = uninstall.map((l, i) => [l, i]).filter(([l]) => /^DeleteRegKey SHCTX "\$\{SK_(UN)?INSTKEY\}"$/.test(l));
+  assert.equal(keys.length, 2);
+  const otherwise = uninstall.findIndex((l, i) => i > owned && l === "${Else}");
+  for (const [, i] of keys) assert.ok(i > owned + 1 && i < otherwise, "a GUID key is deleted whatever folder it names");
+  assert.ok(at(uninstall, 'ReadRegStr $R0 SHCTX "${SK_INSTKEY}" "InstallLocation"') < owned);
+  // its scope: the hive whose key names this folder, never HKCU just because HKLM's does not
+  assert.ok(at(body(helpers, "un.SkDetectScope"), "Call un.SkScopeFor") >= 0);
+});
+
+test("the new program is asked whether it can start before anything of the installed one is touched", () => {
+  const install = body(installer, "Install");
+  const check = at(install, "Call SkStartupCheck");
+  assert.ok(check > at(install, "Call SkCheckStaged"), "asked before the staged files are checked");
+  assert.ok(check < at(install, "Call SkCloseIn"), "asked after SpaceKnife is closed");
+  assert.ok(check < at(install, "Call SkRemoveElectronBuilder"));
+  assert.equal(install[check - 1], 'StrCpy $R0 "$SkStage\\${MAINBINARYNAME}.exe"');
+  assert.ok(at(install.slice(check), '${SkAbort} "$(skCantStart)"') > 0);
+  assert.ok(at(body(helpers, "SkStartupCheck"), "nsExec::ExecToStack /TIMEOUT=${SK_STARTUP_CHECK_MS} '\"$R0\" --startup-check'") >= 0);
+});
+
+test("a failed silent update says why, and nothing half placed is started again", () => {
+  // every stop of the two sections goes through SkAbort (the text SkFailed shows)
+  for (const name of ["WebView2", "Install"]) {
+    const bare = body(installer, name).filter((l) => /^Abort\b/.test(l));
+    assert.deepEqual(bare, [], `${name}: an Abort without SkAbort`);
+  }
+  assert.deepEqual(body(installer, ".onInstFailed"), ["Function .onInstFailed", "Call SkFailed", "FunctionEnd"]);
+  const failed = body(helpers, "SkFailed");
+  assert.ok(at(failed, "Call SkRestartPrevious") < at(failed, "MessageBox"), "the installed version is started before the message");
+  assert.ok(at(failed, "Call SkFailureLevel") >= 0);
+  const silent = at(failed, "${If} ${Silent}");
+  assert.equal(failed[silent + 1], "${AndIf} $UpdateMode = 1", "a message box in a silent run that is no update");
+  assert.ok(at(failed, "kernel32::ReleaseMutex") > silent && at(failed, "kernel32::ReleaseMutex") < at(failed, "MessageBox"), "the mutex is held while the message waits");
+  assert.ok(at(failed, "MB_TOPMOST") >= 0);
+  const level = body(helpers, "SkFailureLevel");
+  assert.equal(level[at(level, "${If} $SkOldGone = 1") + 1], "SetErrorLevel 3");
+  // the outer instance: the elevated copy's 3 means nothing to start again
+  const init = body(installer, ".onInit");
+  assert.ok(at(init, "Call SkAfterElevatedFailed") > at(init, "Call SkRunElevated"));
+  assert.equal(at(init, "Call SkRestartPrevious"), -1);
+  const after = body(helpers, "SkAfterElevatedFailed");
+  assert.ok(at(after, "${If} $0 = 3") < at(after, "Call SkRestartPrevious") && at(after, "${Else}") < at(after, "Call SkRestartPrevious"));
+  // silent runs show a banner while WebView2 downloads; EdgeUpdate asks for rights only as an administrator
+  const webview2 = body(installer, "WebView2");
+  const exec = at(webview2, "ExecWait \"$6 ${WEBVIEW2INSTALLERARGS} /install\" $1");
+  assert.equal(webview2[exec - 1], '!insertmacro SK_BANNER_SHOW "$(skBannerWebView2)"');
+  assert.equal(webview2[exec + 1], "!insertmacro SK_BANNER_HIDE");
+  const update = body(helpers, "SkWebView2Update");
+  assert.ok(at(update, "&needsadmin=$2") >= 0 && at(update, "&needsadmin=true") < 0);
+  assert.equal(update[at(update, "${If} $SkIsAdmin = 1") + 1], 'StrCpy $2 "true"');
+});
+
+test("the UAC prompt belongs to a window in front, which goes only once it is answered", () => {
+  const leave = body(installer, "SkPageScopeLeave");
+  assert.equal(at(leave, "HideWindow"), -1, "the wizard hides before the prompt");
+  assert.ok(at(leave, "StrCpy $SkFromWizard 1") < at(leave, "Call SkRunElevated"));
+  const run = body(helpers, "${UN}SkRunElevated");
+  const shell = at(run, "shell32::ShellExecuteExW");
+  assert.ok(at(run, "user32::SetForegroundWindow(p r5)") < shell);
+  assert.ok(at(run, "user32::ShowWindow(p r5, i 0)") > shell);
+  assert.ok(at(run, '*(&l4, i 0x140, p r5, w "runas"') >= 0, "the prompt's owner window");
+  // .onInit has no window of its own yet: a banner
+  const init = body(installer, ".onInit");
+  const elevate = at(init, "Call SkRunElevated");
+  assert.ok(at(init, 'Banner::show "$(skBannerInstalling)"') < elevate && at(init, "Pop $SkOwnerHwnd") < elevate);
+  assert.ok(init.findIndex((l, i) => i > elevate && l === "Banner::destroy") > elevate);
+  // the elevated copy of the wizard skips the pages the outer instance showed
+  const skip = body(installer, "SkSkipIfPassiveOrUpdate");
+  assert.ok(at(skip, "${If} $SkInner = 1") >= 0 && skip[at(skip, "${If} $SkInner = 1") + 1] === "${AndIf} $SkFromWizard = 1");
+});
+
+test("the installer starts in its own folder, shows a wizard started hidden, and logs line by line", () => {
+  const init = body(installer, ".onInit");
+  assert.equal(init[1], "SetOutPath $TEMP", "the folder it was started in is kept by the outer instance");
+  const hidden = at(init, "Call SkShowIfStartedHidden");
+  assert.equal(init[hidden - 1], "${IfNot} ${Silent}");
+  assert.ok(hidden < at(init, "Call SkRunElevated"));
+  const log = body(helpers, "${UN}SkLogLine");
+  assert.ok(at(log, 'FileOpen $R1 "${SK_LOG_FILE}" a') >= 0 && at(log, "FileClose $R1") > at(log, "FileWriteUTF16LE"));
+  assert.doesNotMatch(helpers, /SkLogFile/);
+});
+
+test("a relocated installation's pins point at the new program", () => {
+  const install = body(installer, "Install");
+  const pins = install.map((l, i) => [l, i]).filter(([l]) => l === "Call SkMigratePins").map(([, i]) => i);
+  assert.equal(pins.length, 2);
+  assert.equal(install[pins[0] - 1], "Call SkMigrateShortcut");
+  const migrate = body(helpers, "SkMigratePins");
+  assert.ok(at(migrate, "SetShellVarContext current") < at(migrate, "Call SkMigrateShortcutsIn") && at(migrate, "Call SkRestoreContext") > at(migrate, "Call SkMigrateShortcutsIn"));
+  assert.ok(at(migrate, "User Pinned\\TaskBar") >= 0 && at(migrate, "User Pinned\\StartMenu") >= 0);
+  assert.ok(at(migrate, '${AndIf} $R1 != "$INSTDIR\\${MAINBINARYNAME}.exe"') >= 0, "pins of an update in place are rewritten");
+});
+
+test("0.3.4 without its registry keys is found by its files", () => {
+  const find = body(helpers, "SkFindPrevious");
+  const files = at(find, "Call SkFindByFiles");
+  assert.ok(files > at(find, "${Else}") && at(find, "Call ${SK_DEFAULT_DIR_OF}") === files - 1);
+  const eb = body(helpers, "SkIsEbFolder");
+  assert.ok(at(eb, '${AndIf} ${FileExists} "$R0\\${SK_EB_UNINSTALLER}"') >= 0 && at(eb, '${AndIf} ${FileExists} "$R0\\resources\\app.asar"') >= 0, "both of 0.3.4's files");
+  assert.ok(at(body(helpers, "SkDetectScope"), "Call SkIsEbFolder") >= 0);
 });
 
 test("files-0.3.4.nsh lists 0.3.4's files and every folder they are in, the deepest first", () => {
