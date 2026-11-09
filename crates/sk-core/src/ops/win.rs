@@ -371,15 +371,22 @@ pub fn notify_changed(path: &str, folder: bool) {
 
 /// The current user's recycle-bin folder on the volume mounted at `root`, when this process may
 /// put items into it itself: `$Recycle.Bin` and `$Recycle.Bin\<SID>` both real folders (neither a
-/// reparse point), the latter owned by this user (what the shell made it). None leaves the volume
-/// to the shell: it makes the folder when there is none, and knows what to do with one it did
-/// not make (FAT has no owners at all).
+/// reparse point), the latter owned by this user (what the shell made it), the former by this
+/// user or the system (SYSTEM, Administrators, TrustedInstaller: what Windows and the shell make
+/// it). A `$Recycle.Bin` another user made (on a data volume any user may create folders on)
+/// lets that user swap this user's folder for a link between this check and the renames: such a
+/// volume is left to the shell. None leaves the volume to the shell: it makes the folder when
+/// there is none, and knows what to do with one it did not make (FAT has no owners at all).
 pub fn own_bin(root: &str) -> Option<PathBuf> {
     use std::os::windows::fs::MetadataExt;
-    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
-    use windows_sys::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
     const DIRECTORY: u32 = 0x10;
     const REPARSE_POINT: u32 = 0x400;
+    /// SYSTEM, Administrators, TrustedInstaller
+    const TRUSTED: [&str; 3] = [
+        "S-1-5-18",
+        "S-1-5-32-544",
+        "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+    ];
     let sid = user_sid().ok()?;
     let top = Path::new(root).join("$Recycle.Bin");
     let mine = top.join(&sid);
@@ -390,7 +397,18 @@ pub fn own_bin(root: &str) -> Option<PathBuf> {
             return None;
         }
     }
-    let w = wide_path(&mine);
+    let top_owner = owner_of(&top)?;
+    if !(top_owner.eq_ignore_ascii_case(&sid) || TRUSTED.contains(&top_owner.as_str())) {
+        return None;
+    }
+    owner_of(&mine)?.eq_ignore_ascii_case(&sid).then_some(mine)
+}
+
+/// The string SID of the owner of the file or folder `path`.
+fn owner_of(path: &Path) -> Option<String> {
+    use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
+    let w = wide_path(path);
     let mut owner: PSID = null_mut();
     let mut sd: PSECURITY_DESCRIPTOR = null_mut();
     // SAFETY: a NUL-terminated path, out pointers; the descriptor is freed below, `owner` points
@@ -423,7 +441,7 @@ pub fn own_bin(root: &str) -> Option<PathBuf> {
             LocalFree(text as *mut c_void);
         }
         LocalFree(sd);
-        (named && owner_sid.eq_ignore_ascii_case(&sid)).then_some(mine)
+        named.then_some(owner_sid)
     }
 }
 
@@ -672,23 +690,55 @@ pub fn long_path(path: &str) -> String {
 
 // --------------------------------------------------------------------------- Restart Manager
 
-fn image_name(pid: u32) -> String {
+/// The full Win32 path of the program process `pid` runs, when this process may ask.
+fn image_path(pid: u32) -> Option<String> {
     // SAFETY: plain Win32 calls; the handle is closed.
     unsafe {
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if h.is_null() {
-            return String::new();
+            return None;
         }
-        let mut buf = vec![0u16; 1024];
+        let mut buf = vec![0u16; 4096];
         let mut size = buf.len() as u32;
         let ok = QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut size) != 0;
         CloseHandle(h);
-        if !ok {
-            return String::new();
-        }
-        let full = String::from_utf16_lossy(&buf[..size as usize]);
-        full.rsplit(['\\', '/']).next().unwrap_or("").to_string()
+        ok.then(|| String::from_utf16_lossy(&buf[..size as usize]))
     }
+}
+
+fn image_name(pid: u32) -> String {
+    image_path(pid)
+        .map(|full| full.rsplit(['\\', '/']).next().unwrap_or("").to_string())
+        .unwrap_or_default()
+}
+
+/// The programs running now, by their full paths (every process this one may ask about; no
+/// disk I/O). A folder holding one renames although the program runs from it: its image is
+/// mapped, no handle is open.
+pub fn running_images() -> Vec<String> {
+    use windows_sys::Win32::System::ProcessStatus::EnumProcesses;
+    let mut pids = vec![0u32; 2048];
+    loop {
+        let mut got = 0u32;
+        let bytes = (pids.len() * 4) as u32;
+        // SAFETY: a buffer of `bytes` bytes, an out pointer.
+        if unsafe { EnumProcesses(pids.as_mut_ptr(), bytes, &mut got) } == 0 {
+            return Vec::new();
+        }
+        if got < bytes || pids.len() >= 1 << 20 {
+            pids.truncate(got as usize / 4);
+            break;
+        }
+        pids = vec![0u32; pids.len() * 2];
+    }
+    let mut out: Vec<String> = pids
+        .into_iter()
+        .filter(|&p| p != 0)
+        .filter_map(image_path)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn rm_error(what: &str, err: u32) -> io::Error {

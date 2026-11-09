@@ -552,6 +552,92 @@ mod windows {
         std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
     }
 
+    /// What a rename into the bin would move although something uses it: a file another program
+    /// holds open while sharing its deletion (NTFS renames it), a folder with a running program
+    /// in it (its image is mapped, no handle is open: the folder renames). Both are reported
+    /// held, by the program's name, and stay where they are, as before the bin was written to
+    /// directly (the Restart Manager asked about every item then).
+    #[test]
+    fn items_in_use_that_a_rename_would_move_stay() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("log.txt");
+        std::fs::write(&shared, b"l").unwrap();
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x7) // read, write, delete
+            .open(&shared)
+            .unwrap();
+        let app = dir.path().join("app");
+        std::fs::create_dir(&app).unwrap();
+        let exe = app.join("waiter.exe");
+        let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        std::fs::copy(Path::new(&system).join("System32").join("PING.EXE"), &exe).unwrap();
+        std::fs::write(app.join("readme.txt"), b"r").unwrap();
+        let mut running = std::process::Command::new(&exe)
+            .args(["-n", "60", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let res = trash_all(&[s(&shared), s(&app)]);
+        let trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
+        let _ = running.kill();
+        let _ = running.wait();
+        drop(handle);
+        drop(trashed);
+        assert_eq!(codes(&res), [OpCode::Locked, OpCode::Locked], "{res:?}");
+        assert!(res.iter().all(|r| r.message.contains("使用")), "{res:?}");
+        assert!(shared.exists() && exe.exists() && app.join("readme.txt").exists());
+    }
+
+    /// A link goes into the bin of the volume it is on, whatever it points to, and never makes its
+    /// folder's other items look as if they were on its target's volume: a junction to another
+    /// volume (dangling here: nothing there is touched) first, then a file beside it, both go
+    /// into this volume's bin and come back.
+    #[test]
+    fn a_link_to_another_volume_does_not_move_its_neighbours_there() {
+        use sk_core::ops::win;
+        let (_, _g) = setup();
+        let _one = Threads::set(1); // the link is checked first
+        let dir = tempfile::tempdir().unwrap();
+        let here = win::volume_root(&s(dir.path())).unwrap();
+        let Some(other) = ('C'..='Z')
+            .map(|c| format!("{c}:\\"))
+            .find(|r| !r.eq_ignore_ascii_case(&here) && win::drive_type(r) == win::DRIVE_FIXED)
+        else {
+            eprintln!("skipped: no other fixed volume");
+            return;
+        };
+        let link = dir.path().join("elsewhere");
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(format!("{other}sk-no-such-folder-{}", std::process::id()))
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "mklink /J");
+        let file = dir.path().join("beside.txt");
+        std::fs::write(&file, b"b").unwrap();
+        let res = trash_all(&[s(&link), s(&file)]);
+        let mut trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
+        assert_eq!(codes(&res), [OpCode::Ok, OpCode::Ok], "{res:?}");
+        for r in &res {
+            assert!(
+                r.trash_ref.to_lowercase().starts_with(&here.to_lowercase()),
+                "{r:?}"
+            );
+        }
+        assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok, OpCode::Ok]);
+        trashed.0.clear();
+        assert!(std::fs::symlink_metadata(&link).is_ok() && file.exists());
+        let _ = std::fs::remove_dir(&link); // the junction only
+    }
+
     /// Moved into the bin by a rename of its own (the user's own bin folder, room in it): the
     /// `$I` record is what Windows 10 writes — version 2, the size the scan gave, the original
     /// path — beside its `$R`, and a restore puts it back.

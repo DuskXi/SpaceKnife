@@ -600,9 +600,10 @@ pub fn move_to_trash<P: AsRef<Path>>(paths: &[P], opts: OpOptions<'_>) -> Vec<Op
     let cancel = opts.cancel;
     let mut run = Run::new(paths, opts.progress);
     let workers = super::par::workers_for_all(&run.os);
-    // Windows: no lock check up front. A move into the bin is one rename, which fails as a whole
-    // while anything inside is open (and then asks who holds it); what goes to the shell is
-    // checked before it does (win_trash)
+    // Windows: no lock check up front. A folder's move into the bin is one rename, which fails
+    // as a whole while a handle is open anywhere inside (and then asks who holds it); files and
+    // running programs a rename would move anyway, and what goes to the shell, are checked in
+    // win_trash
     let check_locks = opts.check_locks && !cfg!(windows);
     for (i, r) in precheck(&run.paths, &run.os, check_locks, roots, workers) {
         run.set(i, r);
@@ -968,8 +969,13 @@ struct Bin {
 /// The recycle bin for `path`, or why there is none.
 #[cfg(windows)]
 fn win_bin(path: &str) -> io::Result<Result<Bin, &'static str>> {
+    win_bin_at(super::win::volume_root(path)?)
+}
+
+/// The recycle bin of the volume mounted at `root`, or why there is none.
+#[cfg(windows)]
+fn win_bin_at(root: String) -> io::Result<Result<Bin, &'static str>> {
     use super::win;
-    let root = win::volume_root(path)?;
     let kind = win::drive_type(&root);
     if kind == win::DRIVE_REMOTE {
         return Ok(Err(text("no_bin_remote")));
@@ -1143,6 +1149,12 @@ struct Fits {
     bin: std::sync::Arc<Bin>,
     size: u64,
     bytes: u64,
+    /// a folder (not a link): a handle open anywhere inside fails its rename whole
+    folder: bool,
+    /// only the shell moves it: a reparse point that is not a link (a cloud file's placeholder:
+    /// its filter decides what leaving its sync root means, it may download it first) or an
+    /// item whose data is elsewhere (offline, recalled on access), as before 0.3.5
+    shell_only: bool,
 }
 
 /// One item's way into the bin, checked: the bin of its volume, its size against the bin's
@@ -1157,14 +1169,31 @@ fn fits_bin(
 ) -> Result<Fits, OpResult> {
     use super::fmt_size;
     use super::win;
+    use std::os::windows::fs::MetadataExt;
+    const REPARSE_POINT: u32 = 0x400;
+    const OFFLINE: u32 = 0x1000;
+    const RECALL_ON_OPEN: u32 = 0x4_0000;
+    const RECALL_ON_DATA_ACCESS: u32 = 0x40_0000;
     let max = seams::max_path();
-    // the volume of an item's folder is the item's (a mount point itself is protected)
-    let folder = os.parent().map(Path::to_path_buf).unwrap_or_default();
+    probe::call(Call::Stat);
+    let meta = std::fs::symlink_metadata(os).map_err(|e| os_error(path, &e))?;
+    let link = is_link_like(&meta);
+    let attrs = meta.file_attributes();
+    let shell_only = attrs & (OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS) != 0
+        || (attrs & REPARSE_POINT != 0 && !link);
+    // the item's volume is its folder's: where its entry is, what a rename moves (a mount point
+    // itself is protected). Asked about the item's own path, a link (junction, symlink) would
+    // answer for its target's volume, and stand for its whole folder in this cache
+    let folder = os
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(os)
+        .to_path_buf();
     let cached = roots.lock().get(&folder).cloned();
     let root = match cached {
         Some(r) => r,
         None => {
-            let r = win::volume_root(path).map_err(|e| os_error(path, &e))?;
+            let r = win::volume_root(&folder.to_string_lossy()).map_err(|e| os_error(path, &e))?;
             roots.lock().insert(folder, r.clone());
             r
         }
@@ -1173,7 +1202,7 @@ fn fits_bin(
     let bin = match known {
         Some(b) => b,
         None => {
-            let b = win_bin(path)
+            let b = win_bin_at(root.clone())
                 .map_err(|e| os_error(path, &e))?
                 .map(std::sync::Arc::new);
             bins.lock().insert(root, b.clone());
@@ -1187,26 +1216,20 @@ fn fits_bin(
     }
     let hint = hints.sizes.get(path).copied();
     let below = hints.longest.get(path).copied();
-    // (bytes, walked: what a walk counted, too long, a folder)
-    let measured = (|| -> io::Result<(u64, Option<u64>, bool, bool)> {
-        probe::call(Call::Stat);
-        let meta = std::fs::symlink_metadata(os)?;
-        let is_dir = meta.is_dir() && !is_link_like(&meta);
-        match (hint, below) {
-            // far from the limit, and its paths fit as scanned: not walked again (a rename
-            // moves it whole; the engine guard covers what the shell takes)
-            (Some(h), Some(below)) if is_dir && (h as f64) <= bin.capacity as f64 * TRUST_SHARE => {
-                let long = too_long_inside(os, below, &bin.folder);
-                Ok((h.max(0) as u64, None, long, true))
-            }
-            _ => {
-                let (total, long) = measure(os, limit, &bin.folder)?;
-                Ok((total, Some(total), long, is_dir))
-            }
+    let is_dir = meta.is_dir() && !link;
+    // (bytes, walked: what a walk counted, too long)
+    let (size, walked, long) = match (hint, below) {
+        // far from the limit, and its paths fit as scanned: not walked again (a rename moves it
+        // whole; the engine guard covers what the shell takes)
+        (Some(h), Some(below)) if is_dir && (h as f64) <= bin.capacity as f64 * TRUST_SHARE => {
+            let long = too_long_inside(os, below, &bin.folder);
+            (h.max(0) as u64, None, long)
         }
-    })()
-    .map_err(|e| os_error(path, &e))?;
-    let (size, walked, long, _) = measured;
+        _ => {
+            let (total, long) = measure(os, limit, &bin.folder).map_err(|e| os_error(path, &e))?;
+            (total, Some(total), long)
+        }
+    };
     if long {
         return Err(result_msg(path, OpCode::NoTrash, text("too_long")));
     }
@@ -1227,7 +1250,97 @@ fn fits_bin(
         .map(|&b| b as u64)
         .or(walked)
         .unwrap_or(size);
-    Ok(Fits { bin, size, bytes })
+    Ok(Fits {
+        bin,
+        size,
+        bytes,
+        folder: is_dir,
+        shell_only,
+    })
+}
+
+/// An item going into its bin by a rename of this process.
+#[cfg(windows)]
+struct Direct {
+    i: usize,
+    /// the bin's folder (`$Recycle.Bin\<SID>`)
+    folder: PathBuf,
+    /// what its `$I` records
+    bytes: u64,
+    /// against the capacity (the shell's batches, if it ends up there)
+    size: u64,
+    is_dir: bool,
+    bin: std::sync::Arc<Bin>,
+}
+
+/// The items about to go into the bin by a rename that something uses although the rename would
+/// go through: a file another program holds open sharing its deletion, a running program's
+/// image (mapped, no handle open), the file itself or inside a folder. A handle open anywhere
+/// inside a folder fails its rename whole, so folders are not walked: their paths are compared
+/// with the running programs' images only (no disk I/O; a library another program loaded from
+/// inside one is not seen). Files are asked about as before 0.3.5 (the Restart Manager).
+#[cfg(windows)]
+fn in_use_anyway(paths: &[String], os: &[PathBuf], direct: &[Direct]) -> Vec<(usize, OpResult)> {
+    use super::basket::path_key;
+    use super::win;
+    let mut out = Vec::new();
+    let files: Vec<usize> = direct.iter().filter(|d| !d.is_dir).map(|d| d.i).collect();
+    if !files.is_empty() {
+        let asked: Vec<String> = files.iter().map(|&i| paths[i].clone()).collect();
+        let held = find_lockers(&asked);
+        out.extend(locked_results(paths, files.iter().copied(), &held));
+    }
+    let folders: Vec<usize> = direct.iter().filter(|d| d.is_dir).map(|d| d.i).collect();
+    if folders.is_empty() {
+        return out;
+    }
+    let images: Vec<(String, String)> = win::running_images()
+        .into_iter()
+        .map(|p| (path_key(&p), p))
+        .collect();
+    let mut hits: Vec<(usize, Vec<String>)> = Vec::new();
+    for &i in &folders {
+        // (an 8.3 name in the item's path, `RUNNER~1`, as the long one the image path has)
+        let long = win::long_names_of(&os[i]).unwrap_or_else(|| paths[i].clone());
+        let below = format!("{}\\", path_key(&long).trim_end_matches('\\'));
+        let mine: Vec<String> = images
+            .iter()
+            .filter(|(k, _)| k.starts_with(&below))
+            .map(|(_, p)| p.clone())
+            .collect();
+        if !mine.is_empty() {
+            hits.push((i, mine));
+        }
+    }
+    if hits.is_empty() {
+        return out;
+    }
+    // the programs' names as the Restart Manager gives them (its own program name otherwise)
+    let mut exes: Vec<String> = hits.iter().flat_map(|h| h.1.iter().cloned()).collect();
+    exes.sort();
+    exes.dedup();
+    let named = find_lockers(&exes);
+    for (i, mine) in hits {
+        let mut names: Vec<String> = Vec::new();
+        for exe in &mine {
+            let found = named
+                .get(exe)
+                .filter(|n| !n.is_empty())
+                .cloned()
+                .unwrap_or_else(|| vec![exe.rsplit(['\\', '/']).next().unwrap_or(exe).to_string()]);
+            for n in found {
+                if !names.contains(&n) {
+                    names.push(n);
+                }
+            }
+        }
+        let msg = fill(
+            text("locked"),
+            &[("names", names.join(text("list_sep")).into())],
+        );
+        out.push((i, result_msg(&paths[i], OpCode::Locked, &msg)));
+    }
+    out
 }
 
 /// The items that fit go into their volume's bin: by this process itself, a rename each
@@ -1237,8 +1350,9 @@ fn fits_bin(
 ///
 /// The shell's engine took 7–14 ms per item and about 1 ms per file inside a folder: it walks
 /// every folder it is given and the bin it moves into, reading all of it, where a rename touches
-/// two entries. `check_locks`: the items given to the shell are checked for holders first (a
-/// rename needs no check: it fails whole while anything inside is open).
+/// two entries. `check_locks`: the items given to the shell are checked for holders first; of
+/// those renamed, what a rename would move although it is in use ([`in_use_anyway`]: a folder
+/// with a handle open inside fails its rename whole, and is asked about then).
 #[cfg(windows)]
 fn win_trash(
     run: &mut Run<'_>,
@@ -1269,10 +1383,14 @@ fn win_trash(
         }
     }
     // per bin: ours to write to, and what it holds now (what the shell would compare)
-    let mut direct: Vec<(usize, PathBuf, u64)> = Vec::new();
+    let mut direct: Vec<Direct> = Vec::new();
     let mut shell: Vec<(usize, std::sync::Arc<Bin>, u64)> = Vec::new();
     let mut own: HashMap<String, Option<(PathBuf, i64)>> = HashMap::new();
     for (i, f) in ready {
+        if f.shell_only {
+            shell.push((i, f.bin, f.size));
+            continue;
+        }
         let slot = own.entry(f.bin.root.clone()).or_insert_with(|| {
             let folder = win::own_bin(&f.bin.root)?;
             let (used, _) = win::bin_usage(&f.bin.root);
@@ -1281,25 +1399,39 @@ fn win_trash(
         match slot {
             Some((folder, used)) if (*used as u64).saturating_add(f.size) <= f.bin.capacity => {
                 *used += f.size as i64;
-                direct.push((i, folder.clone(), f.bytes));
+                direct.push(Direct {
+                    i,
+                    folder: folder.clone(),
+                    bytes: f.bytes,
+                    size: f.size,
+                    is_dir: f.folder,
+                    bin: f.bin,
+                });
             }
             _ => shell.push((i, f.bin, f.size)),
         }
     }
     drop(checks);
+    if check_locks && !direct.is_empty() {
+        let _phase = probe::phase("trash.locks");
+        for (i, r) in in_use_anyway(&run.paths, &run.os, &direct) {
+            run.set(i, r);
+        }
+        direct.retain(|d| run.results[d.i].is_none());
+    }
 
     // ours: a rename each, one after the other. Renames into one folder (the bin) at once wait
     // for each other: here 0.12 ms each one by one, 6.3 ms each with eight threads
-    let mut back: Vec<usize> = Vec::new();
+    let mut back: Vec<&Direct> = Vec::new();
     let mut moved: Vec<String> = Vec::new();
     {
         let _phase = probe::phase("trash.direct");
-        for (i, folder, bytes) in &direct {
+        for d in &direct {
             if cancelled(cancel) {
                 break;
             }
-            let path = run.paths[*i].clone();
-            match win::recycle_into(&run.os[*i], folder, *bytes) {
+            let path = run.paths[d.i].clone();
+            match win::recycle_into(&run.os[d.i], &d.folder, d.bytes) {
                 Ok(payload) => {
                     moved.push(path.clone());
                     let r = OpResult::new(
@@ -1308,38 +1440,28 @@ fn win_trash(
                         text("trashed"),
                         &info_of(&ref_of(&payload)),
                     );
-                    run.set(*i, r);
+                    run.set(d.i, r);
                 }
-                Err(e) => match rename_failed(&path, &e) {
-                    Some(r) => run.set(*i, r),
-                    None => back.push(*i),
+                Err(e) => match rename_failed(&path, &run.os[d.i], &e) {
+                    Some(r) => run.set(d.i, r),
+                    None => back.push(d),
                 },
             }
         }
     }
     if !moved.is_empty() {
         let _phase = probe::phase("trash.notify");
-        let mut folders: Vec<PathBuf> = direct.iter().map(|d| d.1.clone()).collect();
+        let mut folders: Vec<PathBuf> = direct.iter().map(|d| d.folder.clone()).collect();
         folders.dedup();
         win::notify_recycled(&moved, &folders);
     }
     if cancelled(cancel) {
         return;
     }
-    // what a rename could not tell about goes to the shell after all
-    if !back.is_empty() {
-        let bins = bins.into_inner();
-        for i in back {
-            let path = run.paths[i].clone();
-            let bin = win::volume_root(&path)
-                .ok()
-                .and_then(|r| bins.get(&r).cloned())
-                .and_then(Result::ok);
-            match bin {
-                Some(b) => shell.push((i, b, 0)),
-                None => run.set(i, result_msg(&path, OpCode::Error, text("not_moved"))),
-            }
-        }
+    // what a rename could not tell about goes to the shell after all, with the bin it was
+    // checked against
+    for d in back {
+        shell.push((d.i, d.bin.clone(), d.size));
     }
     if shell.is_empty() {
         return;
@@ -1358,9 +1480,11 @@ fn win_trash(
 
 /// What a failed rename into the bin tells; None: the shell is to try (it may know a way).
 #[cfg(windows)]
-fn rename_failed(path: &str, e: &io::Error) -> Option<OpResult> {
+fn rename_failed(path: &str, os: &Path, e: &io::Error) -> Option<OpResult> {
     match e.raw_os_error() {
-        Some(2) | Some(3) => Some(result(path, OpCode::Missing)),
+        // not found: the item, or the bin's folder gone meanwhile (the shell makes it again)
+        Some(2) | Some(3) if !lexists(os) => Some(result(path, OpCode::Missing)),
+        Some(2) | Some(3) => None,
         // held open (a folder: something inside it, whatever its sharing)
         Some(5) | Some(32) | Some(33) => {
             let held = super::locks::find_lockers(&[path.to_string()]);
