@@ -130,7 +130,7 @@ Linux（WSL 2 的 ext4，热缓存，同样交替 3 次）：永久删除 2 万�
 | Btrfs（WinBtrfs） | 同 NTFS（属主同 ReFS 的情况） | POSIX 语义；名字不是合法 Unicode 的项建不出来 | 本机 H: |
 | 网络位置（SMB） | 没有回收站：逐项 `no_trash`「网络位置没有回收站，只能永久删除」，原样不动 | 经典语义（同 FAT）；名字只差大小写时按文件 ID 核对（2.3） | 本机 `\\localhost\C$`；CI 同样（`RUNNER_TEMP` 所在盘的管理共享） |
 | 可移动磁盘（U 盘、SD 卡） | 「可移动磁盘没有回收站，只能永久删除」 | 同它的文件系统 | 没有实测（USB SSD、USB 机械盘是固定磁盘，有回收站） |
-| ext4、XFS（Linux） | freedesktop：家目录所在文件系统用 `$XDG_DATA_HOME/Trash`，别的卷在卷顶建 `$topdir/.Trash-$uid` | `unlinkat` | CI loop 镜像；本机 WSL 2 的 ext4 |
+| ext4、XFS（Linux） | freedesktop：家目录所在文件系统用 `$XDG_DATA_HOME/Trash`，别的卷在卷顶建 `$topdir/.Trash-$uid`；卷顶有管理员建的、带粘滞位的 `.Trash` 时用其中的 `.Trash/$uid`（CI 的 xfs 卷这样建，本机 WSL 2 的 tmpfs 上也试过） | `unlinkat` | CI loop 镜像；本机 WSL 2 的 ext4 |
 | Btrfs（Linux） | 同上（子卷里的项：卷顶找到子卷根为止，改名不跨子卷） | 里面的子卷（快照常是）设备号不同、却在同一个挂载上：不进入，说「其中有一个 Btrfs 子卷（例如快照），未进入；它要用 btrfs subvolume delete 删除」，以前说成「另一个卷的挂载点」 | CI loop 镜像 |
 | vfat、exfat、ntfs3（Linux） | `$topdir/.Trash-$uid`（以 `uid=`/`gid=` 挂载，这个目录才属于用户） | `unlinkat`；没有权限位、链接（vfat、exfat），名字里不能有 `\` | CI loop 镜像 |
 | tmpfs（Linux，内存里的 `/tmp`：Fedora、Arch 等） | 同 ext4（不是家目录所在的文件系统时在卷顶建 `$topdir/.Trash-$uid`） | `unlinkat` | CI（以 `uid=`/`gid=` 挂载）；本机 WSL 2 的 tmpfs |

@@ -5,7 +5,8 @@
 # and tmpfs (a /tmp in memory: Fedora, Arch …); macOS: APFS, HFS+ (journaled), FAT32, ExFAT
 # (hdiutil images) — mounted so that this user can
 # write everywhere on it. Moving to the trash uses the real trash of that volume
-# (SPACEKNIFE_FS_MATRIX=1): freedesktop's `$topdir/.Trash-$uid`, macOS's `.Trashes/$uid`.
+# (SPACEKNIFE_FS_MATRIX=1): freedesktop's `$topdir/.Trash-$uid` (on xfs `$topdir/.Trash/$uid`, in
+# an administrator's sticky `.Trash`), macOS's `.Trashes/$uid`.
 #
 # A test that needs what a file system lacks says `skipped: …` and why; those lines and the
 # results go into the job summary. Every file system runs even when one fails; the script fails
@@ -91,6 +92,9 @@ if [ "$(uname)" = Linux ]; then
     esac || { echo "::error::$fs: could not mount"; failed+=("$fs"); continue; }
     findmnt -no FSTYPE,OPTIONS "$mnt"
     mkdir -p "$mnt/tmp"
+    # xfs: the trash's other place on a volume, an administrator's sticky `.Trash` holding each
+    # user's `.Trash/$uid` (the others get `.Trash-$uid`)
+    if [ "$fs" = xfs ]; then mkdir -m 1777 "$mnt/.Trash"; fi
     run_on "$mnt/tmp" "$fs"
     sudo umount "$mnt" || sudo umount -l "$mnt"
     rm -f "$img"
