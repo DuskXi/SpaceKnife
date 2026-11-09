@@ -18,11 +18,13 @@
 //! Nothing here tells anyone anything about the user: one GET of the public release list with a
 //! `SpaceKnife/<version>` User-Agent and no token, and the file the user asked for. HTTPS goes
 //! through rustls with the operating system's certificate store; proxies come from the
-//! environment (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`).
+//! environment (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`), else from the system's settings
+//! ([`proxy`]: Windows' Internet settings with WPAD and PAC, macOS's network proxies).
 //!
 //! [`swap`] is the portable copy's `--apply-update` mode; [`rollback`] the note it leaves when it
 //! kept the old version.
 
+pub mod proxy;
 pub mod rollback;
 pub mod swap;
 
@@ -1290,6 +1292,19 @@ fn agent(url: &str, timeout: Duration, body: Option<Duration>) -> ureq::Agent {
         );
     if loopback {
         cfg = cfg.proxy(None);
+    } else {
+        match proxy::route(url) {
+            // ureq's default: the environment's proxy, with NO_PROXY
+            proxy::Route::Env => {}
+            proxy::Route::Direct => cfg = cfg.proxy(None),
+            proxy::Route::Via(p) => match ureq::Proxy::new(&p) {
+                Ok(p) => cfg = cfg.proxy(Some(p)),
+                Err(e) => {
+                    tracing::warn!("the system's proxy {p} can't be used: {e}");
+                    cfg = cfg.proxy(None);
+                }
+            },
+        }
     }
     cfg.build().into()
 }
