@@ -1,8 +1,8 @@
-# The file-system matrix (ci.yml, job fs-matrix; docs/manage.md §2.5 「各文件系统」) on Windows:
+# The file-system matrix (ci.yml, job fs-matrix; docs/manage.md §2.3.2 「各文件系统」) on Windows:
 # sk-core's ops tests and the ops_bench example run with the temporary folder on a small virtual
 # disk of each file system — NTFS, ReFS (formatting it needs a Server edition: the runner's),
-# exFAT, FAT32 — made with diskpart and given a drive letter, and on the runner's own C: drive
-# reached over SMB (\\localhost\C$: a network location, which has no recycle bin). Moving to the
+# exFAT, FAT32 — made with diskpart and given a drive letter, and on the runner's own disk
+# reached over SMB (\\localhost\D$…: a network location, which has no recycle bin). Moving to the
 # trash uses the recycle bin of that volume; the tests and ops_bench take back what they put there.
 #
 # A test that needs what a file system lacks says `skipped: …` and why; those lines and the
@@ -23,7 +23,7 @@ function Run-On([string]$Tmp, [string]$Fs, [string]$Trash) {
   $ok = $true
   Write-Host "::group::$Fs ($Tmp)"
   $env:TMP = $Tmp; $env:TEMP = $Tmp
-  cargo test -p sk-core --locked @tests -- --test-threads=4 --show-output 2>&1 | Tee-Object -FilePath $log
+  cargo test -p sk-core --locked --no-fail-fast @tests -- --test-threads=4 --show-output 2>&1 | Tee-Object -FilePath $log
   if ($LASTEXITCODE -ne 0) { $ok = $false }
   foreach ($mode in 'delete', 'trash') {
     $env:OPS_BENCH_EXPECT = if ($mode -eq 'trash') { $Trash } else { 'ok' }
@@ -78,9 +78,12 @@ foreach ($v in $volumes) {
   Run-On $tmp $v.Fs 'ok'
 }
 
-# a network location: the runner's own C: over SMB
-$share = '\\localhost\C$' + (Join-Path $env:RUNNER_TEMP 'fs-smb').Substring(2)
-New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'fs-smb') | Out-Null
+# a network location: the runner's own disk over SMB, through the administrative share of the
+# drive the folder is on (RUNNER_TEMP is on D: on most hosted runners, not C:)
+$local = Join-Path $env:RUNNER_TEMP 'fs-smb'
+New-Item -ItemType Directory -Force $local | Out-Null
+$share = '\\localhost\' + $local.Substring(0, 1) + '$' + $local.Substring(2)
+Write-Host "SMB: $local as $share"
 if (Test-Path $share) {
   Run-On $share 'SMB' 'no_trash'
 } else {

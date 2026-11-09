@@ -1,6 +1,6 @@
 //! What the file system holding a test's temporary folder can do, found out at run time.
 //!
-//! CI's file-system matrix (`.github/workflows/ci.yml`, job `fs-matrix`; docs/manage.md §2.5)
+//! CI's file-system matrix (`.github/workflows/ci.yml`, job `fs-matrix`; docs/manage.md §2.3.2)
 //! runs the ops tests with the temporary folder on FAT32, exFAT, NTFS, ReFS, ext4, XFS, Btrfs,
 //! NTFS (ntfs3), APFS, HFS+ … A test that needs what the file system there lacks (links,
 //! case-sensitive names, names that are not Unicode, folder permissions, a trash …) skips that

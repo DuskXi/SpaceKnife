@@ -172,10 +172,10 @@ jobs:
           node tools/i18n_check.mjs --area core
 
   # Moving to the trash and deleting permanently on every file system people keep files on
-  # (docs/manage.md §2.5 「各文件系统」): sk-core's ops tests (ops_trash, ops_basket, ops_case_twins,
-  # ops_paths, ops_locks, ops_fs) and two ops_bench runs per mode with the temporary folder on a
+  # (docs/manage.md §2.3.2 「各文件系统」): sk-core's ops tests (ops_trash, ops_basket, ops_case_twins,
+  # ops_paths, ops_locks, ops_fs) and ops_bench (delete, then trash) with the temporary folder on a
   # small volume of each, made for the job — Windows: NTFS, ReFS, exFAT, FAT32 (virtual disks) and
-  # an SMB share; Linux: ext4, xfs, btrfs, vfat, exfat, ntfs3 (loop images); macOS: APFS, HFS+,
+  # an SMB share; Linux: ext4, xfs, btrfs, vfat, exfat, ntfs3 (loop images), tmpfs; macOS: APFS, HFS+,
   # FAT32, ExFAT (disk images). The real trash of each volume is used and emptied of what the run
   # put there. What a file system cannot do (links, case-sensitive names, …) a test detects and
   # skips, saying why: those notes are in the job summary. The scripts: .github/scripts/fs-matrix.*

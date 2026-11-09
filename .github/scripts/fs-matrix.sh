@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# The file-system matrix (ci.yml, job fs-matrix; docs/manage.md §2.5 「各文件系统」) on Linux and
+# The file-system matrix (ci.yml, job fs-matrix; docs/manage.md §2.3.2 「各文件系统」) on Linux and
 # macOS: sk-core's ops tests and the ops_bench example run with the temporary folder on a small
-# volume of each file system — Linux: ext4, xfs, btrfs, vfat, exfat, ntfs3 (loop images, sudo);
-# macOS: APFS, HFS+ (journaled), FAT32, ExFAT (hdiutil images) — mounted so that this user can
+# volume of each file system — Linux: ext4, xfs, btrfs, vfat, exfat, ntfs3 (loop images, sudo)
+# and tmpfs (a /tmp in memory: Fedora, Arch …); macOS: APFS, HFS+ (journaled), FAT32, ExFAT
+# (hdiutil images) — mounted so that this user can
 # write everywhere on it. Moving to the trash uses the real trash of that volume
 # (SPACEKNIFE_FS_MATRIX=1): freedesktop's `$topdir/.Trash-$uid`, macOS's `.Trashes/$uid`.
 #
@@ -17,12 +18,12 @@ mkdir -p "$work"
 failed=()
 tests=(--test ops_trash --test ops_basket --test ops_case_twins --test ops_paths --test ops_locks --test ops_fs)
 
-# The ops tests and two ops_bench runs per mode with TMPDIR in `$1` (a folder on the volume);
+# The ops tests and ops_bench (delete, then trash) with TMPDIR in `$1` (a folder on the volume);
 # `$2` names the file system.
 run_on() {
   local tmp=$1 fs=$2 log="$work/$2.log" ok=1
   echo "::group::$fs ($tmp)"
-  if ! TMPDIR=$tmp SPACEKNIFE_FS_MATRIX=1 cargo test -p sk-core --locked "${tests[@]}" -- --test-threads=4 --show-output 2>&1 | tee "$log"; then
+  if ! TMPDIR=$tmp SPACEKNIFE_FS_MATRIX=1 cargo test -p sk-core --locked --no-fail-fast "${tests[@]}" -- --test-threads=4 --show-output 2>&1 | tee "$log"; then
     ok=0
   fi
   for mode in delete trash; do
@@ -61,7 +62,7 @@ if [ "$(uname)" = Linux ]; then
     fi
     sudo modprobe "$1" 2> /dev/null
   }
-  for fs in ext4 xfs btrfs vfat exfat ntfs3; do
+  for fs in ext4 xfs btrfs vfat exfat ntfs3 tmpfs; do
     img="$work/$fs.img"
     mnt="/mnt/sk-$fs"
     if ! module "$fs"; then
@@ -69,7 +70,7 @@ if [ "$(uname)" = Linux ]; then
       printf '### %s\n\nnot tested: the kernel cannot mount it\n\n' "$fs" >> "$summary"
       continue
     fi
-    truncate -s 512M "$img"
+    [ "$fs" = tmpfs ] || truncate -s 512M "$img"
     case $fs in
       ext4) mkfs.ext4 -q -F "$img" ;;
       xfs) mkfs.xfs -q -f "$img" ;;
@@ -86,6 +87,7 @@ if [ "$(uname)" = Linux ]; then
       vfat) sudo mount -t vfat -o "loop,uid=$uid,gid=$gid,utf8" "$img" "$mnt" ;;
       exfat) sudo mount -t exfat -o "loop,uid=$uid,gid=$gid,iocharset=utf8" "$img" "$mnt" ;;
       ntfs3) sudo mount -t ntfs3 -o "loop,uid=$uid,gid=$gid,iocharset=utf8" "$img" "$mnt" ;;
+      tmpfs) sudo mount -t tmpfs -o "size=512m,mode=0755,uid=$uid,gid=$gid" tmpfs "$mnt" ;;
     esac || { echo "::error::$fs: could not mount"; failed+=("$fs"); continue; }
     findmnt -no FSTYPE,OPTIONS "$mnt"
     mkdir -p "$mnt/tmp"

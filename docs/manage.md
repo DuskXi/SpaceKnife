@@ -128,11 +128,12 @@ Linux（WSL 2 的 ext4，热缓存，同样交替 3 次）：永久删除 2 万�
 | ReFS | 同 NTFS。`<SID>` 的属主常是 Administrators（提升权限的程序先删过东西时 shell 建的），以前因此交给 shell：19 个小文件夹 23.6 s，现在 0.03 s（调试版 ops_bench） | POSIX 语义（本机 ReFS 支持） | 本机 W:；CI windows-2025 虚拟盘 |
 | exFAT、FAT32（Windows，固定磁盘） | 卷上只有一个所有用户共用的 `$Recycle.Bin`，没有 `<SID>` 文件夹（这两种文件系统没有属主和权限，shell 就这样放）。以前：还原（撤销）报「不是可还原的回收站条目」，回收站占用算成 0，每项交给 shell 要 1.3 s（它把整个回收站走一遍）。现在还原认这个位置，占用按它算，放进去也由后端自己做（没有属主也没有链接，没人能在检查之后把它换掉）：19 项 24.4 s → 0.27 s（调试版 ops_bench） | 没有 POSIX 语义：子项的句柄先关、文件夹最后删。别的程序（杀毒、预览、同步）开着、允许删除的文件要等它关掉名字才消失：文件夹先再问约 1 s（10–500 ms 递增），关了就删掉；还开着就说明（见下），不是「目录不是空的」 | 本机 L:（exFAT USB SSD）；CI 虚拟盘（FAT32 有 8.3 短名，exFAT 没有） |
 | Btrfs（WinBtrfs） | 同 NTFS（属主同 ReFS 的情况） | POSIX 语义；名字不是合法 Unicode 的项建不出来 | 本机 H: |
-| 网络位置（SMB） | 没有回收站：逐项 `no_trash`「网络位置没有回收站，只能永久删除」，原样不动 | 经典语义（同 FAT）；名字只差大小写时按文件 ID 核对（2.3） | 本机 `\\localhost\C$`；CI 同样 |
+| 网络位置（SMB） | 没有回收站：逐项 `no_trash`「网络位置没有回收站，只能永久删除」，原样不动 | 经典语义（同 FAT）；名字只差大小写时按文件 ID 核对（2.3） | 本机 `\\localhost\C$`；CI 同样（`RUNNER_TEMP` 所在盘的管理共享） |
 | 可移动磁盘（U 盘、SD 卡） | 「可移动磁盘没有回收站，只能永久删除」 | 同它的文件系统 | 没有实测（USB SSD、USB 机械盘是固定磁盘，有回收站） |
-| ext4、XFS（Linux） | freedesktop：家目录所在文件系统用 `$XDG_DATA_HOME/Trash`，别的卷在卷顶建 `$topdir/.Trash-$uid` | `unlinkat` | CI loop 镜像 |
+| ext4、XFS（Linux） | freedesktop：家目录所在文件系统用 `$XDG_DATA_HOME/Trash`，别的卷在卷顶建 `$topdir/.Trash-$uid` | `unlinkat` | CI loop 镜像；本机 WSL 2 的 ext4 |
 | Btrfs（Linux） | 同上（子卷里的项：卷顶找到子卷根为止，改名不跨子卷） | 里面的子卷（快照常是）设备号不同、却在同一个挂载上：不进入，说「其中有一个 Btrfs 子卷（例如快照），未进入；它要用 btrfs subvolume delete 删除」，以前说成「另一个卷的挂载点」 | CI loop 镜像 |
 | vfat、exfat、ntfs3（Linux） | `$topdir/.Trash-$uid`（以 `uid=`/`gid=` 挂载，这个目录才属于用户） | `unlinkat`；没有权限位、链接（vfat、exfat），名字里不能有 `\` | CI loop 镜像 |
+| tmpfs（Linux，内存里的 `/tmp`：Fedora、Arch 等） | 同 ext4（不是家目录所在的文件系统时在卷顶建 `$topdir/.Trash-$uid`） | `unlinkat` | CI（以 `uid=`/`gid=` 挂载）；本机 WSL 2 的 tmpfs |
 | APFS、HFS+（macOS） | `NSFileManager trashItemAtURL`：家目录所在卷进 `~/.Trash`，别的卷进它自己的 `.Trashes/<uid>`（`trash_status` 的 `location` 以前总说 `~/.Trash`） | `unlinkat` | CI hdiutil 镜像 |
 | FAT32、ExFAT（macOS） | 同上；系统说这个卷不支持废纸篓时（`NSFeatureUnsupportedError`）是 `no_trash`「这个卷不支持废纸篓，只能永久删除」，以前是「操作失败：…」 | 同上 | CI hdiutil 镜像 |
 
@@ -140,9 +141,9 @@ Linux（WSL 2 的 ext4，热缓存，同样交替 3 次）：永久删除 2 万�
 
 **引擎**：一个文件夹里有删不掉、不进入的项时，它和它上面的文件夹不再去删（只会失败，Windows 上还要白等删除待定）。删除线程里出了错（panic，测试里接缝做的事出错也算）不再让别的线程永远等它的任务（以前整个操作卡住、界面一直「进行中」：SMB 上测试建联接点失败时就是这样）：那一项报「内部错误：…」，别的项照常。
 
-**测试矩阵**（CI 的 `fs-matrix` 任务，`.github/scripts/fs-matrix.sh` / `.ps1`）：`sk-core` 的 ops_trash、ops_basket、ops_case_twins、ops_paths、ops_locks、ops_fs 和 ops_bench（19 个文件夹项，两种操作，`OPS_BENCH_EXPECT` 核对每项都成功、没剩下、放进回收站的都拿出来了；SMB 上核对每项都是 `no_trash`、都还在）在每种文件系统的小卷上跑，TMP / TMPDIR 指到卷上。Windows（windows-2025）：diskpart 建的 NTFS、ReFS、exFAT、FAT32 虚拟盘和 `\\localhost\C$`；Linux（ubuntu-24.04）：sudo 挂载的 ext4、xfs、btrfs、vfat、exfat、ntfs3 loop 镜像（内核没有某个模块时是 warning，不算通过）；macOS（macos-15）：hdiutil 的 APFS、HFS+（日志式）、FAT32、ExFAT 镜像。`ops_fs` 是照后端的方式端到端走一遍：扫描、放进删除篮、按 `ops_service` 给的选项执行 19 个文件夹，逐项结果必须完全对；移到回收站时核对落在 `trash_status` 说的位置，再还原回来内容不变（Linux、macOS 只在 `SPACEKNIFE_FS_MATRIX=1` 时用真的回收站）。测试要用到文件系统没有的东西时运行时探测、跳过那一部分并打印原因（`skipped: …`，CI 的任务摘要里有）：链接（FAT、exFAT、SMB 上没有联接点）、区分大小写的文件夹、名字不是合法 Unicode（WinBtrfs、macOS）、名字以点或空格结尾、名字里的反斜杠（Linux 的 vfat、exfat、ntfs3）、文件夹权限（同上，或 root）、只读文件、8.3 短名（exFAT、ReFS、Btrfs）、回收站（没有的卷上核对是 `no_trash`、提示永久删除、原样不动，再跳过）。探测在测试自己的临时文件夹里真的试一次，有这个功能时那一部分一定跑。
+**测试矩阵**（CI 的 `fs-matrix` 任务，`.github/scripts/fs-matrix.sh` / `.ps1`）：`sk-core` 的 ops_trash、ops_basket、ops_case_twins、ops_paths、ops_locks、ops_fs 和 ops_bench（19 个文件夹项，两种操作，`OPS_BENCH_EXPECT` 核对每项都成功、没剩下、放进回收站的都拿出来了；SMB 上核对每项都是 `no_trash`、都还在）在每种文件系统的小卷上跑，TMP / TMPDIR 指到卷上。Windows（windows-2025）：diskpart 建的 NTFS、ReFS、exFAT、FAT32 虚拟盘和 `\\localhost\<盘>$`（`RUNNER_TEMP` 所在的盘，托管运行器上多是 D:）；Linux（ubuntu-24.04）：sudo 挂载的 ext4、xfs、btrfs、vfat、exfat、ntfs3 loop 镜像和 tmpfs（内核没有某个模块时是 warning，不算通过）；macOS（macos-15）：hdiutil 的 APFS、HFS+（日志式）、FAT32、ExFAT 镜像。`ops_fs` 是照后端的方式端到端走一遍：扫描、放进删除篮、按 `ops_service` 给的选项执行 19 个文件夹，逐项结果必须完全对；移到回收站时核对落在 `trash_status` 说的位置，再还原回来内容不变（Linux、macOS 只在 `SPACEKNIFE_FS_MATRIX=1` 时用真的回收站）。测试要用到文件系统没有的东西时运行时探测、跳过那一部分并打印原因（`skipped: …`，CI 的任务摘要里有）：链接（FAT、exFAT、SMB 上没有联接点）、区分大小写的文件夹、名字不是合法 Unicode（WinBtrfs、macOS）、名字以点或空格结尾、名字里的反斜杠（Linux 的 vfat、exfat、ntfs3）、文件夹权限（同上，或 root）、只读文件、8.3 短名（exFAT、ReFS、Btrfs）、回收站（没有的卷上核对是 `no_trash`、提示永久删除、原样不动，再跳过）。探测在测试自己的临时文件夹里真的试一次，有这个功能时那一部分一定跑。
 
-本机实测（2026-11-09，Windows 11）：NTFS（C: 的临时文件夹）、ReFS（W:）、WinBtrfs（H:）、exFAT USB SSD（L:）、SMB 回环上六个测试程序全部通过（跳过的只有上面那些），ops_bench 19 个文件夹项两种操作全部成功、没有剩下（SMB 的移到回收站是 19 个 `no_trash`）。回收站里只动了测试自己放进去的项（`$I` 记的原路径在测试的临时文件夹下的），别的条目前后一致。CI 的三种系统只在推送之后才跑（Linux、macOS 的这些文件系统本机没有，见结果里的「没验证」）。
+本机实测（2026-11-09，Windows 11）：NTFS（C: 的临时文件夹）、ReFS（W:）、WinBtrfs（H:）、exFAT USB SSD（L:）、SMB 回环上六个测试程序全部通过（跳过的只有上面那些），ops_bench 19 个文件夹项两种操作全部成功、没有剩下（SMB 的移到回收站是 19 个 `no_trash`）。回收站里只动了测试自己放进去的项（`$I` 记的原路径在测试的临时文件夹下的），别的条目前后一致。Linux：WSL 2（内核 6.6）的 ext4 和自己挂的 tmpfs 上 sk-core 的六个 ops 测试程序全部通过（tmpfs 上用真的回收站，卷顶的 `.Trash-$uid`，ops_bench 两种操作也是）。XFS、Btrfs、vfat、exfat、ntfs3 和 macOS 的四种只在 CI 上跑（推送之后）。
 
 ### 2.4 服务层（`crates/sk-server/src/ops_service.rs`）
 
