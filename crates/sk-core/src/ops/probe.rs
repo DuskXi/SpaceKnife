@@ -133,7 +133,11 @@ impl Drop for Phase {
 
 /// The counts and phases so far: `(call, count)` and `(phase, seconds)`.
 #[cfg(feature = "probe")]
-pub fn snapshot() -> (Vec<(Call, u64)>, Vec<(&'static str, f64)>) {
+pub type Snapshot = (Vec<(Call, u64)>, Vec<(&'static str, f64)>);
+
+/// See [`Snapshot`].
+#[cfg(feature = "probe")]
+pub fn snapshot() -> Snapshot {
     imp::snapshot()
 }
 
@@ -231,7 +235,7 @@ mod imp {
         *PHASES.lock().entry(name).or_default() += d;
     }
 
-    pub(super) fn snapshot() -> (Vec<(Call, u64)>, Vec<(&'static str, f64)>) {
+    pub(super) fn snapshot() -> super::Snapshot {
         let counts = Call::ALL
             .iter()
             .map(|&c| (c, COUNTS[index(c)].load(Ordering::Relaxed)))

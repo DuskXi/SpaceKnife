@@ -410,8 +410,70 @@ fn rename_only(base: &Path, n: usize, threads: usize) {
     );
 }
 
+/// One file and one folder moved to the bin and left there until a line comes on stdin (the
+/// shell's own view of the bin can be checked meanwhile), then put back and removed.
+fn bin_check(base: &Path) {
+    let root = base.join(format!(
+        "bincheck-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(root.join("folder.d")).unwrap();
+    std::fs::write(root.join("folder.d").join("inside.txt"), b"inside").unwrap();
+    std::fs::write(root.join("single.txt"), b"single").unwrap();
+    let paths = [root.join("single.txt"), root.join("folder.d")];
+    let res = sk_core::ops::move_to_trash(&paths, OpOptions::default());
+    for r in &res {
+        println!("BIN {} {} {}", r.code.as_str(), r.path, r.trash_ref);
+    }
+    std::io::stdout().flush().unwrap();
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
+    let refs: Vec<String> = res.iter().map(|r| r.trash_ref.clone()).collect();
+    for r in sk_core::ops::restore(&refs) {
+        println!("BACK {} {}", r.code.as_str(), r.path);
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// What renaming a folder of `n` small files costs here: beside itself, then into another folder.
+fn dir_rename(base: &Path, n: usize) {
+    let root = base.join(format!(
+        "dirren-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fill(&root.join("a"), n);
+    std::fs::create_dir_all(root.join("other")).unwrap();
+    for (from, to) in [("a", "b"), ("b", "other/c")] {
+        let io0 = io_counters();
+        let t = Instant::now();
+        std::fs::rename(root.join(from), root.join(to)).unwrap();
+        let secs = t.elapsed().as_secs_f64();
+        let io1 = io_counters();
+        println!(
+            "DIRREN n={n} {from} -> {to}: {secs:.3}s, process reads {} other {}",
+            io1[0] - io0[0],
+            io1[2] - io0[2]
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() >= 2 && args[1].starts_with("dirren:") {
+        dir_rename(Path::new(&args[0]), args[1][7..].parse().unwrap());
+        return;
+    }
+    if args.len() >= 2 && args[1] == "bincheck" {
+        bin_check(Path::new(&args[0]));
+        return;
+    }
     if let Some(n) = std::env::var("OPS_BENCH_WORKERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())

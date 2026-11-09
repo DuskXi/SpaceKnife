@@ -1881,13 +1881,22 @@ mod imp {
     /// Delete what `h` is open on: POSIX semantics where the file system has them, else the
     /// classic flag; a read-only item loses the flag first (through another handle checked to
     /// be the same item), as Explorer does after asking.
-    fn delete(h: &Handle, path: &[u16], f: &Facts) -> io::Result<()> {
+    /// `posix`: the item's file system may have POSIX semantics; cleared at its first refusal of
+    /// them (FAT, exFAT: not asked again for the rest of the item, one call less a file).
+    fn delete(h: &Handle, path: &[u16], f: &Facts, posix: &AtomicBool) -> io::Result<()> {
         if let Some(code) = f.undeletable {
             return Err(io::Error::from_raw_os_error(code));
         }
-        let all = DISPOSITION_DELETE | DISPOSITION_POSIX | DISPOSITION_IGNORE_READONLY;
-        if set_disposition(h, Some(all)).is_ok() {
-            return Ok(());
+        if posix.load(Ordering::Relaxed) {
+            let all = DISPOSITION_DELETE | DISPOSITION_POSIX | DISPOSITION_IGNORE_READONLY;
+            match set_disposition(h, Some(all)) {
+                Ok(()) => return Ok(()),
+                // no such information class here (invalid function / not supported / parameter)
+                Err(e) if matches!(e.raw_os_error(), Some(1) | Some(50) | Some(87)) => {
+                    posix.store(false, Ordering::Relaxed)
+                }
+                Err(_) => {}
+            }
         }
         match set_disposition(h, None) {
             Ok(()) => Ok(()),
@@ -1918,8 +1927,12 @@ mod imp {
                     return Err(last());
                 }
                 drop(w);
-                set_disposition(h, Some(DISPOSITION_DELETE | DISPOSITION_POSIX))
-                    .or_else(|_| set_disposition(h, None))
+                if posix.load(Ordering::Relaxed) {
+                    set_disposition(h, Some(DISPOSITION_DELETE | DISPOSITION_POSIX))
+                        .or_else(|_| set_disposition(h, None))
+                } else {
+                    set_disposition(h, None)
+                }
             }
             Err(e) => Err(e),
         }
@@ -2094,9 +2107,11 @@ mod imp {
         h: Mutex<Option<Handle>>,
         facts: Facts,
         path: Vec<u16>,
-        /// the item's volume, and whether its file system tells what a handle was opened as
+        /// the item's: its volume, whether its file system tells what a handle was opened as,
+        /// whether it may delete with POSIX semantics (shared by the item's folders)
         volume: u32,
         names_known: bool,
+        posix: Arc<AtomicBool>,
         /// the file ids it lists its names with, read once a handle reports a name of it in
         /// another case ([`listed_ids`])
         ids: Mutex<Option<HashMap<Vec<u16>, u64>>>,
@@ -2109,7 +2124,7 @@ mod imp {
         h: Handle,
         facts: Facts,
         path: Vec<u16>,
-        (volume, names_known): (u32, bool),
+        (volume, names_known, posix): (u32, bool, Arc<AtomicBool>),
         buf: &mut [u64],
     ) -> io::Result<(Dir, Vec<OsString>)> {
         let lister = open(
@@ -2128,6 +2143,7 @@ mod imp {
                 path,
                 volume,
                 names_known,
+                posix,
                 ids: Mutex::new(None),
             },
             names,
@@ -2155,7 +2171,7 @@ mod imp {
             if !f.dir() || f.link() {
                 return Err(super::moved_inside()); // replaced since the caller looked
             }
-            let item = (f.volume, f.name.is_some());
+            let item = (f.volume, f.name.is_some(), Arc::new(AtomicBool::new(true)));
             frame(h, f, top_w, item, buf)
         }
 
@@ -2202,7 +2218,8 @@ mod imp {
                 if cancel() {
                     return Visit::Stop;
                 }
-                return match frame(h, facts, path, (dir.volume, dir.names_known), buf) {
+                let item = (dir.volume, dir.names_known, dir.posix.clone());
+                return match frame(h, facts, path, item, buf) {
                     Ok((d, names)) => Visit::Folder(d, names),
                     Err(e) => Visit::Failed(e),
                 };
@@ -2211,7 +2228,7 @@ mod imp {
                 return Visit::Failed(super::mount_inside());
             }
             // a file, or a link of any kind: the entry itself, never what it points to
-            match delete(&h, &path, &facts) {
+            match delete(&h, &path, &facts, &dir.posix) {
                 Ok(()) => Visit::Deleted,
                 Err(e) => Visit::Failed(e),
             }
@@ -2221,7 +2238,7 @@ mod imp {
             let Some(h) = dir.h.lock().take() else {
                 return Ok(());
             };
-            let gone = delete(&h, &dir.path, &dir.facts);
+            let gone = delete(&h, &dir.path, &dir.facts, &dir.posix);
             drop(h);
             gone
         }

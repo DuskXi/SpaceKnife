@@ -8,7 +8,9 @@
 //!   recycled item landed (`PostDeleteItem`'s newly created item: the `$R` file). The COM
 //!   objects are driven through their vtables by hand (no `windows` crate).
 //! * Recycle-bin facts: per-volume settings (HKCU `BitBucket`), the current user's SID, the bin's
-//!   current usage. Nothing here shows a window or asks for elevation.
+//!   current usage (from its `$I` records). Nothing here shows a window or asks for elevation.
+//! * Moving into the bin by this process itself where the bin is the user's own folder: a `$I`
+//!   record and a rename to `$R` ([`recycle_into`]), what the shell does without walking anything.
 
 #![allow(clippy::upper_case_acronyms)]
 
@@ -41,9 +43,7 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
     QueryFullProcessImageNameW,
 };
-use windows_sys::Win32::UI::Shell::{
-    SHChangeNotify, SHCreateItemFromParsingName, SHQUERYRBINFO, SHQueryRecycleBinW,
-};
+use windows_sys::Win32::UI::Shell::{SHChangeNotify, SHCreateItemFromParsingName};
 use windows_sys::core::{GUID, HRESULT};
 
 pub const S_OK: HRESULT = 0;
@@ -238,20 +238,63 @@ pub fn bin_settings(guid: &str, total: u64) -> BinSettings {
     }
 }
 
-/// (bytes, items) in the recycle bin of the volume at `root`; (-1, -1) when unknown.
+/// (bytes, items) in this user's recycle bin on the volume at `root`, as its `$I` records tell
+/// (each holds its item's size): the bin's folder listed, each record read once (kept by its
+/// path, length and time: a record never changes), the items themselves never walked.
+/// `SHQueryRecycleBin` walked every folder in the bin each time it was asked (60 000 operations
+/// for a bin holding one folder of 33 000 files), and the drawer asks after every change. (0, 0)
+/// without a bin folder; (-1, -1) when it cannot be read.
 pub fn bin_usage(root: &str) -> (i64, i64) {
+    use std::time::SystemTime;
+    type Known = HashMap<PathBuf, (u64, Option<SystemTime>, i64)>;
+    static RECORDS: std::sync::Mutex<Option<Known>> = std::sync::Mutex::new(None);
     let _phase = super::probe::phase("bin_usage");
-    let w = wide(root);
-    let mut info = SHQUERYRBINFO {
-        cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32,
-        i64Size: 0,
-        i64NumItems: 0,
-    };
-    // SAFETY: a sized struct.
-    if unsafe { SHQueryRecycleBinW(w.as_ptr(), &mut info) } != S_OK {
+    let Ok(sid) = user_sid() else {
         return (-1, -1);
+    };
+    let folder = Path::new(root).join("$Recycle.Bin").join(sid);
+    super::probe::call(super::probe::Call::List);
+    let listing = match std::fs::read_dir(&folder) {
+        Ok(it) => it,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return (0, 0),
+        Err(_) => return (-1, -1),
+    };
+    let mut known = RECORDS.lock().unwrap_or_else(|p| p.into_inner());
+    let known = known.get_or_insert_with(HashMap::new);
+    if known.len() > 200_000 {
+        known.clear();
     }
-    (info.i64Size, info.i64NumItems)
+    let (mut bytes, mut items) = (0i64, 0i64);
+    for entry in listing.flatten() {
+        let name = entry.file_name();
+        let named = name.to_string_lossy();
+        if !named.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("$I")) {
+            continue;
+        }
+        // the listing's own facts (no call of its own on Windows)
+        let Ok(meta) = entry.metadata() else { continue };
+        let (len, when) = (meta.len(), meta.modified().ok());
+        let path = entry.path();
+        let size = match known.get(&path) {
+            Some(&(l, w, s)) if l == len && w == when => s,
+            _ => {
+                super::probe::call(super::probe::Call::Open);
+                let Ok(data) = std::fs::read(&path) else {
+                    continue;
+                };
+                let Ok((s, _, _)) =
+                    super::trash::parse_recycle_record(&data[..data.len().min(1 << 16)])
+                else {
+                    continue;
+                };
+                known.insert(path, (len, when, s));
+                s
+            }
+        };
+        bytes += size.max(0);
+        items += 1;
+    }
+    (bytes, items)
 }
 
 /// String SID of the user this process runs as (the name of its folder in `$Recycle.Bin`).

@@ -602,6 +602,28 @@ mod windows {
         );
     }
 
+    /// What the bin holds is told from its `$I` records: one item more and its bytes after a
+    /// move, as before once it is back.
+    #[test]
+    fn the_bin_is_sized_from_its_records() {
+        let (_, _g) = setup();
+        let _one = Threads::set(1);
+        let dir = tempfile::tempdir().unwrap();
+        let root = sk_core::ops::win::volume_root(&s(dir.path())).unwrap();
+        let f = dir.path().join("five.bin");
+        std::fs::write(&f, b"12345").unwrap();
+        let before = sk_core::ops::win::bin_usage(&root);
+        assert!(before.0 >= 0 && before.1 >= 0, "{before:?}");
+        let r = trash_all(&[s(&f)]).remove(0);
+        let mut trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(r.code, OpCode::Ok, "{r:?}");
+        let during = sk_core::ops::win::bin_usage(&root);
+        assert_eq!((during.0 - before.0, during.1 - before.1), (5, 1));
+        assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok]);
+        trashed.0.clear();
+        assert_eq!(sk_core::ops::win::bin_usage(&root), before);
+    }
+
     /// A folder with a file open inside cannot be renamed: it is reported held (by this test
     /// process, the Restart Manager says) and stays where it is, whole.
     #[test]

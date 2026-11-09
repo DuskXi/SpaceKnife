@@ -1137,7 +1137,7 @@ fn too_long_inside(path: &Path, below: usize, bin_folder: &str) -> bool {
     base + below > max || in_bin + below > max
 }
 
-/// An item that may go to the bin: its bin, its bytes (capacity), what its `$I` records, a folder.
+/// An item that may go to the bin: its bin, its bytes (capacity), what its `$I` records.
 #[cfg(windows)]
 struct Fits {
     bin: std::sync::Arc<Bin>,
