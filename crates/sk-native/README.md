@@ -136,23 +136,42 @@ are listed up to a cap, past that they are errors with `messages::CAP`. The othe
   `alloc_ask_opened`, `alloc_ask_failed`, …; empty on POSIX).
 - `bulk_listing() -> String` — macOS `getattrlistbulk` state (`"on"`, `"off: why"`, `"untested"`),
   `"unsupported"` elsewhere.
-- `default_threads()` — the carriers' start width (as many calling threads as a scanner should use).
-- `listing_threads(reset) -> ListingThreads` — `cpus`, `start`, `least`, `cold`, `max`, `width` now, `threads` (the carriers' pool), `mode` (`adaptive` / `fixed` / `start`), `low` / `high` since the last reset.
+- `default_threads()` — the carriers' start width (a scanner's first calls).
+- `listing_threads(reset) -> ListingThreads` — `cpus`, `start`, `least` (the CPU lane's narrowest),
+  `cold` (the IO lane's widest), `max` (both lanes' widest together), `width` now (both lanes),
+  `threads` (the carriers' pool), `mode` (`lanes` / `one lane` / `fixed` / `start`), `low` / `high`,
+  per lane `io` / `cpu` (`LaneSeen`: `width`, `low`, `high`), and `calls` (calls a scanner should
+  keep in flight now) with `calls_low` / `calls_high`, lows and highs since the last reset.
+- `pace_report(reset) -> PaceReport` — the stretch since the last reset: `timeline` (one
+  `PacePoint` per second: `listings`, `io_listings`, `cold` / `raw_cold` mean posterior, `io_width`
+  / `cpu_width` time means), `medium`, `vetoed`, `restarts`, `cold` now, `cpu_share` per lane.
+- `RootOptions::device: DeviceHint { medium: Medium }` (`Unknown`, `Nvme`, `Ssd`, `Hdd`, `Flash`,
+  `Network`, `Virtual`) — what the backend knows of a root's storage; `Task::prior: Prior` — a
+  frontier folder's lean towards waiting for the disk (`Prior::of(p)`, `get()`, `UNKNOWN` for
+  tasks a caller makes).
 - `ListingGate::new(limit)`, `set(limit, paused)`, `limit()`, `paused()`, `inflight()`, `window() -> (busy_s, peak, refused)`.
 - `sk_native::cpus::usable()` — the CPUs this process may use (Windows affinity across processor groups, Linux affinity and cgroup v2 `cpu.max`).
 
-Listing threads (port of main's `pace.rs` / `slots.rs`, docs/native.md 2.2 「列目录线程」): calls with
-`threads: 0` list on one process-wide rayon pool (the *carriers*). The *width* is the most folders
-listed at once (not the thread count): a folder is listed only while it holds a slot of the width and
-of its call's gate; others wait on the call's parked stack, and a carrier that finished a folder goes
-on with the next one of its call (depth-first, no job spawned). A call takes at most its share of the
-width among the calls on the carriers. The width adapts (`pace.rs` `decide`): start = usable CPUs
-2–16 (macOS 2×, 4–16); disk reads per folder ≥ 0.2 with busy slots → the cold width max(2×start, 32)
-(max 64); warm and contended → probes half the width and keeps it when ≥ 15 % faster. Windows counts
-reads with the volume's `IOCTL_DISK_PERFORMANCE`, POSIX with `getrusage` `ru_inblock` (Linux in 512 B
-units → 4 KiB reads; macOS reads as they are). Environment (measurements): `SPACEKNIFE_SCAN_THREADS=N`
-fixes the width, `SPACEKNIFE_WALK_ADAPT=0` keeps the start width, `SPACEKNIFE_WALK_MAX`,
-`SPACEKNIFE_WALK_TRACE=<file>`. A paused gate starts no folder that can wait (it goes back in the
+Listing threads (`pace/`, `slots.rs`, docs/native.md 2.2 「列目录线程」): calls with `threads: 0`
+list on one process-wide rayon pool (the *carriers*), in two *lanes*, each a limit on listings in
+flight (not a thread count): folders expected to wait for the disk go to the IO lane, the others to
+the CPU lane. A folder is listed only while it holds a slot of its lane and of its call's gate;
+others wait on the call's parked stack of that lane, and a carrier that finished a folder goes on
+with the next one of its call and lane (depth-first, no job spawned). A call takes at most its
+share of both lanes' widths among the calls on the carriers. Every listing is a sample: its wall
+time less its thread's CPU time (Windows x86-64 `QueryThreadCycleTime` against `rdtsc`, POSIX
+`CLOCK_THREAD_CPUTIME_ID`) is its wait; a two-cluster online mixture on `ln(1 + wait µs)`
+(`pace/model.rs`) gives the posterior that the folder was cold, which its subfolders take as their
+prior (and frontier tasks carry, `Task::prior`); disk read counters (Windows the volume's
+`IOCTL_DISK_PERFORMANCE`, POSIX `getrusage` `ru_inblock`) can only veto. Each lane follows its own
+rate-against-in-flight curve, BBR-like (`pace/lane.rs`: startup doubling while it gains, BDP, ±25 %
+probes beating twice the round noise, backoff), one lane experimenting at a time, the CPU lane
+bounded by the CPUs the IO lane's listings use (`pace/ctl.rs`). `RootOptions::device` sets where
+the lanes start, how wide the IO lane goes and the cold centre (a hard disk's IO lane is fixed at
+0.3.5's cold width). `pace/sim.rs` (tests) drives the same controller with simulated devices,
+CPUs and trees. Environment (measurements): `SPACEKNIFE_SCAN_THREADS=N` one fixed lane of N,
+`SPACEKNIFE_WALK_ADAPT=0` one lane at the start width, `SPACEKNIFE_WALK_LANES=0` one adaptive
+lane, `SPACEKNIFE_WALK_MAX` the IO lane's widest, `SPACEKNIFE_WALK_TRACE=<file>`. A paused gate starts no folder that can wait (it goes back in the
 frontier). Private pools (`threads` ≥ 1) are cached by size (four kept); `threads: 1` uses a pool owned
 by the calling thread. Linux: a found subfolder is opened with `O_NOATIME` in the `open` itself when the
 parent's `fstatat` says its owner allows it (else without trying).

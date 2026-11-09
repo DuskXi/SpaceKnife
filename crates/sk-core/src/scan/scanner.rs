@@ -7,12 +7,17 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
-use sk_native::hardscan::{self, LinkSet, Ref, RootOptions, SliceOptions, SliceResult, Task};
+use sk_native::hardscan::{
+    self, LinkSet, Prior, Ref, RootOptions, SliceOptions, SliceResult, Task,
+};
 use sk_protocol::DateTime;
 use sk_store::{Flags, Kind, NodeId, Store, Times};
 
 use super::gate::{IoGate, Permit};
-use super::{ScanState, fold_slice, native_threads, normalise_root, path_inside, verify_names};
+use super::{
+    MAX_CALLERS, ScanState, calls_follow_the_walker, device_hint, fold_slice, native_threads,
+    normalise_root, path_inside, verify_names,
+};
 use crate::volume::{self, VolumeInfo};
 
 /// Denied folders recorded per scan (the count goes on).
@@ -61,7 +66,9 @@ impl RootInfo {
 /// How a [`Scanner`] works.
 #[derive(Clone)]
 pub struct ScanOptions {
-    /// Listing calls in flight; 0 = [`native_threads`].
+    /// Listing calls in flight; 0 = as many as the walker wants (its `calls`, up to
+    /// [`MAX_CALLERS`]; [`native_threads`] off the shared carriers or with
+    /// `SPACEKNIFE_SCAN_THREADS`).
     pub concurrency: usize,
     /// Descend into other filesystems mounted below a root (POSIX).
     pub cross_mounts: bool,
@@ -197,12 +204,17 @@ impl ScanProgress {
 }
 
 /// Where a scan's time went (logged when it ends).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ScanProfile {
     /// scanning, start to end, without the time it was paused
     pub wall_s: f64,
-    /// listing calls allowed in parallel
+    /// listing calls in flight at most
     pub threads: usize,
+    /// listing calls allowed in flight, time-mean (the walker's `calls`, under the disk-load
+    /// limit's concurrency); `threads` when fixed
+    pub calls_mean: f64,
+    /// the disk-load limit's concurrency, time-mean (None: no limit)
+    pub gate_mean: Option<f64>,
     /// summed time the slices listed
     pub busy_s: f64,
     /// coordinator: folding the slices into the tree
@@ -212,14 +224,91 @@ pub struct ScanProfile {
     pub slices: u64,
     /// entries this run added to the tree
     pub items: u64,
-    /// The walker's shared listing threads: the narrowest and widest width it listed at during
-    /// the run (process-wide: scans at the same time share it); (0, 0) without them.
+    /// The walker's shared listing threads: the narrowest and widest width (both lanes) it
+    /// listed at during the run (process-wide: scans at the same time share it); (0, 0) without
+    /// them.
     pub width: (usize, usize),
+    /// Its lanes (docs/native.md 2.2 「列目录线程」): each one's narrowest and widest width and
+    /// time-mean width, the share of the folders listed in the IO lane, the cold fraction over
+    /// time (seconds, mean posterior), the device hint it followed.
+    pub lanes: Option<LaneProfile>,
+}
+
+/// The walker's lanes during a scan ([`ScanProfile::lanes`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LaneProfile {
+    pub io: (usize, usize),
+    pub cpu: (usize, usize),
+    pub io_mean: f64,
+    pub cpu_mean: f64,
+    pub io_share: f64,
+    pub cold: Vec<(f64, f64)>,
+    pub medium: String,
+    pub calls: (usize, usize),
+}
+
+impl LaneProfile {
+    fn of(t: &hardscan::ListingThreads, r: &hardscan::PaceReport) -> LaneProfile {
+        let (mut dt, mut io, mut cpu, mut n, mut n_io) = (0.0, 0.0, 0.0, 0u64, 0u64);
+        for p in &r.timeline {
+            dt += p.dt;
+            io += p.io_width * p.dt;
+            cpu += p.cpu_width * p.dt;
+            n += p.listings;
+            n_io += p.io_listings;
+        }
+        LaneProfile {
+            io: (t.io.low, t.io.high),
+            cpu: (t.cpu.low, t.cpu.high),
+            io_mean: if dt > 0.0 { io / dt } else { t.io.width as f64 },
+            cpu_mean: if dt > 0.0 {
+                cpu / dt
+            } else {
+                t.cpu.width as f64
+            },
+            io_share: if n > 0 { n_io as f64 / n as f64 } else { 0.0 },
+            cold: r
+                .timeline
+                .iter()
+                .filter(|p| p.listings > 0)
+                .map(|p| (p.t, p.cold))
+                .collect(),
+            medium: format!("{:?}", r.medium).to_lowercase(),
+            calls: (t.calls_low, t.calls_high),
+        }
+    }
+
+    /// The cold fraction at most `n` points, evenly spaced over the scan: "0.98 0.95 … 0.10 (per
+    /// 2.0 s)".
+    pub fn cold_curve(&self, n: usize) -> (String, f64) {
+        let pts = &self.cold;
+        if pts.is_empty() {
+            return (String::new(), 0.0);
+        }
+        let step = pts.len().div_ceil(n.max(1));
+        let per = if pts.len() > 1 {
+            (pts[pts.len() - 1].0 - pts[0].0) / (pts.len() - 1) as f64 * step as f64
+        } else {
+            1.0
+        };
+        let curve = pts
+            .chunks(step)
+            .map(|c| format!("{:.2}", c.iter().map(|p| p.1).sum::<f64>() / c.len() as f64))
+            .collect::<Vec<_>>()
+            .join(" ");
+        (curve, per.max(1.0))
+    }
 }
 
 impl ScanProfile {
+    /// The calls' busy share: listing time over the time-mean calls allowed.
     pub fn busy(&self) -> f64 {
-        self.busy_s / (self.wall_s.max(1e-9) * self.threads.max(1) as f64)
+        let calls = if self.calls_mean > 0.0 {
+            self.calls_mean
+        } else {
+            self.threads.max(1) as f64
+        };
+        self.busy_s / (self.wall_s.max(1e-9) * calls)
     }
     pub fn ingest(&self) -> f64 {
         self.ingest_s / self.wall_s.max(1e-9)
@@ -229,30 +318,52 @@ impl ScanProfile {
     }
     pub fn text(&self) -> String {
         let bulk = hardscan::bulk_listing();
+        let range = |(low, high): (usize, usize)| {
+            if low == high {
+                low.to_string()
+            } else {
+                format!("{low}–{high}")
+            }
+        };
         let mut s = format!(
-            "{} items in {:.1}s ({:.0}/s); listing threads busy {:.0}% of {}; coordinator folding {:.0}%; held by the disk-load limit {:.0}%; {} slices",
+            "{} items in {:.1}s ({:.0}/s); listing calls busy {:.0}% of {:.1} on average ({} at most)",
             self.items,
             self.wall_s,
             self.items as f64 / self.wall_s.max(1e-9),
             self.busy() * 100.0,
+            if self.calls_mean > 0.0 {
+                self.calls_mean
+            } else {
+                self.threads as f64
+            },
             self.threads,
+        );
+        if self.width.1 > 0 {
+            s.push_str(&format!(" (listing width {})", range(self.width)));
+        }
+        if let Some(l) = &self.lanes {
+            let (curve, per) = l.cold_curve(12);
+            s.push_str(&format!(
+                "; io lane {} (mean {:.1}), cpu lane {} (mean {:.1}), {:.0}% of folders in the io lane; cold fraction {curve} (per {per:.1}s); device {}",
+                range(l.io),
+                l.io_mean,
+                range(l.cpu),
+                l.cpu_mean,
+                l.io_share * 100.0,
+                l.medium,
+            ));
+        }
+        if let Some(g) = self.gate_mean {
+            s.push_str(&format!(
+                "; disk-load limit's concurrency {g:.1} on average"
+            ));
+        }
+        s.push_str(&format!(
+            "; coordinator folding {:.0}%; held by the disk-load limit {:.0}%; {} slices",
             self.ingest() * 100.0,
             self.limited() * 100.0,
             self.slices,
-        );
-        if self.width.1 > 0 {
-            let (low, high) = self.width;
-            let w = if low == high {
-                low.to_string()
-            } else {
-                format!("{low}–{high}")
-            };
-            s = s.replacen(
-                &format!("of {};", self.threads),
-                &format!("of {} (listing width {w});", self.threads),
-                1,
-            );
-        }
+        ));
         if cfg!(target_os = "macos") {
             s.push_str(&format!("; getattrlistbulk {bulk}"));
         }
@@ -291,6 +402,12 @@ struct Shared {
     inflight: usize,
     /// ScanProfile::width
     width: (usize, usize),
+    /// Calls allowed × seconds, the disk-load limit's concurrency × seconds, the most calls in
+    /// flight (ScanProfile::calls_mean, gate_mean, threads).
+    calls_area: f64,
+    gate_area: f64,
+    calls_peak: usize,
+    lanes: Option<LaneProfile>,
 }
 
 impl Shared {
@@ -340,7 +457,9 @@ pub struct Scanner {
     roots: RwLock<Vec<RootInfo>>,
     root_opts: Arc<Vec<RootOptions>>,
     opts: ScanOptions,
+    /// Calls in flight at most; `dynamic`: as many as the walker wants up to that.
     concurrency: usize,
+    dynamic: bool,
     cancel: Arc<AtomicBool>,
     paused: AtomicBool,
     st: Mutex<Shared>,
@@ -459,11 +578,13 @@ impl Scanner {
                     path: Some(path.clone()),
                     verify_names: verify_names(vol.as_ref()),
                     listed_alloc: super::winopts::listed_alloc(vol.as_ref()),
+                    device: device_hint(vol.as_ref()),
                 });
                 queue.push_back(Task {
                     target: Ref::Node(node as u64),
                     path: path.clone(),
                     root: (root_opts.len() - 1) as u32,
+                    prior: Prior::UNKNOWN,
                 });
                 infos.push(RootInfo {
                     path,
@@ -473,16 +594,18 @@ impl Scanner {
                 });
             }
         }
-        let concurrency = if opts.concurrency == 0 {
-            native_threads()
-        } else {
-            opts.concurrency
+        let dynamic = opts.concurrency == 0 && calls_follow_the_walker();
+        let concurrency = match opts.concurrency {
+            0 if dynamic => MAX_CALLERS,
+            0 => native_threads(),
+            n => n,
         };
         Ok(Scanner {
             store,
             roots: RwLock::new(infos),
             root_opts: Arc::new(root_opts),
             concurrency,
+            dynamic,
             opts,
             cancel: Arc::new(AtomicBool::new(false)),
             paused: AtomicBool::new(false),
@@ -511,6 +634,10 @@ impl Scanner {
                 slices: 0,
                 inflight: 0,
                 width: (0, 0),
+                calls_area: 0.0,
+                gate_area: 0.0,
+                calls_peak: 0,
+                lanes: None,
             }),
             links: Mutex::new(LinkSet::new()),
             wake: Mutex::new(None),
@@ -547,9 +674,23 @@ impl Scanner {
         self.root_opts.clone()
     }
 
-    /// Listing calls in flight at most.
+    /// Listing calls in flight at most (following the walker: up to [`MAX_CALLERS`]).
     pub fn concurrency(&self) -> usize {
         self.concurrency
+    }
+
+    /// Whether the calls in flight follow the walker's `calls`.
+    pub fn calls_follow_the_walker(&self) -> bool {
+        self.dynamic
+    }
+
+    /// Calls allowed in flight now.
+    fn allowed(&self) -> usize {
+        if self.dynamic {
+            hardscan::wanted_calls().clamp(1, self.concurrency)
+        } else {
+            self.concurrency
+        }
     }
 
     pub fn state(&self) -> ScanState {
@@ -712,6 +853,10 @@ impl Scanner {
             st.paused_total = Duration::ZERO;
             st.slices = 0;
             st.folded = 0;
+            st.calls_area = 0.0;
+            st.gate_area = 0.0;
+            st.calls_peak = 0;
+            st.lanes = None;
             if st.paused_since.is_some() {
                 st.paused_since = Some(now); // paused while queued
             }
@@ -729,6 +874,7 @@ impl Scanner {
         };
         if shared {
             hardscan::listing_threads(true);
+            hardscan::pace_report(true);
         }
         let base = |budget: Duration| {
             let mut o = SliceOptions {
@@ -744,11 +890,12 @@ impl Scanner {
         };
         let full = base(self.opts.budget);
         let short = base(self.opts.budget.min(Duration::from_millis(10)));
-        let workers = self.concurrency.max(1);
         let failure: Option<String> = std::thread::scope(|scope| {
             let (job_tx, job_rx) = mpsc::channel::<Job>();
             let job_rx = Arc::new(Mutex::new(job_rx));
-            for i in 0..workers {
+            // the calling threads start as they are needed (a call is dispatched with every one
+            // busy), up to `concurrency`; idle ones wait on the job channel until the scan ends
+            let start = |i: usize| {
                 let rx = job_rx.clone();
                 let tx = tx.clone();
                 std::thread::Builder::new()
@@ -766,9 +913,17 @@ impl Scanner {
                             }
                         }
                     })
-                    .expect("cannot start a listing thread");
-            }
-            let fail = self.coordinate(&rx, &job_tx, &full, &short, &mut on_progress, interval);
+                    .is_ok()
+            };
+            let fail = self.coordinate(
+                &rx,
+                &job_tx,
+                &start,
+                &full,
+                &short,
+                &mut on_progress,
+                interval,
+            );
             drop(job_tx); // workers end
             fail
         });
@@ -797,6 +952,7 @@ impl Scanner {
             if shared {
                 let w = hardscan::listing_threads(false);
                 st.width = (w.low, w.high);
+                st.lanes = Some(LaneProfile::of(&w, &hardscan::pace_report(false)));
             }
         }
         let result = self.progress();
@@ -817,11 +973,14 @@ impl Scanner {
         result
     }
 
-    /// The dispatch / fold loop; Some(message) when the scan failed.
+    /// The dispatch / fold loop (`start(i)` starts calling thread `i`); Some(message) when the
+    /// scan failed.
+    #[allow(clippy::too_many_arguments)]
     fn coordinate(
         &self,
         rx: &mpsc::Receiver<Msg>,
         jobs: &mpsc::Sender<Job>,
+        start: &dyn Fn(usize) -> bool,
         full: &Arc<SliceOptions>,
         short: &Arc<SliceOptions>,
         on_progress: &mut Option<&mut dyn FnMut(&ScanProgress)>,
@@ -829,9 +988,11 @@ impl Scanner {
     ) -> Option<String> {
         let gate = self.opts.gate.clone();
         let mut inflight = 0usize;
+        let mut started = 0usize;
         let mut last_report = Instant::now();
         let mut fail: Option<String> = None;
         let tick = interval.clamp(Duration::from_millis(10), Duration::from_millis(250));
+        let mut last_tick = Instant::now();
         loop {
             if self.cancelled() || fail.is_some() {
                 break;
@@ -839,12 +1000,26 @@ impl Scanner {
             if inflight == 0 && self.st().queue.is_empty() {
                 break;
             }
+            // the calls allowed and the disk-load limit's concurrency, time-weighted (profile)
+            let allowed = self.allowed();
+            let limit = gate.as_ref().map(|g| g.concurrency());
+            {
+                let now = Instant::now();
+                let dt = now.duration_since(last_tick).as_secs_f64();
+                last_tick = now;
+                let mut st = self.st();
+                if !self.paused() {
+                    st.calls_area += dt * limit.map_or(allowed, |l| l.clamp(1, allowed)) as f64;
+                    st.gate_area += dt * limit.unwrap_or(0) as f64;
+                }
+            }
             // dispatch
             if !self.paused() {
                 loop {
-                    let parallel = gate.as_ref().map_or(self.concurrency, |g| {
-                        g.concurrency().clamp(1, self.concurrency)
-                    });
+                    let allowed = self.allowed();
+                    let parallel = gate
+                        .as_ref()
+                        .map_or(allowed, |g| g.concurrency().clamp(1, allowed));
                     if inflight >= parallel || self.st().queue.is_empty() {
                         break;
                     }
@@ -883,7 +1058,18 @@ impl Scanner {
                         self.st().inflight -= 1;
                         break;
                     }
+                    if inflight >= started && started < self.concurrency.max(1) {
+                        if start(started) {
+                            started += 1;
+                        } else if started == 0 {
+                            return Some("cannot start a listing thread".into());
+                        }
+                    }
                     inflight += 1;
+                    {
+                        let mut st = self.st();
+                        st.calls_peak = st.calls_peak.max(inflight);
+                    }
                     if jobs
                         .send(Job {
                             tasks,
@@ -1019,19 +1205,31 @@ impl Scanner {
         let paused = st.paused_total
             + st.paused_since
                 .map_or(Duration::ZERO, |s| end.saturating_duration_since(s));
+        let wall_s = st.started.map_or(0.0, |s| {
+            end.saturating_duration_since(s)
+                .saturating_sub(paused)
+                .as_secs_f64()
+        });
         ScanProfile {
-            wall_s: st.started.map_or(0.0, |s| {
-                end.saturating_duration_since(s)
-                    .saturating_sub(paused)
-                    .as_secs_f64()
-            }),
-            threads: self.concurrency,
+            wall_s,
+            threads: if self.dynamic {
+                st.calls_peak
+            } else {
+                self.concurrency
+            },
+            calls_mean: if wall_s > 0.0 && st.calls_area > 0.0 {
+                st.calls_area / wall_s
+            } else {
+                0.0
+            },
+            gate_mean: (self.opts.gate.is_some() && wall_s > 0.0).then(|| st.gate_area / wall_s),
             busy_s: st.busy.as_secs_f64(),
             ingest_s: st.ingest.as_secs_f64(),
             limited_s: st.limited.as_secs_f64(),
             slices: st.slices,
             items: st.folded,
             width: st.width,
+            lanes: st.lanes.clone(),
         }
     }
 

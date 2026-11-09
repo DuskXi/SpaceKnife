@@ -1,8 +1,9 @@
 //! Scanning (port of `spaceknife.scan.scanner`, `worker`, `mft`).
 //!
 //! * [`Scanner`]: the hard scan. Calling threads run [`sk_native::hardscan::scan_slice`] on
-//!   batches of folders (`concurrency` calls in flight, listed on the walker's shared carriers
-//!   with its adaptive width and the disk's [`sk_native::hardscan::ListingGate`]); the thread
+//!   batches of folders (as many calls in flight as the walker wants, `calls`, or a fixed
+//!   `concurrency`; listed on the walker's shared carriers in its two adaptive lanes and the
+//!   disk's [`sk_native::hardscan::ListingGate`]); the thread
 //!   that calls [`Scanner::run`] folds every result into the [`Store`] with
 //!   [`sk_store::Appender::ingest_slice`] and hands the frontier back to the queue. Readers (views)
 //!   run meanwhile (sk-store threading contract); the appender is taken per fold only, so a
@@ -20,13 +21,14 @@ pub mod winopts;
 
 use std::path::{Path, PathBuf};
 
-use sk_native::hardscan::{Entries, LinkSet, Ref, SliceResult, Task};
+use sk_native::hardscan::{DeviceHint, Entries, LinkSet, Medium, Ref, SliceResult, Task};
 use sk_store::{Appender, EntryBatch, Flags, NodeId, SliceRef, StoreError};
 
 pub use gate::{IoGate, Permit};
 pub use scanner::{
-    BYTES_CEILING, ESTIMATE_AFTER_S, MAX_RECORDED_DENIED, RATE_WINDOW_S, RootInfo, ScanError,
-    ScanFault, ScanOptions, ScanProfile, ScanProgress, Scanner, panic_message, scan_path,
+    BYTES_CEILING, ESTIMATE_AFTER_S, LaneProfile, MAX_RECORDED_DENIED, RATE_WINDOW_S, RootInfo,
+    ScanError, ScanFault, ScanOptions, ScanProfile, ScanProgress, Scanner, panic_message,
+    scan_path,
 };
 pub use sk_protocol::scan::ScanStateName as ScanState;
 
@@ -50,26 +52,39 @@ pub fn shared_listing() -> bool {
     )
 }
 
-/// Threads that call the walker, one slice each. On the shared carriers the walker decides how
-/// many folders are listed at once (its width: from the start width up to the cold width while the
-/// disk is read, narrower where fewer list faster); the scanner calls it from as many threads as
-/// its start width: the CPUs this process may use ([`sk_native::cpus::usable`]), 2–16 (macOS twice
-/// that, 4–16: APFS listings wait in the kernel; Windows at most 8). `SPACEKNIFE_SCAN_THREADS` (1–64) fixes both,
-/// for measurements. Without the carriers ([`shared_listing`] off): one per CPU, 2–16 (macOS
-/// 4–16, Windows at most 8: NTFS's directory locks).
+/// The most threads a scanner calls the walker from when it follows the walker's `calls`.
+pub const MAX_CALLERS: usize = 64;
+
+/// `SPACEKNIFE_SCAN_THREADS` (1–64): a fixed number of calls and a fixed walker (measurements).
+fn fixed_threads() -> Option<usize> {
+    std::env::var("SPACEKNIFE_SCAN_THREADS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .map(|n| n.min(64))
+}
+
+/// Whether a scan's calls follow the walker ([`sk_native::hardscan::wanted_calls`]): on the
+/// shared carriers, unless `SPACEKNIFE_SCAN_THREADS` fixes them.
+pub fn calls_follow_the_walker() -> bool {
+    shared_listing() && fixed_threads().is_none()
+}
+
+/// Threads that call the walker, one slice each, at a scan's start (the scanner then follows the
+/// walker's `calls`, up to [`MAX_CALLERS`]: docs/native.md 2.2 「列目录线程」). On the shared
+/// carriers the walker decides how many folders are listed at once (two lanes, by how cold the
+/// folders look); this is its start width, the CPUs this process may use
+/// ([`sk_native::cpus::usable`]), 2–16 (macOS twice that, 4–16: APFS listings wait in the kernel).
+/// The fixed Windows cap of 8 is gone: the calls follow the lanes (C: cold, 0.3.5's 8 calls
+/// against a width up to 64 were the limit). `SPACEKNIFE_SCAN_THREADS` (1–64) fixes both, for
+/// measurements. Without the carriers ([`shared_listing`] off): one per CPU, 2–16 (macOS 4–16,
+/// Windows at most 8: NTFS's directory locks).
 pub fn native_threads() -> usize {
-    if let Ok(v) = std::env::var("SPACEKNIFE_SCAN_THREADS")
-        && let Ok(n) = v.trim().parse::<usize>()
-        && n > 0
-    {
-        return n.min(64); // the walker's width is fixed to it too (read once per process)
+    if let Some(n) = fixed_threads() {
+        return n; // the walker's width is fixed to it too (read once per process)
     }
     if shared_listing() {
-        let start = sk_native::hardscan::default_threads().max(1);
-        // Windows: at most 8 callers (the walker still lists up to its width, two folders a call
-        // at width 16): C:\Windows warm on 32 CPUs, 1.37–1.43 s with 8 callers, 1.89–2.04 s with
-        // 16 (NTFS's directory locks), 1.48–2.05 s with the old one-thread-per-call mode
-        return if cfg!(windows) { start.min(8) } else { start };
+        return sk_native::hardscan::default_threads().max(1);
     }
     let cpus = sk_native::cpus::usable();
     if cfg!(target_os = "macos") {
@@ -89,6 +104,30 @@ pub fn listing_max() -> usize {
         sk_native::hardscan::listing_threads(false).max.max(1)
     } else {
         native_threads()
+    }
+}
+
+/// What the walker is told of a root's storage (docs/native.md 2.2 「列目录线程」, 设备提示): the
+/// media the backend probes (`crate::media`: seek penalty and bus on Windows, rotational and the
+/// device path on Linux, `diskutil` on macOS), known at once, never learnt.
+pub fn device_hint(volume: Option<&VolumeInfo>) -> DeviceHint {
+    use crate::media::Media;
+    let media = match volume {
+        Some(v) if v.reason.is_empty() => {
+            crate::media::media_of(&v.mount_point, &v.device, v.is_remote)
+        }
+        _ => Media::Unknown,
+    };
+    DeviceHint {
+        medium: match media {
+            Media::NvmeSsd => Medium::Nvme,
+            Media::SataSsd | Media::Ssd | Media::UsbSsd => Medium::Ssd,
+            Media::Hdd | Media::UsbHdd => Medium::Hdd,
+            Media::UsbFlash | Media::SdCard => Medium::Flash,
+            Media::Network => Medium::Network,
+            Media::Virtual => Medium::Virtual,
+            Media::Unknown => Medium::Unknown,
+        },
     }
 }
 
@@ -256,8 +295,30 @@ pub fn fold_slice(
                 target: Ref::Node(node as u64),
                 path: t.path,
                 root: t.root,
+                prior: t.prior, // the walker's lean for the folder, for the call that lists it
             })
         })
         .collect();
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_volume_tells_the_walker_its_medium() {
+        assert_eq!(device_hint(None).medium, Medium::Unknown);
+        let unusable = VolumeInfo {
+            reason: "no media".into(),
+            ..VolumeInfo::default()
+        };
+        assert_eq!(device_hint(Some(&unusable)).medium, Medium::Unknown);
+        let share = VolumeInfo {
+            is_remote: true,
+            mount_point: "/mnt/share".into(),
+            ..VolumeInfo::default()
+        };
+        assert_eq!(device_hint(Some(&share)).medium, Medium::Network);
+    }
 }

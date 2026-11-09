@@ -18,8 +18,8 @@ use std::time::Duration;
 #[cfg(windows)]
 use sk_native::hardscan::messages;
 use sk_native::hardscan::{
-    self, LinkSet, ListingGate, Ref, RootOptions, SliceOptions, SliceResult, Task, flag, kind,
-    lower_ext, scan_slice,
+    self, LinkSet, ListingGate, Prior, Ref, RootOptions, SliceOptions, SliceResult, Task, flag,
+    kind, lower_ext, scan_slice,
 };
 
 fn serial() -> MutexGuard<'static, ()> {
@@ -54,6 +54,7 @@ fn task(node: u64, path: &Path, root: u32) -> Task {
         target: Ref::Node(node),
         path: path.to_path_buf(),
         root,
+        prior: Prior::UNKNOWN,
     }
 }
 
@@ -878,6 +879,66 @@ fn a_paused_gate_hands_back_what_can_wait() {
     assert!(!gate.paused() && gate.limit() == 2);
     let res = scan(tasks, &opts);
     assert!(res.frontier.is_empty() && res.listings() > 50);
+}
+
+#[test]
+fn frontier_tasks_carry_their_prior_and_the_lanes_report() {
+    // docs/native.md 2.2 「列目录线程」: a folder found but not listed goes back with its parent's
+    // posterior; the tasks a caller made keep theirs (unknown)
+    let _s = serial();
+    let t = tree();
+    let opts = SliceOptions {
+        max_entries: 1, // stop after the first folder: its subfolders become the frontier
+        ..SliceOptions::unbounded(vec![root_opts(&t.root)])
+    };
+    let res = scan(vec![task(1, &t.root, 0)], &opts);
+    assert!(res.listings() >= 1 && !res.frontier.is_empty());
+    assert!(
+        res.frontier.iter().all(|f| f.prior.get().is_some()),
+        "{:?}",
+        res.frontier.iter().map(|f| f.prior).collect::<Vec<_>>()
+    );
+    // a frontier task lists with its prior in a later call, like any other
+    let again = scan(
+        res.frontier.clone(),
+        &SliceOptions::unbounded(vec![root_opts(&t.root)]),
+    );
+    assert!(again.frontier.is_empty() && again.listings() > 10);
+    // unlisted tasks of the caller come back as they were
+    let paused = ListingGate::new(2);
+    paused.set(None, Some(true));
+    let held = scan(
+        vec![task(1, &t.root, 0)],
+        &SliceOptions {
+            gate: Some(paused),
+            ..SliceOptions::unbounded(vec![root_opts(&t.root)])
+        },
+    );
+    assert_eq!(held.frontier, vec![task(1, &t.root, 0)]);
+    // the lanes and the curve of the cold fraction
+    let info = hardscan::listing_threads(false);
+    assert!(info.io.width >= 1 && info.cpu.width >= 1 && info.calls >= 1);
+    assert_eq!(info.width, info.io.width + info.cpu.width);
+    let report = hardscan::pace_report(false);
+    let listed: u64 = report.timeline.iter().map(|p| p.listings).sum();
+    assert!(listed > 10, "{report:?}");
+    assert!(
+        report
+            .timeline
+            .iter()
+            .all(|p| (0.0..=1.0).contains(&p.cold))
+    );
+}
+
+#[test]
+fn priors_fit_in_a_byte() {
+    assert_eq!(Prior::of(f32::NAN), Prior::UNKNOWN);
+    assert_eq!(Prior::UNKNOWN.get(), None);
+    for p in [0.0f32, 0.1, 0.5, 0.9, 1.0] {
+        let back = Prior::of(p).get().unwrap();
+        assert!((back - p).abs() < 0.005, "{p} -> {back}");
+    }
+    assert_eq!(Prior::of(7.0).get(), Some(1.0));
 }
 
 #[test]

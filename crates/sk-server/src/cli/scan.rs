@@ -701,11 +701,17 @@ fn profile(scanner: &Scanner, gated: bool) -> (Text, String) {
     let p = scanner.profile();
     let walker = t("原生遍历器");
     let bold = |s: String| Text::styled(&s, Style::BOLD);
+    let calls = if p.calls_mean > 0.0 {
+        p.calls_mean
+    } else {
+        p.threads as f64
+    };
     let mut lines = vec![
         Text::plain(&tr!(
-            "{walker} · 列目录并发 {threads}",
+            "{walker} · 列目录调用平均 {mean} 个、最多 {peak} 个",
             walker = walker,
-            threads = p.threads
+            mean = format!("{calls:.1}"),
+            peak = p.threads
         )),
         fill(
             t("列目录线程平均忙碌 {busy}（系统调用；接近 100% 说明瓶颈在磁盘或文件系统）"),
@@ -719,12 +725,50 @@ fn profile(scanner: &Scanner, gated: bool) -> (Text, String) {
         ),
         Text::plain(&tr!("共 {slices} 批", slices = fmt::count(p.slices as i64))),
     ];
+    if let Some(l) = &p.lanes {
+        let range = |(low, high): (usize, usize)| {
+            if low == high {
+                low.to_string()
+            } else {
+                format!("{low}–{high}")
+            }
+        };
+        lines.insert(
+            2,
+            Text::plain(&tr!(
+                "IO 道宽度 {io}（平均 {io_mean}），CPU 道宽度 {cpu}（平均 {cpu_mean}）；{share} 的文件夹在 IO 道列",
+                io = range(l.io),
+                io_mean = format!("{:.1}", l.io_mean),
+                cpu = range(l.cpu),
+                cpu_mean = format!("{:.1}", l.cpu_mean),
+                share = percent0(l.io_share)
+            )),
+        );
+        let (curve, per) = l.cold_curve(12);
+        if !curve.is_empty() {
+            lines.insert(
+                3,
+                Text::plain(&tr!(
+                    "冷的比例（每 {per} 秒一个点）：{curve}；设备提示 {medium}",
+                    per = format!("{per:.1}"),
+                    curve = curve,
+                    medium = l.medium.clone()
+                )),
+            );
+        }
+    }
     if gated {
         lines.push(fill(
             t("等磁盘负载上限放行 {limited}（没有任何目录在列）"),
             Style::NONE,
             &[("limited", bold(percent0(p.limited())))],
         ));
+        if let Some(g) = p.gate_mean {
+            lines.push(Text::plain(&tr!(
+                "磁盘负载上限的并发平均 {mean}",
+                mean = format!("{g:.1}")
+            )));
+        }
     }
     if cfg!(target_os = "macos") {
         lines.push(Text::plain(&tr!(

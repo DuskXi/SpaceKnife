@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use sk_native::hardscan::{self, Ref, RootOptions, SliceOptions, SliceResult, Task};
+use sk_native::hardscan::{self, Prior, Ref, RootOptions, SliceOptions, SliceResult, Task};
 use sk_protocol::scan::{MonitorState, MonitorStatus};
 use sk_store::lookup::PathIndex;
 use sk_store::{Flags, Kind, NodeId, Nodes, Store, mutate};
@@ -1097,6 +1097,7 @@ impl ScanMonitor {
                 target: task,
                 path: path.to_path_buf(),
                 root: root as u32,
+                prior: Prior::UNKNOWN,
             }],
             &opts,
         )
@@ -1237,6 +1238,7 @@ impl ScanMonitor {
                         target: Ref::Node(node as u64),
                         path,
                         root: i as u32,
+                        prior: Prior::UNKNOWN,
                     })
                 })
                 .collect()

@@ -23,8 +23,9 @@
 //! by every scan on it.
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use parking_lot::{Condvar, Mutex};
@@ -101,6 +102,22 @@ pub fn level_limit(level: Level, custom: Option<f64>) -> f64 {
 /// Where the controller aims: a little under the limit so noise rarely crosses it.
 pub fn setpoint(limit: f64) -> f64 {
     limit - (0.03 * limit).max(0.01)
+}
+
+/// `SPACEKNIFE_IO_TRACE=<file>`: one line per disk per sample window appended to that file (what
+/// the governor measured and decided; for measurements, not an interface).
+fn trace_sink() -> Option<&'static Mutex<std::fs::File>> {
+    static SINK: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+    SINK.get_or_init(|| {
+        let path = std::env::var_os("SPACEKNIFE_IO_TRACE")?;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()
+            .map(Mutex::new)
+    })
+    .as_ref()
 }
 
 fn wall_now() -> f64 {
@@ -644,10 +661,44 @@ impl GovernorCore {
         if clean {
             self.update_yield();
         }
+        let u_before = self.u;
         if self.pauses.is_empty() && demand && !held {
             self.control(n_bar, peak, blocked, sample.dt);
         }
         self.plan_probe(now, demand);
+        if let Some(sink) = trace_sink() {
+            let f = |x: Option<f64>| x.map_or("-".to_owned(), |v| format!("{v:.3}"));
+            let _ = writeln!(
+                sink.lock(),
+                "{:.3} {} busy={:.3} queue={:.2} riops={} rlat_us={} rho={:.3} others={} self={:.3} g_ref={} gain={} nbar={:.2} peak={} blocked={} held={} probe={:?} yield={} u={:.2}->{:.2} conc={} q_eff={} limit={:.2}",
+                wall.unwrap_or_else(wall_now),
+                self.disk.id,
+                sample.busy,
+                sample.queue,
+                sample
+                    .read_iops
+                    .map_or("-".to_owned(), |v| format!("{v:.0}")),
+                sample
+                    .read_latency
+                    .map_or("-".to_owned(), |v| format!("{:.0}", v * 1e6)),
+                rho,
+                f(self.others),
+                self.self_load,
+                f(self.g_ref),
+                f(self.gain),
+                n_bar,
+                peak,
+                blocked,
+                held,
+                self.probe,
+                self.yielding,
+                u_before,
+                self.u,
+                self.concurrency(),
+                f(self.q_eff),
+                self.limit(),
+            );
+        }
         self.record(span, wall);
     }
 

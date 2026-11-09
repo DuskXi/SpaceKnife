@@ -85,13 +85,40 @@ impl Ref {
     }
 }
 
-/// A directory to list: what it stands for, its absolute path, and the index of its root in
-/// [`SliceOptions::roots`].
+/// A directory to list: what it stands for, its absolute path, the index of its root in
+/// [`SliceOptions::roots`], and the walker's lean on whether its listing waits for the disk.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Task {
     pub target: Ref,
     pub path: PathBuf,
     pub root: u32,
+    /// For a folder of the frontier, its parent's posterior that it is cold (docs/native.md 2.2
+    /// 「列目录线程」: subtrees tend to be cold or warm together); a later call lists it in the
+    /// lane that says. [`Prior::UNKNOWN`] for a task the caller makes.
+    pub prior: Prior,
+}
+
+/// A probability that a folder's listing waits for the disk, as a [`Task`] carries it (one byte:
+/// 0 unknown, 1–255 for 0–1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Prior(u8);
+
+impl Prior {
+    pub const UNKNOWN: Prior = Prior(0);
+
+    /// `p` in 0–1 (NaN: unknown).
+    pub fn of(p: f32) -> Prior {
+        if p.is_nan() {
+            Prior::UNKNOWN
+        } else {
+            Prior(1 + (p.clamp(0.0, 1.0) * 254.0).round() as u8)
+        }
+    }
+
+    /// The probability (None: unknown).
+    pub fn get(self) -> Option<f32> {
+        (self.0 > 0).then(|| (self.0 - 1) as f32 / 254.0)
+    }
 }
 
 /// Per-root options (worker.RootOptions).
@@ -123,6 +150,9 @@ pub struct RootOptions {
     /// asked by name). [`ListedAlloc::Off`]: estimated from the size (`cluster_size`,
     /// `resident_max`, `GetCompressedFileSizeW` by path for sparse and compressed files).
     pub listed_alloc: ListedAlloc,
+    /// The storage the root lies on (the walker's lanes start and go by it; docs/native.md 2.2
+    /// 「列目录线程」, 设备提示). Calls on the shared carriers only.
+    pub device: DeviceHint,
 }
 
 /// Where a root's file allocations come from on Windows ([`RootOptions::listed_alloc`]): the
@@ -181,8 +211,37 @@ impl Default for RootOptions {
             path: None,
             verify_names: false,
             listed_alloc: ListedAlloc::Off,
+            device: DeviceHint::default(),
         }
     }
+}
+
+/// The storage a scan root lies on, as the backend knows it at once (docs/native.md 2.2
+/// 「列目录线程」, 设备提示: Windows `IOCTL_STORAGE_QUERY_PROPERTY`, Linux `/sys/class/block`,
+/// macOS `diskutil`): where the walker's listing lanes start, how wide they go, what a cold
+/// listing is expected to wait. Never learnt; [`Medium::Unknown`] when nothing is known.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Medium {
+    #[default]
+    Unknown,
+    /// NVMe SSD.
+    Nvme,
+    /// SATA and other SSDs.
+    Ssd,
+    /// A spinning disk (also behind USB).
+    Hdd,
+    /// USB flash drives, SD cards.
+    Flash,
+    /// A network share.
+    Network,
+    /// A virtual disk.
+    Virtual,
+}
+
+/// What the backend tells the walker about a root's device ([`RootOptions::device`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct DeviceHint {
+    pub medium: Medium,
 }
 
 /// Private knobs that make Windows behave as WinBtrfs does, for tests (win.rs `RootState`).
@@ -213,7 +272,7 @@ pub struct SliceOptions {
     /// Entry budget, checked like the time budget.
     pub max_entries: usize,
     /// Listing threads. 0 = the process's shared carriers: every such call lists on them, as many
-    /// folders at once as the adaptive width allows ([`listing_threads`]; the scanner's calls).
+    /// folders at once as the adaptive lanes allow ([`listing_threads`]; the scanner's calls).
     /// N = a pool of N threads of the call's own; a one-thread pool belongs to the calling
     /// thread, so several one-thread slices on several threads run side by side.
     pub threads: usize,
@@ -561,16 +620,19 @@ pub fn scan_slice(tasks: Vec<Task>, opts: &SliceOptions) -> Result<SliceResult, 
             });
         }
     }
-    // threads 0: the shared carriers, within the width; else a pool of the call's own
+    // threads 0: the shared carriers, within the lanes; else a pool of the call's own
     let pace = (opts.threads == 0).then(pace::get);
     let roots: Vec<RootOpts> = opts.roots.iter().map(root_opts).collect();
     let pool = match pace {
         Some(p) => {
+            if let Some(first) = opts.roots.first() {
+                p.note_hint(first.device);
+            }
             for r in &roots {
                 p.note_root(&r.path);
             }
             walk::carriers(p.capacity())
-                .or_else(|_| walk::carriers(p.widths.start))
+                .or_else(|_| walk::carriers(pace::start_width(p.n_cpu)))
                 .or_else(|_| walk::pool(1)) // no threads to be had: the calling thread's
         }
         None => walk::pool(opts.threads),
@@ -614,7 +676,6 @@ pub fn scan_slice(tasks: Vec<Task>, opts: &SliceOptions) -> Result<SliceResult, 
         arenas: (0..pool.current_num_threads().max(1))
             .map(|_| Mutex::new(Arena::default()))
             .collect(),
-        width: pace.map(pace::Pace::slots),
         gate: opts.gate.as_ref().map(|g| g.slots.clone()),
         pace,
         running: AtomicUsize::new(0),
@@ -623,7 +684,10 @@ pub fn scan_slice(tasks: Vec<Task>, opts: &SliceOptions) -> Result<SliceResult, 
     };
     let nodes: Vec<Node> = tasks
         .iter()
-        .map(|t| Node::new(path_to_native(&t.path), t.root, false))
+        .map(|t| {
+            let prior = t.prior.get().unwrap_or(f32::NAN);
+            Node::new(path_to_native(&t.path), t.root, false, prior)
+        })
         .collect();
 
     walk::walk(&pool, &nodes, &ctx);
@@ -668,52 +732,138 @@ pub fn open_stats(reset: bool) -> Vec<(&'static str, u64)> {
     sys::open_stats(reset)
 }
 
-/// The start width of the shared carriers ([`SliceOptions::threads`] = 0): as many calling
-/// threads as a scanner should use.
+/// The start width of the shared carriers ([`SliceOptions::threads`] = 0): the CPUs this process
+/// may use, 2–16 (macOS twice that, 4–16).
 pub fn default_threads() -> usize {
-    pace::get().widths.start
+    pace::start_width(pace::get().n_cpu)
 }
 
-/// How listings on the shared carriers are paced (pace.rs, docs/native.md 2.2 「列目录线程」).
+/// Calls a scanner should keep in flight on the shared carriers now (both lanes' widths over the
+/// folders a call lists there at once; cheap: an atomic read).
+pub fn wanted_calls() -> usize {
+    pace::get().calls()
+}
+
+/// How listings on the shared carriers are paced (pace/, docs/native.md 2.2 「列目录线程」).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ListingThreads {
     /// The CPUs this process may use.
     pub cpus: usize,
-    /// The start width: as many calling threads as the scanner should use.
+    /// The start width ([`default_threads`]).
     pub start: usize,
+    /// The narrowest the CPU lane goes.
     pub least: usize,
+    /// The widest the IO lane goes (the old cold width's place).
     pub cold: usize,
+    /// The widest both lanes go together: what a disk-load governor's concurrency, counted in
+    /// listings, may reach.
     pub max: usize,
-    /// The width now.
+    /// Both lanes' limits together now.
     pub width: usize,
     /// The carriers' pool now.
     pub threads: usize,
-    /// "adaptive", "fixed" (`SPACEKNIFE_SCAN_THREADS`) or "start" (`SPACEKNIFE_WALK_ADAPT=0`).
+    /// "lanes", "one lane" (`SPACEKNIFE_WALK_LANES=0`), "fixed" (`SPACEKNIFE_SCAN_THREADS`) or
+    /// "start" (`SPACEKNIFE_WALK_ADAPT=0`).
     pub mode: &'static str,
-    /// The narrowest and widest width since the last reset.
+    /// The narrowest and widest of both lanes together since the last reset.
     pub low: usize,
     pub high: usize,
+    /// Each lane: its limit now, the narrowest and widest since the last reset.
+    pub io: pace::LaneSeen,
+    pub cpu: pace::LaneSeen,
+    /// Calls a scanner should keep in flight now, and the fewest and most since the last reset.
+    pub calls: usize,
+    pub calls_low: usize,
+    pub calls_high: usize,
 }
 
-/// The listing width of calls on the shared carriers; `reset` starts `low` / `high` over from
-/// the width now, after reading them.
+/// The listing lanes of calls on the shared carriers; `reset` starts the lows and highs over from
+/// now, after reading them.
 pub fn listing_threads(reset: bool) -> ListingThreads {
     let p = pace::get();
-    let (low, high) = p.seen(reset);
+    let ([io, cpu], (calls_low, calls_high)) = p.seen(reset);
+    let lanes = pace::lane_cfgs_of(p);
     ListingThreads {
         cpus: p.n_cpu,
-        start: p.widths.start,
-        least: p.widths.least,
-        cold: p.widths.cold,
-        max: p.widths.most,
-        width: p.width(),
+        start: pace::start_width(p.n_cpu),
+        least: lanes[pace::CPU].lo,
+        cold: lanes[pace::IO].hi,
+        max: lanes[pace::IO].hi + lanes[pace::CPU].hi,
+        width: io.width + cpu.width,
         threads: p.capacity(),
         mode: match p.mode {
-            pace::Mode::Adaptive => "adaptive",
+            pace::Mode::Lanes => "lanes",
+            pace::Mode::OneLane => "one lane",
             pace::Mode::Fixed => "fixed",
             pace::Mode::Start => "start",
         },
-        low,
-        high,
+        low: io.low + cpu.low,
+        high: io.high + cpu.high,
+        io,
+        cpu,
+        calls: p.calls(),
+        calls_low,
+        calls_high,
+    }
+}
+
+/// A stretch of listing on the shared carriers, for a scan's profile.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PaceReport {
+    /// One point per second (two merged into one past 256 points).
+    pub timeline: Vec<PacePoint>,
+    /// The medium the lanes followed.
+    pub medium: Medium,
+    /// Listings the read counters' veto turned from cold to warm, and the lanes' restarts, since
+    /// the process started.
+    pub vetoed: u64,
+    pub restarts: u64,
+    /// The global cold fraction now.
+    pub cold: f64,
+    /// The share of a listing's time spent on the CPU, per lane (None: no CPU clock, none yet).
+    pub cpu_share: [Option<f64>; 2],
+}
+
+/// A point of [`PaceReport::timeline`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PacePoint {
+    /// Seconds since the report began, and the stretch's length.
+    pub t: f64,
+    pub dt: f64,
+    pub listings: u64,
+    /// Of them listed in the IO lane.
+    pub io_listings: u64,
+    /// The mean posterior that a listing was cold (with the read counters' veto), and from the
+    /// latencies alone.
+    pub cold: f64,
+    pub raw_cold: f64,
+    /// The time-mean limits of the lanes.
+    pub io_width: f64,
+    pub cpu_width: f64,
+}
+
+/// The shared carriers' report since the last reset (`reset`: a new one begins now).
+pub fn pace_report(reset: bool) -> PaceReport {
+    let r = pace::get().report(reset);
+    PaceReport {
+        timeline: r
+            .timeline
+            .iter()
+            .map(|p| PacePoint {
+                t: p.t,
+                dt: p.dt,
+                listings: p.listings,
+                io_listings: p.io,
+                cold: p.cold,
+                raw_cold: p.raw,
+                io_width: p.width[pace::IO],
+                cpu_width: p.width[pace::CPU],
+            })
+            .collect(),
+        medium: r.medium,
+        vetoed: r.vetoed,
+        restarts: r.restarts,
+        cold: r.cold,
+        cpu_share: r.cpu_share,
     }
 }
