@@ -469,7 +469,7 @@ async function portable() {
     await until("0.3.4 to quit", () => {
       // 0.3.4 removes the staging folder, unpacks again and starts the swap: when it can't, it says
       // so and runs on (v0.3.4 index.ts replacePortable, restartInto); no need to wait for the end
-      const failed = output.slice(heard).find((l) => /\[update\] could not (unpack|start the update)/.test(l));
+      const failed = output.slice(heard).find((l) => /\[update\] (could not (unpack|start the update)|\S+ is not one folder with |\S+ has no )/.test(l));
       if (failed) throw new Error(`0.3.4's second attempt did not get to the swap: ${failed}`);
       return app.exited;
     }, 90_000);
