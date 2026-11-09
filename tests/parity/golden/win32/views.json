@@ -1,0 +1,7994 @@
+{
+ "format": 1,
+ "scenario": "views",
+ "platform": "win32",
+ "steps": [
+  {
+   "i": 1,
+   "wait_scan": {
+    "state": "done",
+    "items": 319
+   },
+   "monotonic": true
+  },
+  {
+   "i": 2,
+   "call": "visual.list",
+   "result": {
+    "visuals": [
+     {
+      "id": "treemap",
+      "layout": "drawlist.v1",
+      "name": "Treemap",
+      "icon": "vizTreemap",
+      "order": 0,
+      "compare": true,
+      "free_space": true,
+      "default_color": "class",
+      "available": true,
+      "reason": null
+     },
+     {
+      "id": "flame",
+      "layout": "flame.v1",
+      "name": "Flame graph",
+      "icon": "vizFlame",
+      "order": 1,
+      "compare": true,
+      "free_space": true,
+      "default_color": "branch",
+      "available": true,
+      "reason": null
+     },
+     {
+      "id": "flame_polar",
+      "layout": "polar.v1",
+      "name": "Polar flame graph",
+      "icon": "vizFlamePolar",
+      "order": 2,
+      "compare": true,
+      "free_space": true,
+      "default_color": "branch",
+      "available": true,
+      "reason": null
+     }
+    ]
+   }
+  },
+  {
+   "i": 3,
+   "call": "view.open",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": false,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 1,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "open",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 1,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        556,
+        385,
+        191,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        683,
+        677,
+        64,
+        64,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        6,
+        688,
+        688,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        38,
+        19,
+        406,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 4,
+   "call": "view.render",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": false,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 2,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "render",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 2,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        556,
+        385,
+        191,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        683,
+        677,
+        64,
+        64,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        6,
+        688,
+        688,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        38,
+        19,
+        406,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 5,
+   "call": "view.list",
+   "result": {
+    "views": [
+     {
+      "view_id": "<view#1>",
+      "scan_id": "<scan#1>",
+      "zoom_node": "@$ROOT/tree",
+      "zoom_key": "@$ROOT/tree",
+      "detail": 5,
+      "min_element": 10.0,
+      "sort_by_size": true,
+      "show_free": true,
+      "show_unknown": true,
+      "show_trash": true,
+      "has_trash": false,
+      "visual": "treemap",
+      "color_mode": "class",
+      "colors": {
+       "treemap": "class",
+       "flame": "branch",
+       "flame_polar": "branch"
+      },
+      "filter_mode": "dim",
+      "viewport": {
+       "width": 800.0,
+       "height": 600.0,
+       "dpr": 1.0
+      },
+      "selected": null,
+      "results_sort": "size",
+      "compare": false,
+      "direction": "all",
+      "can_back": false,
+      "can_forward": false,
+      "can_up": false
+     }
+    ]
+   }
+  },
+  {
+   "i": 6,
+   "call": "view.list",
+   "result": {
+    "views": [
+     {
+      "view_id": "<view#1>",
+      "scan_id": "<scan#1>",
+      "zoom_node": "@$ROOT/tree",
+      "zoom_key": "@$ROOT/tree",
+      "detail": 5,
+      "min_element": 10.0,
+      "sort_by_size": true,
+      "show_free": true,
+      "show_unknown": true,
+      "show_trash": true,
+      "has_trash": false,
+      "visual": "treemap",
+      "color_mode": "class",
+      "colors": {
+       "treemap": "class",
+       "flame": "branch",
+       "flame_polar": "branch"
+      },
+      "filter_mode": "dim",
+      "viewport": {
+       "width": 800.0,
+       "height": 600.0,
+       "dpr": 1.0
+      },
+      "selected": null,
+      "results_sort": "size",
+      "compare": false,
+      "direction": "all",
+      "can_back": false,
+      "can_forward": false,
+      "can_up": false
+     }
+    ]
+   }
+  },
+  {
+   "i": 10,
+   "call": "view.zoom",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree/a",
+     "zoom_key": "@$ROOT/tree/a",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": true
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 3,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 4,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      },
+      {
+       "key": "@$ROOT/tree/a",
+       "label": "a"
+      }
+     ],
+     "scanned": 139264,
+     "filter": null,
+     "reason": "zoom",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 3,
+     "final": true,
+     "count": 4,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        0,
+        9,
+        9
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        399,
+        199
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        0,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        7,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        3,
+        9,
+        7,
+        7
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        126976,
+        126976,
+        8192,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        729,
+        723,
+        69,
+        69
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        731,
+        731
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        0,
+        401
+       ]
+      }
+     },
+     "names": [
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 11,
+   "call": "view.back",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": false,
+     "can_forward": true,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 4,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "back",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 4,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        556,
+        385,
+        191,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        683,
+        677,
+        64,
+        64,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        6,
+        688,
+        688,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        38,
+        19,
+        406,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 12,
+   "call": "view.forward",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree/a",
+     "zoom_key": "@$ROOT/tree/a",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": true
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 5,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 4,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      },
+      {
+       "key": "@$ROOT/tree/a",
+       "label": "a"
+      }
+     ],
+     "scanned": 139264,
+     "filter": null,
+     "reason": "forward",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 5,
+     "final": true,
+     "count": 4,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        0,
+        9,
+        9
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        399,
+        199
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        0,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        7,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        3,
+        9,
+        7,
+        7
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        126976,
+        126976,
+        8192,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        729,
+        723,
+        69,
+        69
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        731,
+        731
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        0,
+        401
+       ]
+      }
+     },
+     "names": [
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 13,
+   "call": "view.up",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": "@$ROOT/tree/a",
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 6,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 7,
+     "selected_row": 0,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "up",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 6,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        556,
+        385,
+        191,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        683,
+        677,
+        64,
+        64,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        6,
+        688,
+        688,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        38,
+        19,
+        406,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 14,
+   "call": "view.up",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": "@$ROOT/tree/a",
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": false,
+    "frame": null,
+    "filter": null
+   }
+  },
+  {
+   "i": 15,
+   "call": "view.home",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": "@$ROOT/tree/a",
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": false,
+    "frame": null,
+    "filter": null
+   },
+   "frames": []
+  },
+  {
+   "i": 16,
+   "call": "view.select",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": "@$ROOT/tree/a",
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": false,
+    "frame": null,
+    "filter": null
+   },
+   "frames": []
+  },
+  {
+   "i": 17,
+   "call": "view.select",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 7,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "select",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 7,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        556,
+        385,
+        191,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        683,
+        677,
+        64,
+        64,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        6,
+        688,
+        688,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        38,
+        19,
+        406,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 18,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 2,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 8,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 6,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "settings",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 8,
+     "final": true,
+     "count": 6,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        385,
+        191,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        7,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        7,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        683,
+        64,
+        64,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        688,
+        688,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        19,
+        406,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 19,
+   "call": "view.set",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "settings",
+     "min_element"
+    ]
+   }
+  },
+  {
+   "i": 20,
+   "call": "view.set",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "settings",
+     "detail"
+    ]
+   }
+  },
+  {
+   "i": 21,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 2,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "time",
+     "colors": {
+      "treemap": "time",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 9,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 6,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "settings",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 9,
+     "final": true,
+     "count": 6,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        385,
+        191,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        7,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        7,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        683,
+        64,
+        64,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        688,
+        688,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        19,
+        406,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 22,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 2,
+     "min_element": 10.0,
+     "sort_by_size": false,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "branch",
+     "colors": {
+      "treemap": "branch",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 10,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 6,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "settings",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 10,
+     "final": true,
+     "count": 6,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        9,
+        255,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        578,
+        578,
+        578,
+        299,
+        299
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        2,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        0,
+        7,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        0,
+        3,
+        7,
+        4,
+        16
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        4096,
+        126976,
+        8192,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        20,
+        683,
+        42,
+        43,
+        43
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        25,
+        710,
+        757,
+        757
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        19,
+        19,
+        0,
+        301
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "",
+      "sub",
+      "two.bin",
+      "deep",
+      "中文 文件夹"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 23,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 2,
+     "min_element": 10.0,
+     "sort_by_size": false,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "flame",
+     "color_mode": "branch",
+     "colors": {
+      "treemap": "branch",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 11,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 8,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "visual",
+     "flash": [],
+     "visual": "flame",
+     "layout": "flame.v1",
+     "geometry": {
+      "kind": "flame",
+      "origin": "bottom",
+      "row_h": 48,
+      "rows": 2,
+      "gap": 2,
+      "root": {
+       "x": 0,
+       "y": 554,
+       "w": 800,
+       "h": 46
+      }
+     },
+     "root": {
+      "key": "@$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "kind": 1,
+      "size": 147456,
+      "count": 0,
+      "flags": 0,
+      "tag": 0,
+      "tone": 4,
+      "branch": 0,
+      "delta": null,
+      "dstat": null
+     }
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "flame.v1",
+     "seq": 11,
+     "final": true,
+     "count": 8,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        3,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        9,
+        255,
+        9,
+        255,
+        255,
+        255,
+        1
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        2,
+        2,
+        1,
+        2,
+        1,
+        2
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        46,
+        46,
+        46,
+        46,
+        46,
+        46,
+        46,
+        46
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/deep/l1",
+        "@$ROOT/tree/中文 文件夹",
+        "@$ROOT/tree/中文 文件夹/照片.jpg"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        2,
+        0,
+        1,
+        2,
+        1,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        0,
+        3,
+        3,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        0,
+        3,
+        7,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/deep/l1",
+        "@$ROOT/tree/中文 文件夹",
+        "@$ROOT/tree/中文 文件夹/照片.jpg"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        0,
+        0,
+        -1,
+        4,
+        -1,
+        6
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        4096,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        20,
+        689,
+        42,
+        21,
+        21,
+        20,
+        20
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        0,
+        22,
+        713,
+        757,
+        757,
+        780,
+        780
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        506,
+        458,
+        458,
+        458,
+        506,
+        458,
+        506,
+        458
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "",
+      "sub",
+      "two.bin",
+      "",
+      "",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 24,
+   "call": "view.zoom",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree/a",
+     "zoom_key": "@$ROOT/tree/a",
+     "detail": 2,
+     "min_element": 10.0,
+     "sort_by_size": false,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "flame",
+     "color_mode": "branch",
+     "colors": {
+      "treemap": "branch",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": true
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 12,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 4,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      },
+      {
+       "key": "@$ROOT/tree/a",
+       "label": "a"
+      }
+     ],
+     "scanned": 139264,
+     "filter": null,
+     "reason": "zoom",
+     "flash": [],
+     "visual": "flame",
+     "layout": "flame.v1",
+     "geometry": {
+      "kind": "flame",
+      "origin": "bottom",
+      "row_h": 48,
+      "rows": 2,
+      "gap": 2,
+      "root": {
+       "x": 0,
+       "y": 554,
+       "w": 800,
+       "h": 46
+      }
+     },
+     "root": {
+      "key": "@$ROOT/tree/a",
+      "node": "@$ROOT/tree/a",
+      "kind": 1,
+      "size": 139264,
+      "count": 0,
+      "flags": 0,
+      "tag": 0,
+      "tone": 4,
+      "branch": 0,
+      "delta": null,
+      "dstat": null
+     }
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "flame.v1",
+     "seq": 12,
+     "final": true,
+     "count": 4,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        9,
+        255,
+        0,
+        9
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        2,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        46,
+        46,
+        46,
+        46
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        1,
+        0,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        0,
+        3,
+        9,
+        7
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        -1,
+        1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        4096,
+        126976,
+        126976,
+        8192
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        22,
+        729,
+        729,
+        45
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        24,
+        24,
+        755
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        506,
+        506,
+        458,
+        506
+       ]
+      }
+     },
+     "names": [
+      "",
+      "sub",
+      "movie.mp4",
+      "two.bin"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 25,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree/a",
+     "zoom_key": "@$ROOT/tree/a",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": false,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "flame_polar",
+     "color_mode": "branch",
+     "colors": {
+      "treemap": "branch",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": true
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 13,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 4,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      },
+      {
+       "key": "@$ROOT/tree/a",
+       "label": "a"
+      }
+     ],
+     "scanned": 139264,
+     "filter": null,
+     "reason": "visual",
+     "flash": [],
+     "visual": "flame_polar",
+     "layout": "polar.v1",
+     "geometry": {
+      "kind": "polar",
+      "cx": 400,
+      "cy": 300,
+      "radius": 290,
+      "hole": 70,
+      "ring_w": 44,
+      "rings": 5,
+      "gap": 2,
+      "unit": 1048576
+     },
+     "root": {
+      "key": "@$ROOT/tree/a",
+      "node": "@$ROOT/tree/a",
+      "kind": 1,
+      "size": 139264,
+      "count": 0,
+      "flags": 0,
+      "tag": 0,
+      "tone": 4,
+      "branch": 0,
+      "delta": null,
+      "dstat": null
+     }
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "polar.v1",
+     "seq": 13,
+     "final": true,
+     "count": 4,
+     "columns": {
+      "a0": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        30840,
+        30840,
+        986895
+       ]
+      },
+      "a1": {
+       "dtype": "<i4",
+       "values": [
+        30840,
+        986895,
+        986895,
+        1048576
+       ]
+      },
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        9,
+        255,
+        0,
+        9
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        2,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        1,
+        0,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        3,
+        3,
+        25
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        0,
+        3,
+        9,
+        7
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        -1,
+        1,
+        -1
+       ]
+      },
+      "r0": {
+       "dtype": "<i4",
+       "values": [
+        71,
+        71,
+        115,
+        71
+       ]
+      },
+      "r1": {
+       "dtype": "<i4",
+       "values": [
+        113,
+        113,
+        157,
+        113
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        4096,
+        126976,
+        126976,
+        8192
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4
+       ]
+      }
+     },
+     "names": [
+      "",
+      "sub",
+      "movie.mp4",
+      "two.bin"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 26,
+   "call": "view.home",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": false,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "flame_polar",
+     "color_mode": "branch",
+     "colors": {
+      "treemap": "branch",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 800.0,
+      "height": 600.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 14,
+     "width": 800,
+     "height": 600,
+     "dpr": 1.0,
+     "rows": 12,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "home",
+     "flash": [],
+     "visual": "flame_polar",
+     "layout": "polar.v1",
+     "geometry": {
+      "kind": "polar",
+      "cx": 400,
+      "cy": 300,
+      "radius": 290,
+      "hole": 70,
+      "ring_w": 44,
+      "rings": 5,
+      "gap": 2,
+      "unit": 1048576
+     },
+     "root": {
+      "key": "@$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "kind": 1,
+      "size": 147456,
+      "count": 0,
+      "flags": 0,
+      "tag": 0,
+      "tone": 4,
+      "branch": 0,
+      "delta": null,
+      "dstat": null
+     }
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "polar.v1",
+     "seq": 14,
+     "final": true,
+     "count": 12,
+     "columns": {
+      "a0": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        0,
+        29127,
+        29127,
+        932068,
+        990322,
+        990322,
+        990322,
+        990322,
+        990322,
+        1019449,
+        1019449
+       ]
+      },
+      "a1": {
+       "dtype": "<i4",
+       "values": [
+        990322,
+        29127,
+        932068,
+        932068,
+        990322,
+        1019449,
+        1019449,
+        1019449,
+        1019449,
+        1019449,
+        1048576,
+        1048576
+       ]
+      },
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        3,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        9,
+        255,
+        0,
+        9,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        1
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        2,
+        3,
+        2,
+        1,
+        2,
+        3,
+        4,
+        5,
+        1,
+        2
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/deep/l1",
+        "@$ROOT/tree/deep/l1/l2",
+        "@$ROOT/tree/deep/l1/l2/l3",
+        "@$ROOT/tree/deep/l1/l2/l3/l4",
+        "@$ROOT/tree/中文 文件夹",
+        "@$ROOT/tree/中文 文件夹/照片.jpg"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        1,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        2,
+        1,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        25,
+        3,
+        3,
+        3,
+        0,
+        25,
+        25,
+        25,
+        3,
+        0,
+        25
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        7,
+        3,
+        9,
+        7,
+        0,
+        2,
+        2,
+        2,
+        2,
+        0,
+        10
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/deep/l1",
+        "@$ROOT/tree/deep/l1/l2",
+        "@$ROOT/tree/deep/l1/l2/l3",
+        "@$ROOT/tree/deep/l1/l2/l3/l4",
+        "@$ROOT/tree/中文 文件夹",
+        "@$ROOT/tree/中文 文件夹/照片.jpg"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        0,
+        2,
+        0,
+        -1,
+        5,
+        6,
+        7,
+        8,
+        -1,
+        10
+       ]
+      },
+      "r0": {
+       "dtype": "<i4",
+       "values": [
+        71,
+        115,
+        115,
+        159,
+        115,
+        71,
+        115,
+        159,
+        203,
+        247,
+        71,
+        115
+       ]
+      },
+      "r1": {
+       "dtype": "<i4",
+       "values": [
+        113,
+        157,
+        157,
+        201,
+        157,
+        113,
+        157,
+        201,
+        245,
+        289,
+        113,
+        157
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        4096,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096,
+        4096,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "one.bin",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "",
+      "l1",
+      "l2",
+      "l3",
+      "l4",
+      "",
+      "照片.jpg"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 27,
+   "call": "view.set",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 28,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 15,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "visual",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 15,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        556,
+        512,
+        369,
+        183,
+        298,
+        298
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        1,
+        1,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        677,
+        665,
+        62,
+        62,
+        41,
+        41
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        6,
+        12,
+        687,
+        687,
+        759,
+        759
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        38,
+        76,
+        38,
+        411,
+        0,
+        302
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 29,
+   "call": "view.filter",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 16,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": {
+      "text": "*.log",
+      "active": true,
+      "stale": false,
+      "mode": "dim",
+      "files": 300,
+      "alloc": 0,
+      "size": 74850,
+      "diagnostics": []
+     },
+     "reason": "filter",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": {
+     "text": "*.log",
+     "active": true,
+     "stale": false,
+     "mode": "dim",
+     "files": 300,
+     "alloc": 0,
+     "size": 74850,
+     "diagnostics": []
+    }
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 16,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        556,
+        512,
+        369,
+        183,
+        298,
+        298
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        1,
+        1,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        677,
+        665,
+        62,
+        62,
+        41,
+        41
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        6,
+        12,
+        687,
+        687,
+        759,
+        759
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        38,
+        76,
+        38,
+        411,
+        0,
+        302
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 30,
+   "call": "view.results",
+   "result": {
+    "view_id": "<view#1>",
+    "seq": 16,
+    "active": true,
+    "sort": "size",
+    "total": 1,
+    "files": 300,
+    "alloc": 0,
+    "size": 74850,
+    "max_alloc": 0,
+    "offset": 0,
+    "rows": [
+     {
+      "key": "@$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "kind": "rest",
+      "name": "",
+      "count": 300,
+      "alloc": 0,
+      "size": 74850,
+      "path": "",
+      "tag": null,
+      "tag_inherited": false
+     }
+    ]
+   }
+  },
+  {
+   "i": 31,
+   "call": "view.results",
+   "result": {
+    "view_id": "<view#1>",
+    "seq": 16,
+    "active": true,
+    "sort": "name",
+    "total": 1,
+    "files": 300,
+    "alloc": 0,
+    "size": 74850,
+    "max_alloc": 0,
+    "offset": 1,
+    "rows": []
+   }
+  },
+  {
+   "i": 32,
+   "call": "view.filter",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": null,
+     "results_sort": "name",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 17,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": {
+      "text": ">1kb;<10kb",
+      "active": true,
+      "stale": false,
+      "mode": "dim",
+      "files": 4,
+      "alloc": 20480,
+      "size": 8825,
+      "diagnostics": []
+     },
+     "reason": "filter",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": {
+     "text": ">1kb;<10kb",
+     "active": true,
+     "stale": false,
+     "mode": "dim",
+     "files": 4,
+     "alloc": 20480,
+     "size": 8825,
+     "diagnostics": []
+    }
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 17,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        1,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        556,
+        512,
+        369,
+        183,
+        298,
+        298
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        1,
+        1,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        677,
+        665,
+        62,
+        62,
+        41,
+        41
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        6,
+        12,
+        687,
+        687,
+        759,
+        759
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        38,
+        76,
+        38,
+        411,
+        0,
+        302
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 33,
+   "call": "view.results",
+   "result": {
+    "view_id": "<view#1>",
+    "seq": 17,
+    "active": true,
+    "sort": "count",
+    "total": 4,
+    "files": 4,
+    "alloc": 20480,
+    "size": 8825,
+    "max_alloc": 8192,
+    "offset": 0,
+    "rows": [
+     {
+      "key": "@$ROOT/tree/a/two.bin",
+      "node": "@$ROOT/tree/a/two.bin",
+      "kind": "file",
+      "name": "two.bin",
+      "count": 1,
+      "alloc": 8192,
+      "size": 5000,
+      "path": "a",
+      "tag": null,
+      "tag_inherited": false
+     },
+     {
+      "key": "@$ROOT/tree/deep",
+      "node": "@$ROOT/tree/deep",
+      "kind": "folder",
+      "name": "deep",
+      "count": 1,
+      "alloc": 4096,
+      "size": 777,
+      "path": "",
+      "tag": null,
+      "tag_inherited": false
+     },
+     {
+      "key": "@$ROOT/tree/中文 文件夹",
+      "node": "@$ROOT/tree/中文 文件夹",
+      "kind": "folder",
+      "name": "中文 文件夹",
+      "count": 1,
+      "alloc": 4096,
+      "size": 2048,
+      "path": "",
+      "tag": null,
+      "tag_inherited": false
+     },
+     {
+      "key": "@$ROOT/tree/a/one.bin",
+      "node": "@$ROOT/tree/a/one.bin",
+      "kind": "file",
+      "name": "one.bin",
+      "count": 1,
+      "alloc": 4096,
+      "size": 1000,
+      "path": "a",
+      "tag": null,
+      "tag_inherited": false
+     }
+    ]
+   }
+  },
+  {
+   "i": 34,
+   "call": "view.filter",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": null,
+     "results_sort": "count",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": false,
+    "frame": null,
+    "filter": {
+     "text": ">>1kb",
+     "active": true,
+     "stale": true,
+     "mode": "dim",
+     "files": 4,
+     "alloc": 20480,
+     "size": 8825,
+     "diagnostics": [
+      {
+       "code": "bad_operator",
+       "severity": "error",
+       "start": 0,
+       "end": 2,
+       "cond_start": 0,
+       "cond_end": 5,
+       "text": ">>",
+       "expected": [
+        "<",
+        ">",
+        "<=",
+        ">="
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "i": 35,
+   "call": "view.set",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "hide",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": null,
+     "results_sort": "count",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 18,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 10,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": {
+      "text": ">>1kb",
+      "active": true,
+      "stale": true,
+      "mode": "hide",
+      "files": 4,
+      "alloc": 20480,
+      "size": 8825,
+      "diagnostics": [
+       {
+        "code": "bad_operator",
+        "severity": "error",
+        "start": 0,
+        "end": 2,
+        "cond_start": 0,
+        "cond_end": 5,
+        "text": ">>",
+        "expected": [
+         "<",
+         ">",
+         "<=",
+         ">="
+        ]
+       }
+      ]
+     },
+     "reason": "settings",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": {
+     "text": ">>1kb",
+     "active": true,
+     "stale": true,
+     "mode": "hide",
+     "files": 4,
+     "alloc": 20480,
+     "size": 8825,
+     "diagnostics": [
+      {
+       "code": "bad_operator",
+       "severity": "error",
+       "start": 0,
+       "end": 2,
+       "cond_start": 0,
+       "cond_end": 5,
+       "text": ">>",
+       "expected": [
+        "<",
+        ">",
+        "<=",
+        ">="
+       ]
+      }
+     ]
+    }
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 18,
+     "final": true,
+     "count": 10,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        3,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        9,
+        9,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        1
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        2,
+        1,
+        2,
+        3,
+        4,
+        5,
+        1,
+        2
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        369,
+        183,
+        298,
+        254,
+        210,
+        166,
+        122,
+        298,
+        254
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/deep/l1",
+        "@$ROOT/tree/deep/l1/l2",
+        "@$ROOT/tree/deep/l1/l2/l3",
+        "@$ROOT/tree/deep/l1/l2/l3/l4",
+        "@$ROOT/tree/中文 文件夹",
+        "@$ROOT/tree/中文 文件夹/照片.jpg"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        2,
+        1,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        7,
+        7,
+        4,
+        2,
+        2,
+        2,
+        2,
+        16,
+        10
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/deep/l1",
+        "@$ROOT/tree/deep/l1/l2",
+        "@$ROOT/tree/deep/l1/l2/l3",
+        "@$ROOT/tree/deep/l1/l2/l3/l4",
+        "@$ROOT/tree/中文 文件夹",
+        "@$ROOT/tree/中文 文件夹/照片.jpg"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        0,
+        -1,
+        3,
+        4,
+        5,
+        6,
+        -1,
+        8
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        12288,
+        8192,
+        4096,
+        4096,
+        4096,
+        4096,
+        4096,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        478,
+        466,
+        466,
+        318,
+        306,
+        294,
+        282,
+        270,
+        318,
+        306
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        6,
+        6,
+        482,
+        488,
+        494,
+        500,
+        506,
+        482,
+        488
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        38,
+        411,
+        0,
+        38,
+        76,
+        114,
+        152,
+        302,
+        340
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "two.bin",
+      "one.bin",
+      "deep",
+      "l1",
+      "l2",
+      "l3",
+      "l4",
+      "中文 文件夹",
+      "照片.jpg"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 36,
+   "call": "view.filter",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "hide",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": null,
+     "results_sort": "count",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 19,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "filter",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 19,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        556,
+        512,
+        369,
+        183,
+        298,
+        298
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        1,
+        1,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        677,
+        665,
+        62,
+        62,
+        41,
+        41
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        6,
+        12,
+        687,
+        687,
+        759,
+        759
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        38,
+        76,
+        38,
+        411,
+        0,
+        302
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 37,
+   "call": "view.reveal",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree/many",
+     "zoom_key": "@$ROOT/tree/many",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "hide",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": "@$ROOT/tree/many/f150.log",
+     "results_sort": "count",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": true
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 20,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 0,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      },
+      {
+       "key": "@$ROOT/tree/many",
+       "label": "many"
+      }
+     ],
+     "scanned": 0,
+     "filter": null,
+     "reason": "reveal",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 20,
+     "final": true,
+     "count": 0,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": []
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": []
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": []
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": []
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": []
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": []
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": []
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": []
+      }
+     },
+     "names": []
+    }
+   ]
+  },
+  {
+   "i": 38,
+   "call": "view.reveal",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree/deep",
+     "zoom_key": "@$ROOT/tree/deep",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "hide",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": "@$ROOT/tree/deep/l1/l2/l3/l4/x.dat",
+     "results_sort": "count",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": true
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 21,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 5,
+     "selected_row": 4,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      },
+      {
+       "key": "@$ROOT/tree/deep",
+       "label": "deep"
+      }
+     ],
+     "scanned": 4096,
+     "filter": null,
+     "reason": "reveal",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 21,
+     "final": true,
+     "count": 5,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        255,
+        255,
+        9
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        4,
+        5
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        32,
+        32,
+        32,
+        32,
+        16
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        556,
+        512,
+        468,
+        424
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/deep/l1",
+        "@$ROOT/tree/deep/l1/l2",
+        "@$ROOT/tree/deep/l1/l2/l3",
+        "@$ROOT/tree/deep/l1/l2/l3/l4",
+        "@$ROOT/tree/deep/l1/l2/l3/l4/x.dat"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        0
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        3,
+        3,
+        7
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        2,
+        2,
+        2,
+        2,
+        5
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/deep/l1",
+        "@$ROOT/tree/deep/l1/l2",
+        "@$ROOT/tree/deep/l1/l2/l3",
+        "@$ROOT/tree/deep/l1/l2/l3/l4",
+        "@$ROOT/tree/deep/l1/l2/l3/l4/x.dat"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        2,
+        3
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        4096,
+        4096,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        800,
+        788,
+        776,
+        764,
+        752
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        6,
+        12,
+        18,
+        24
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        38,
+        76,
+        114,
+        152
+       ]
+      }
+     },
+     "names": [
+      "l1",
+      "l2",
+      "l3",
+      "l4",
+      "x.dat"
+     ]
+    }
+   ]
+  },
+  {
+   "i": 41,
+   "call": "view.tag",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "hide",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": "@$ROOT/tree/a",
+     "results_sort": "count",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 24,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 7,
+     "selected_row": 0,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "tag",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 24,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        24,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        556,
+        512,
+        369,
+        183,
+        298,
+        298
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        1,
+        1,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        677,
+        665,
+        62,
+        62,
+        41,
+        41
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        6,
+        12,
+        687,
+        687,
+        759,
+        759
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        38,
+        76,
+        38,
+        411,
+        0,
+        302
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 42,
+   "call": "tree.summary",
+   "result": {
+    "tag": "red"
+   }
+  },
+  {
+   "i": 43,
+   "call": "view.tag",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "hide",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": "@$ROOT/tree/a",
+     "results_sort": "count",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#1>",
+     "seq": 25,
+     "width": 800,
+     "height": 600,
+     "dpr": 2.0,
+     "rows": 7,
+     "selected_row": 0,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "tag",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#1>",
+     "layout": "drawlist.v1",
+     "seq": 25,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        16,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        600,
+        556,
+        512,
+        369,
+        183,
+        298,
+        298
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        7,
+        1,
+        1,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        7,
+        7,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        755,
+        677,
+        665,
+        62,
+        62,
+        41,
+        41
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        6,
+        12,
+        687,
+        687,
+        759,
+        759
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        38,
+        76,
+        38,
+        411,
+        0,
+        302
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "two.bin",
+      "one.bin",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 44,
+   "call": "view.zoom",
+   "result": {
+    "state": {
+     "view_id": "<view#1>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "branch"
+     },
+     "filter_mode": "hide",
+     "viewport": {
+      "width": 400.0,
+      "height": 300.0,
+      "dpr": 2.0
+     },
+     "selected": "@$ROOT/tree/a",
+     "results_sort": "count",
+     "compare": false,
+     "direction": "all",
+     "can_back": true,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": false,
+    "frame": null,
+    "filter": null
+   }
+  },
+  {
+   "i": 45,
+   "call": "view.open",
+   "result": {
+    "state": {
+     "view_id": "<view#2>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "flame_polar",
+     "color_mode": "flat",
+     "colors": {
+      "treemap": "class",
+      "flame": "branch",
+      "flame_polar": "flat"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 300.0,
+      "height": 300.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": false,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#2>",
+     "seq": 1,
+     "width": 300,
+     "height": 300,
+     "dpr": 1.0,
+     "rows": 6,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "open",
+     "flash": [],
+     "visual": "flame_polar",
+     "layout": "polar.v1",
+     "geometry": {
+      "kind": "polar",
+      "cx": 150,
+      "cy": 150,
+      "radius": 141,
+      "hole": 36,
+      "ring_w": 21,
+      "rings": 5,
+      "gap": 2,
+      "unit": 1048576
+     },
+     "root": {
+      "key": "@$ROOT/tree",
+      "node": "@$ROOT/tree",
+      "kind": 1,
+      "size": 147456,
+      "count": 0,
+      "flags": 0,
+      "tag": 0,
+      "tone": 4,
+      "branch": 0,
+      "delta": null,
+      "dstat": null
+     }
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#2>",
+     "layout": "polar.v1",
+     "seq": 1,
+     "final": true,
+     "count": 6,
+     "columns": {
+      "a0": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        0,
+        0,
+        902940,
+        961195,
+        990322
+       ]
+      },
+      "a1": {
+       "dtype": "<i4",
+       "values": [
+        990322,
+        902940,
+        902940,
+        961195,
+        990322,
+        1048576
+       ]
+      },
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        0
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@more:@$ROOT/tree"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        5
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        9,
+        9,
+        9,
+        0,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        0,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1
+       ]
+      },
+      "r0": {
+       "dtype": "<i4",
+       "values": [
+        37,
+        58,
+        79,
+        58,
+        58,
+        37
+       ]
+      },
+      "r1": {
+       "dtype": "<i4",
+       "values": [
+        56,
+        77,
+        98,
+        77,
+        77,
+        56
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        8192
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 46,
+   "call": "view.close",
+   "result": {}
+  },
+  {
+   "i": 47,
+   "call": "view.render",
+   "error": {
+    "code": -32012,
+    "loc": null
+   }
+  },
+  {
+   "i": 48,
+   "call": "view.open",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  },
+  {
+   "i": 50,
+   "call": "view.open",
+   "result": {
+    "state": {
+     "view_id": "<view#3>",
+     "scan_id": "<scan#1>",
+     "zoom_node": "@$ROOT/tree",
+     "zoom_key": "@$ROOT/tree",
+     "detail": 5,
+     "min_element": 10.0,
+     "sort_by_size": true,
+     "show_free": true,
+     "show_unknown": true,
+     "show_trash": true,
+     "has_trash": false,
+     "visual": "treemap",
+     "color_mode": "class",
+     "colors": {
+      "treemap": "class",
+      "flame": "class",
+      "flame_polar": "class"
+     },
+     "filter_mode": "dim",
+     "viewport": {
+      "width": 200.0,
+      "height": 100.0,
+      "dpr": 1.0
+     },
+     "selected": null,
+     "results_sort": "size",
+     "compare": false,
+     "direction": "all",
+     "can_back": false,
+     "can_forward": false,
+     "can_up": false
+    },
+    "changed": true,
+    "frame": {
+     "view_id": "<view#3>",
+     "seq": 1,
+     "width": 200,
+     "height": 100,
+     "dpr": 1.0,
+     "rows": 7,
+     "selected_row": null,
+     "breadcrumb": [
+      {
+       "key": "@$ROOT/tree",
+       "label": "$ROOT/tree"
+      }
+     ],
+     "scanned": 147456,
+     "filter": null,
+     "reason": "open",
+     "flash": [],
+     "visual": "treemap",
+     "layout": "drawlist.v1",
+     "geometry": null,
+     "root": null
+    },
+    "filter": null
+   },
+   "frames": [
+    {
+     "stream": "view:<view#3>",
+     "layout": "drawlist.v1",
+     "seq": 1,
+     "final": true,
+     "count": 7,
+     "columns": {
+      "branch": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        3
+       ]
+      },
+      "cls": {
+       "dtype": "<u1",
+       "values": [
+        255,
+        255,
+        0,
+        9,
+        9,
+        255,
+        255
+       ]
+      },
+      "count": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+       ]
+      },
+      "depth": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        2,
+        3,
+        2,
+        2,
+        1,
+        1
+       ]
+      },
+      "flags": {
+       "dtype": "<u2",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "h": {
+       "dtype": "<i4",
+       "values": [
+        100,
+        78,
+        56,
+        51,
+        25,
+        49,
+        49
+       ]
+      },
+      "key": {
+       "dtype": "<u4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "kind": {
+       "dtype": "<u1",
+       "values": [
+        1,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2
+       ]
+      },
+      "label": {
+       "dtype": "<u1",
+       "values": [
+        3,
+        3,
+        3,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "name_len": {
+       "dtype": "<u4",
+       "values": [
+        1,
+        3,
+        9,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "node": {
+       "dtype": "<i4",
+       "values": [
+        "@$ROOT/tree/a",
+        "@$ROOT/tree/a/sub",
+        "@$ROOT/tree/a/sub/movie.mp4",
+        "@$ROOT/tree/a/two.bin",
+        "@$ROOT/tree/a/one.bin",
+        "@$ROOT/tree/deep",
+        "@$ROOT/tree/中文 文件夹"
+       ]
+      },
+      "parent": {
+       "dtype": "<i4",
+       "values": [
+        -1,
+        0,
+        1,
+        0,
+        0,
+        -1,
+        -1
+       ]
+      },
+      "size": {
+       "dtype": "<i8",
+       "values": [
+        139264,
+        126976,
+        126976,
+        8192,
+        4096,
+        4096,
+        4096
+       ]
+      },
+      "tag": {
+       "dtype": "<u1",
+       "values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+       ]
+      },
+      "tone": {
+       "dtype": "<u1",
+       "values": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+       ]
+      },
+      "w": {
+       "dtype": "<i4",
+       "values": [
+        189,
+        167,
+        161,
+        14,
+        14,
+        9,
+        9
+       ]
+      },
+      "x": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        3,
+        6,
+        172,
+        172,
+        191,
+        191
+       ]
+      },
+      "y": {
+       "dtype": "<i4",
+       "values": [
+        0,
+        19,
+        38,
+        19,
+        72,
+        0,
+        51
+       ]
+      }
+     },
+     "names": [
+      "a",
+      "sub",
+      "movie.mp4",
+      "",
+      "",
+      "",
+      ""
+     ]
+    }
+   ]
+  },
+  {
+   "i": 51,
+   "call": "view.set",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 52,
+   "call": "view.set",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 53,
+   "call": "view.render",
+   "error": {
+    "code": -32012,
+    "loc": null
+   }
+  },
+  {
+   "i": 54,
+   "call": "scan.close",
+   "result": {}
+  },
+  {
+   "i": 55,
+   "call": "view.render",
+   "error": {
+    "code": -32012,
+    "loc": null
+   }
+  },
+  {
+   "i": 56,
+   "call": "view.list",
+   "result": {
+    "views": []
+   }
+  }
+ ]
+}

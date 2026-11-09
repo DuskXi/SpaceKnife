@@ -4,3 +4,11 @@
 *.woff2 binary
 *.ttf binary
 *.otf binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.gif binary
+*.mp4 binary
+*.sks binary
+# real 0.3.4 data, byte for byte (the Windows files have CRLF line ends, as 0.3.4 wrote them there)
+crates/sk-core/tests/data/v034/** -text

@@ -1,0 +1,6 @@
+# A project of its own (like apps/desktop): its own lockfile, not part of a repository-wide workspace.
+allowBuilds:
+  electron: true
+  esbuild: true
+  # electron-builder's Squirrel.Windows support: not a target here (NSIS)
+  electron-winstaller: false

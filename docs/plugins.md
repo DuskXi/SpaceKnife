@@ -28,11 +28,11 @@
 
 只写后端引擎的插件，产出一种已有的布局格式，所有前端都不用改，画面自然一致。
 
-推广开来：**前端能画的东西应当是少数几种通用的「形状」，由我们维护；插件往这些形状里填数据。** 布局格式（矩形、条带、极坐标）就是第一批这样的形状。设置页按元数据自动渲染（`settings.py` 里的 `S(...)`），是另一个现成的例子。
+推广开来：**前端能画的东西应当是少数几种通用的「形状」，由我们维护；插件往这些形状里填数据。** 布局格式（矩形、条带、极坐标）就是第一批这样的形状。设置页按元数据自动渲染（`crates/sk-core/src/settings/registry.rs` 里的设置声明），是另一个现成的例子。
 
 ### 2.2 契约加一致性测试，才是真正的接口
 
-- 后端的行契约 1–8 由 `layout/contract.py` 的 `check_draw` 检查；前端的几何一致性由 `visual/testing/conformance.ts` 检查。
+- 后端的行契约 1–8 由 `layout/contract.rs` 的 `check_draw` 检查；前端的几何一致性由 `visual/testing/conformance.ts` 检查。
 - 两者都按注册表参数化：任何东西一注册，就会被同一套测试检查。
 
 这套检查本身就是插件开发包的核心，应当原样发给插件开发者（第 7 节）。只给接口签名、不给契约检查，插件质量没法保证。
@@ -45,7 +45,7 @@
 
 ### 2.4 通用效果由宿主统一提供
 
-呼吸灯、变化闪烁、标签、过滤暗化、分支配色、选中与悬停，都由宿主按行算好、统一绘制（后端 `View._annotate`，前端 `visual/Host.tsx` 与 `visual/overlays.ts`）。新可视化不写一行就全有。
+呼吸灯、变化闪烁、标签、过滤暗化、分支配色、选中与悬停，都由宿主按行算好、统一绘制（后端 `view/state.rs` 的 `annotate`，前端 `components/visual/Host.vue` 与 `visual/overlays.ts`）。新可视化不写一行就全有。
 
 插件只负责自己独有的那部分，体验的一致性由宿主保证。这是开放程度和质量能同时成立的关键。
 
@@ -67,10 +67,10 @@
 
 | 情况 | 现在的做法 | 问题 |
 |---|---|---|
-| 命令面板命令 | 后端 `palette/commands.py` 的 `C(...)` 声明 id 和按键；前端在 `state/commands.ts` 的 `runCommand` 和 `App.tsx` 的按键处理里再接一遍 | 按键要手动保持一致，代码里只能写注释提醒 |
-| 协议 | pydantic 模型 → `spaceknife schema` → `tools/gen_ts_protocol.py` → `generated.ts` | 已经是生成的，但要记得跑；漏跑由 CI 的 `--check` 拦下 |
-| 文案 | 代码里写中文原文，英文写在 `locales/en/*.json` | `tools/i18n_check.py` 兜底，但多个代理并行时共享的 locale 文件容易冲突 |
-| 设置 | `S(...)` 一处声明，设置页自动渲染 | 这是好例子 |
+| 命令面板命令 | 后端 `crates/sk-core/src/palette/commands.rs` 的 `Command` 声明 id 和按键；前端在 `state/commands.ts` 的 `runCommand` 和 `state/shortcuts.ts` 的按键处理里再接一遍 | 按键要手动保持一致，代码里只能写注释提醒 |
+| 协议 | `crates/sk-protocol` 的 Rust 类型 → `cargo run -p sk-protocol --bin gen-ts` → `crates/sk-protocol/generated/protocol.ts` | 已经是生成的，但要记得跑；漏跑由 CI 的 `--check` 拦下 |
+| 文案 | 代码里写中文原文，英文写在 `locales/en/*.json` | `node tools/i18n_check.mjs` 兜底，但多个代理并行时共享的 locale 文件容易冲突 |
+| 设置 | `settings/registry.rs` 一处声明，设置页自动渲染 | 这是好例子 |
 
 插件系统的要求：**一项东西只声明一次，其余全部生成或自动接线。** 命令、按键、设置、文案、协议类型都一样。
 
@@ -101,23 +101,23 @@
 
 | 部件 | 位置 | 插件系统里的用途 |
 |---|---|---|
-| 协议模型和方法、事件注册表 | `packages/protocol/src/spaceknife_protocol/`（`methods.py` 的 `MethodSpec`、`EventSpec`、`METHODS`、`EVENTS`） | 插件的方法和事件用同一套模型描述 |
-| schema 与 TypeScript 生成 | `spaceknife schema`、`tools/gen_ts_protocol.py` | 扩展为按插件生成类型化的客户端 |
-| 服务端路由 | `server/rpc.py` 的 `Router.method(spec)` | 插件方法按命名空间注册进来 |
-| 订阅 | `server/topics.py` 的 `TopicRegistry`（`$/subscribe`） | 插件的数据流、共享状态 |
-| 二进制列帧 | `spaceknife_protocol/binary.py` 的 `encode_frame` | 插件返回大数组时走二进制，不走 JSON |
-| 能力协商 | `session.hello`、`spaceknife_protocol/__init__.py` | 插件提供和需要的能力 |
-| Python 客户端 | `packages/client` | 测试插件的后端部分，以及命令行插件 |
-| 前端调用与类型 | `apps/electron/src/renderer/src/protocol/rpc.ts`、`generated.ts` | 生成插件专用的类型化接口 |
-| 宿主能力（Electron） | `apps/electron/src/preload/index.ts`、`apps/electron/src/shared/api.ts`（`window.sk`） | 统一成「宿主服务」，插件不直接碰 IPC |
-| 浏览器模式 | `apps/electron/src/renderer/src/shim.ts`、`tools/demo/m3_web.py` | 不起 Electron 也能开发、测试插件界面 |
-| 子进程通道 | `helper/transport.py`（提权助手：鉴权的本地通道） | 外部进程插件的传输层 |
-| 设置元数据 | `settings.py` 的 `S(...)` 与设置页 | 插件设置一处声明、自动渲染 |
-| 命令面板 | `palette/commands.py` 的 `C(...)` | 插件命令；顺带解决 2.7 的两处声明 |
-| 国际化 | `i18n.tr` / 前端 `t()`、`locales/`、`tools/i18n_check.py` | 插件自带中英文案，同一套检查 |
-| 设计令牌和图标 | `design/tokens`、`design/icons`、`tools/gen_design.py` | 插件图标和颜色取自令牌，风格统一 |
-| 已有的注册表 | `layout/registry.py`；`monitor/base.py` 的 `Watcher` / `create_watcher`；`export/formats.py` 的 `FORMATS`；`insights/`（内置规则加用户 TOML） | 统一成一个扩展注册表 |
-| 契约与一致性检查 | `layout/contract.py`、`visual/testing/conformance.ts` | 插件开发包的测试核心 |
+| 协议模型和方法、事件注册表 | `crates/sk-protocol/src/`（`methods.rs` 的 `MethodSpec`、`EventSpec`、`METHODS`、`EVENTS`） | 插件的方法和事件用同一套模型描述 |
+| schema 与 TypeScript 生成 | `cargo run -p sk-protocol --bin gen-ts [-- --schema <out.json>]` | 扩展为按插件生成类型化的客户端 |
+| 服务端路由 | `crates/sk-server/src/rpc.rs` 的 `Router`（`add`） | 插件方法按命名空间注册进来 |
+| 订阅 | `crates/sk-server/src/topics.rs` 的 `TopicRegistry`（`$/subscribe`） | 插件的数据流、共享状态 |
+| 二进制列帧 | `crates/sk-protocol/src/binary.rs` 的 `encode_frame` | 插件返回大数组时走二进制，不走 JSON |
+| 能力协商 | `session.hello`、`crates/sk-protocol/src/lib.rs` | 插件提供和需要的能力 |
+| 客户端 | 暂无 Rust 版（原 Python 客户端 `packages/client` 只作参考）；服务端的集成测试在 `crates/sk-server/tests/` | 测试插件的后端部分，以及命令行插件 |
+| 前端调用与类型 | `apps/desktop/app/protocol/rpc.ts`、`generated.ts` | 生成插件专用的类型化接口 |
+| 宿主能力（Tauri） | `apps/desktop/app/shared/api.ts`（`window.sk`）、`apps/desktop/app/lib/tauriHost.ts`、`apps/desktop/src-tauri/src/commands.rs` | 统一成「宿主服务」，插件不直接碰 IPC |
+| 浏览器模式 | `apps/desktop/app/shim.ts`、`pnpm dev`、`spaceknife-cli headless` | 不起窗口也能开发、测试插件界面 |
+| 子进程通道 | `crates/sk-core/src/helper/transport.rs`（提权助手：鉴权的本地通道） | 外部进程插件的传输层 |
+| 设置元数据 | `settings/registry.rs` 的设置声明与设置页 | 插件设置一处声明、自动渲染 |
+| 命令面板 | `palette/commands.rs` 的 `Command` | 插件命令；顺带解决 2.7 的两处声明 |
+| 国际化 | 后端 `tr!` / 前端 `t()`、`locales/`、`node tools/i18n_check.mjs` | 插件自带中英文案，同一套检查 |
+| 设计令牌和图标 | `design/tokens`、`design/icons`、`node tools/gen_design.mjs` | 插件图标和颜色取自令牌，风格统一 |
+| 已有的注册表 | `layout/registry.rs`；`monitor/mod.rs` 的 `Watcher` / `create_watcher`；`export/formats.rs` 的 `FORMATS`；`insights/`（内置规则加用户 TOML） | 统一成一个扩展注册表 |
+| 契约与一致性检查 | `layout/contract.rs`、`visual/testing/conformance.ts` | 插件开发包的测试核心 |
 
 ## 4. 统一通讯层：插件开发者看到的样子
 

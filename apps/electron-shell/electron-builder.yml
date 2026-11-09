@@ -1,0 +1,108 @@
+# The Electron shell's packages, only where the Tauri app can't run: the RHEL 9 rpm, the AppImage and
+# the unpacked Linux app that scripts/portable.mjs packs as the Linux portable copy under 0.3.4's
+# name. The Tauri shell makes the Windows installer (its forked NSIS template, apps/desktop/src-tauri/
+# windows), the other portable copies, the deb and the macOS app (apps/desktop); the win / nsis
+# settings below are no longer built or published. Built by
+# scripts/package.mjs, which first puts spaceknife-cli (and on Windows SpaceKnife.com) and the
+# licences in ../../target/electron-shell/stage and builds main and preload (electron-vite); the
+# interface is apps/desktop's Nuxt build. See docs/packaging.md. No code signing certificate yet:
+# the Windows and Linux builds are unsigned.
+#
+# What 0.3.4 installed must update to this in place (plan §5.4, path A): the same appId (so the same
+# uninstall GUID 3cb3f1fc-…), product name, install folder, shortcuts, user data folder, rpm
+# package name, executable names and installer options as 0.3.4's electron-builder.yml.
+appId: io.github.duskxi.spaceknife
+productName: SpaceKnife
+copyright: Copyright © 2026 DuskXi
+directories:
+  buildResources: build # icon.ico, icon.png, icons/<n>x<n>.png, installer.nsh
+  output: ../../target/electron-shell/dist
+files:
+  - out/**
+  - resources/icon.png # the window icon (Linux)
+  - "!**/*.map"
+extraResources:
+  # resources/ui: the window's interface (src/main/index.ts uiDir), and what `spaceknife-cli headless`
+  # serves by default (crates/sk-server/src/cli/headless.rs ui_candidates: resources/ui next to it)
+  - from: ../desktop/.output/public
+    to: ui
+  # SpaceKnife (MIT) and the third-party licences of spaceknife-cli and the interface
+  - from: ../../target/electron-shell/stage/licenses
+    to: licenses
+asar: true
+electronLanguages: [en-US, zh-CN] # the two UI languages (M7.5); drops the other Chromium locales
+npmRebuild: false # no native Node modules
+# No publish target and no update information (latest.yml, app-update.yml): the update check is
+# SpaceKnife's own (crates/sk-core update), as in 0.3.4. Unset, a GH_TOKEN in the environment (CI
+# has one for `gh release download`) makes electron-builder look for a GitHub repository to publish
+# to and stop when it finds none (src/main/builder.test.ts).
+publish: null
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-Setup-x64.${ext}
+  extraFiles:
+    # the backend and headless mode, next to SpaceKnife.exe (src/main/backend.ts cliPath)
+    - from: ../../target/electron-shell/stage/spaceknife-cli.exe
+      to: spaceknife-cli.exe
+    # the console entry: `SpaceKnife --headless` in a terminal (packaging/console-launcher)
+    - from: ../../target/electron-shell/stage/SpaceKnife.com
+      to: SpaceKnife.com
+nsis:
+  oneClick: false # an assisted installer: current user or all users, install folder
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SpaceKnife
+  uninstallDisplayName: SpaceKnife
+  deleteAppDataOnUninstall: false # scans, snapshots and settings stay unless the user removes them
+  multiLanguageInstaller: true # the installer follows the system language
+  installerLanguages: [en_US, zh_CN]
+  displayLanguageSelector: false
+  runAfterFinish: true
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+  icon: build/icons
+  executableName: spaceknife
+  syncDesktopName: true # spaceknife.desktop = package.json desktopName = the window's app_id / WM_CLASS
+  category: Utility
+  synopsis: Disk space treemap — see what fills your drives
+  # also the .desktop Comment (electron-builder puts the description there)
+  description: See what fills your drives — a live treemap with filters, snapshot comparison and cleanup
+  maintainer: DuskXi <84715902+DuskXi@users.noreply.github.com>
+  vendor: DuskXi
+  desktop:
+    entry:
+      Name: SpaceKnife
+      GenericName: Disk Space Analyzer
+      GenericName[zh_CN]: 磁盘空间分析
+      Comment[zh_CN]: 看清是什么占满了磁盘：实时树图、过滤、快照对比与清理
+      Keywords: disk;space;usage;treemap;storage;cleanup;磁盘;空间;
+  extraFiles:
+    # the backend and headless mode, next to the program (/opt/SpaceKnife, the AppImage's root)
+    - from: ../../target/electron-shell/stage/spaceknife-cli
+      to: spaceknife-cli
+appImage:
+  artifactName: ${productName}-${version}-x86_64.${ext}
+rpm:
+  packageName: spaceknife
+  artifactName: spaceknife-${version}.x86_64.${ext}
+  # electron-builder's own scripts (the /usr/bin/spaceknife link, chrome-sandbox) plus
+  # /usr/bin/spaceknife-cli; after a whole upgrade transaction, the links 0.3.4's removal script
+  # took away are put back, and the folders 0.3.4 left removed (build/linux/rpm-posttrans.sh).
+  # --directories: the package owns /opt/SpaceKnife and every folder in it (%dir), which rpm
+  # removes with it; fpm lists only files otherwise (so did 0.3.4's rpm), and a removal leaves the
+  # folders behind, empty
+  afterInstall: build/linux/after-install.sh
+  afterRemove: build/linux/after-remove.sh
+  fpm: ["--rpm-posttrans", "build/linux/rpm-posttrans.sh", "--directories", "/opt/SpaceKnife"]

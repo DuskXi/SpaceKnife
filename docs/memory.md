@@ -1,6 +1,8 @@
 # 内存模型
 
-后端把一次扫描存成按列的节点表（numpy 数组）加一个名字堆，不为每个文件建 Python 对象。本文给出每项（一个文件或文件夹）的内存开销、规模估算、两种存储模式，以及防止内存失控的机制。数字来自 `tools/bench_memory.py`，在一个 845 万项的 C: 盘快照上实测（Windows 11，2026-10-18）。
+后端把一次扫描存成按列的节点表加一个名字堆，不为每个文件建对象。本文给出每项（一个文件或文件夹）的内存开销、规模估算、两种存储模式，以及防止内存失控的机制。数字来自 `tools/bench_memory.py`，在一个 845 万项的 C: 盘快照上实测（Windows 11，2026-10-18）。
+
+> **现状（0.3.5 起）**：后端已改写为 Rust，节点表与名字堆在 `crates/sk-store`（`store.rs`、`heap.rs`、`mapped.rs`、`subtree.rs`、`mutate.rs`；列布局和每项 89 B 不变，见 `crates/sk-store/src/lib.rs`），名字索引在 `crates/sk-core/src/filter/names.rs`，计算池在 `crates/sk-server/src/compute.rs`，看门狗在 `crates/sk-server/src/diag.rs`，堆的归还与 glibc 设置在 `crates/sk-core/src/memory.rs`（`release`、`tune_allocator`、`trim`）；窗口默认是 Tauri + 系统 WebView，没有 Electron 的各个进程（rpm、AppImage 和沿用 0.3.4 文件名的 Linux 便携版仍是精简的 Electron 外壳，后端是它的子进程 `spaceknife-cli serve`）。下文的路径（`server/*.py`、`store/*.py`、`NodeStore`、numpy、tracemalloc、PyInstaller）和测量都是 0.3.x（Python 后端 + Electron）时的；Rust 版的数字还没有重新测过。<!-- TODO: confirm — Rust 后端与 Tauri 窗口的内存实测 -->
 
 ## 1. 每项开销
 
@@ -79,7 +81,7 @@ C: 盘实测（845 万项，名字平均 24 B）：
 - **监控整理**（`mutate.compact`）：实时监控下删掉和重列的行累计到 25%（至少 10 万行）时，整棵树重新编号一次。
   - 原来重排名字时给每个名字字节建一个 int64 下标（加上中间数组约 600 B/项），整理一次 C: 瞬间多占 +6278 MB（每项 759 B）。
   - 现在列按 26 万行一块、名字按 4096 行一块，从名字堆的各块直接拼进新的 `\0name` 图像，新节点表原样接管；新编号和映射表用 int32。C: 实测峰值 +1024 MB，其中 980 MB 就是整理出来的新副本，耗时不变（3.1 秒）。结果与旧算法逐列一致（随机树对照测试）。
-- **后端基线**：命令面板的拼音（「qhps」找到「切换配色」）改为读开发时生成的 `palette/pinyin.json`（`tools/gen_pinyin.py`，测试检查是否最新），运行时不再导入 pypinyin，空闲后端少约 50 MB（导入它就要 50 MB 词典）。
+- **后端基线**：命令面板的拼音（「qhps」找到「切换配色」）改为读开发时生成的 `palette/pinyin.json`（现在是 `crates/sk-core/src/palette/pinyin.json`，由 `node tools/gen_pinyin.mjs` 生成，测试检查是否最新），运行时不再导入 pypinyin，空闲后端少约 50 MB（导入它就要 50 MB 词典）。
 - **整盘汇总**（`tree.summary`：详情面板的类别、最大文件、最近修改；「本机磁盘」的类别构成）：
   - 分块遍历子树，每块约 26 万项（`subtree.SUMMARY_CHUNK`、`subtree_chunks`），临时内存不超过几十 MB；原来每次整棵子树一次性展开，约 100 B/项（C: 约 0.85 GB）。结果与分块大小无关（随机树对照测试）。
   - 后端按「节点、store 版本、类别表、文件夹类别选择」缓存（`scans.cached_summary`，每个扫描 8 条），同一扫描的汇总一次只算一个：详情面板、「本机磁盘」和扫描结束时几乎同时要的同一份汇总只算一次，原来三份同时算。扫描进行中不缓存（扫描先改版本号、后写入行）。
@@ -192,7 +194,7 @@ C: 盘实测（845 万项，名字平均 24 B）：
 - 按每项的数字估算 C:（860 万项）：默认扫完稳定约 1.4 GB（改之前约 2 GB）；打开大扫描映射后，扫描中峰值约 0.9 GB、扫完稳定约 0.5 GB，代价是每次扫描约写盘 1.8 GB。未在真实 C: 上复测。
 - 因为这次写盘，大扫描映射默认关，开关留在「设置 → 高级 → 内存」。
 
-## 10. 前端（Electron）的内存
+## 10. 前端（Electron，0.3.x）的内存
 
 实测（2026-10-22，Windows 11，3840×2160 显示器、125% 缩放，窗口最大化，打开 C: 快照的树图；每个进程的私有工作集 / 私有提交，GPU 进程的显存来自 Windows 的 GPU 计数器）：
 

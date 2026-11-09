@@ -78,6 +78,7 @@ export interface Content {
     rpm: { title: string; note: string };
     appimage: { title: string; note: string };
     portableLinux: { title: string; note: string };
+    portableLinuxTauri: { title: string; note: string };
     button: string;
     sha: string;
     copy: string;
@@ -155,10 +156,10 @@ export const content: Record<Lang, Content> = {
     ],
     mockNote: "Screenshots use mock data, not a real disk.",
     openTitle: "Open source, built in the open",
-    openBody: "SpaceKnife is MIT-licensed. The scanner, the treemap layout and the filter engine run in a Python backend with a native Rust extension; the Electron interface talks to it over a documented WebSocket protocol.",
+    openBody: "SpaceKnife is MIT-licensed. The scanner, the treemap layout and the filter engine are written in Rust; the interface talks to them over a documented WebSocket protocol.",
     openPoints: [
       "No account, no telemetry: everything runs locally on your computer.",
-      "Python 3.12 backend, Rust (PyO3) native scanner, Electron + React + WebGL interface.",
+      "Rust backend and scanner, Tauri + Vue + WebGL interface on the system's WebView.",
       "More than a thousand automated tests on Windows and Linux.",
     ],
     openCta: "Read the source",
@@ -172,7 +173,8 @@ export const content: Record<Lang, Content> = {
       deb: { title: "Ubuntu / Debian", note: "Ubuntu 22.04+, Debian 12+ and derivatives." },
       rpm: { title: "RHEL / Fedora", note: "RHEL 9+, Rocky, Alma, Fedora and derivatives." },
       appimage: { title: "AppImage", note: "Any x64 Linux with glibc 2.34+. Needs FUSE 2." },
-      portableLinux: { title: "Linux · portable", note: "x64, glibc 2.34+. Extract anywhere and run, no FUSE needed; data stays next to it." },
+      portableLinux: { title: "Linux · portable", note: "x64, glibc 2.34+, RHEL 9 too. Extract anywhere and run, no FUSE needed; data stays next to it." },
+      portableLinuxTauri: { title: "Linux · portable, light", note: "x64, a much smaller download that uses the system's WebKitGTK 4.1 (Ubuntu 22.04+, Debian 12+, Fedora). Extract and run; data stays next to it." },
       button: "Download",
       sha: "SHA-256",
       copy: "Copy",
@@ -275,10 +277,10 @@ export const content: Record<Lang, Content> = {
     ],
     mockNote: "截图使用模拟数据，不是真实的磁盘。",
     openTitle: "开源，公开开发",
-    openBody: "SpaceKnife 使用 MIT 许可证。扫描、树图布局和过滤引擎运行在 Python 后端和 Rust 原生扩展里，Electron 界面通过有文档的 WebSocket 协议与后端通信。",
+    openBody: "SpaceKnife 使用 MIT 许可证。扫描、树图布局和过滤引擎都用 Rust 编写，界面通过有文档的 WebSocket 协议与它们通信。",
     openPoints: [
       "不需要账号，没有遥测：一切都在你的电脑上本地运行。",
-      "Python 3.12 后端、Rust（PyO3）原生扫描器、Electron + React + WebGL 界面。",
+      "Rust 后端与扫描器，Tauri + Vue + WebGL 界面，用系统自带的 WebView。",
       "在 Windows 和 Linux 上有上千项自动化测试。",
     ],
     openCta: "阅读源码",
@@ -292,7 +294,8 @@ export const content: Record<Lang, Content> = {
       deb: { title: "Ubuntu / Debian", note: "Ubuntu 22.04+、Debian 12+ 及衍生版。" },
       rpm: { title: "RHEL / Fedora", note: "RHEL 9+、Rocky、Alma、Fedora 及衍生版。" },
       appimage: { title: "AppImage", note: "任意 x64 Linux（glibc 2.34+），需要 FUSE 2。" },
-      portableLinux: { title: "Linux · 便携版", note: "x64，glibc 2.34+。解压后直接运行，不需要 FUSE；数据存在旁边。" },
+      portableLinux: { title: "Linux · 便携版", note: "x64，glibc 2.34+，RHEL 9 也能用。解压后直接运行，不需要 FUSE；数据存在旁边。" },
+      portableLinuxTauri: { title: "Linux · 轻量便携版", note: "x64，下载小得多，用系统自带的 WebKitGTK 4.1（Ubuntu 22.04+、Debian 12+、Fedora）。解压即用，数据存在旁边。" },
       button: "下载",
       sha: "SHA-256",
       copy: "复制",

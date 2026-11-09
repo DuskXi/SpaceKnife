@@ -19,10 +19,11 @@ Include what you found, how to reproduce it, and the version and operating syste
 
 Areas where a security problem matters most:
 
-- **The elevated scan helper** (Windows NTFS quick scan): it runs with administrator rights and must stay read-only and accept only the backend that started it.
-- **The local backend**: a WebSocket server on `127.0.0.1` that requires a per-session token; the interface and the backend must not be reachable from other machines or other users.
+- **The elevated scan helper** (Windows NTFS quick scan, `spaceknife-cli helper`): it runs with administrator rights and must stay read-only and accept only the SpaceKnife process that started it.
+- **The local backend**: a WebSocket server on `127.0.0.1` that requires a per-session token, running inside the app (or, in the Electron builds, as the app's child process `spaceknife-cli serve`); the interface and the backend must not be reachable from other machines or other users.
+- **Headless mode** (`spaceknife-cli headless`): it serves the interface and the backend over HTTP(S) on an address the user chooses, possibly the network. A link with the token gives the rights of the account it runs as; without the token, nothing but the public page files may be reachable, and the page must accept only its own origin.
 - **File operations**: the delete basket, the recycle bin and the protected system and program folders; a request to move something to the recycle bin must never delete it permanently.
-- **Installers and updates**: the installers are not code-signed yet; verify downloads against the `SHA256SUMS.txt` attached to each release. The in-app update download checks the file against those sums itself and only starts files named like this project's release files. A portable copy's files are swapped by SpaceKnife's own backend executable from the new version (`--apply-update`), not by a script. SpaceKnife never installs an update by itself: every install starts with the user's click in the update card, and no option to install automatically will be added.
+- **Installers and updates**: the installers are not code-signed yet; verify downloads against the `SHA256SUMS.txt` attached to each release. The in-app update download checks the file against those sums itself, downloads nothing when the release lists no checksum for the file, and only starts files named like this project's release files. A portable copy's files are swapped by the new version's own SpaceKnife executable (`--apply-update`), not by a script, after it has checked that the new version can start. SpaceKnife never installs an update by itself: every install starts with the user's click in the update card, and no option to install automatically will be added.
 
 SpaceKnife sends no telemetry. Its only network requests of its own are the update check — at most once a day it reads this project's release list from `api.github.com`, sending nothing about you or your files — and, when a newer version is found (or you click to download it), the release file and its checksums from `github.com`. Switch the check off in Settings › About & updates.
 
@@ -45,9 +46,10 @@ SpaceKnife 目前是预发布版。安全修复只进入最新版本，报告前
 
 ### 重点范围
 
-- **提权扫描助手**（Windows NTFS 快速扫描）：以管理员权限运行，必须保持只读，并且只接受启动它的那个后端。
-- **本地后端**：监听 `127.0.0.1` 的 WebSocket 服务，每次会话需要令牌；不能被其他机器或其他用户访问。
+- **提权扫描助手**（Windows NTFS 快速扫描，`spaceknife-cli helper`）：以管理员权限运行，必须保持只读，并且只接受启动它的那个 SpaceKnife 进程。
+- **本地后端**：监听 `127.0.0.1` 的 WebSocket 服务，每次会话需要令牌，在应用进程里运行（Electron 版里是应用的子进程 `spaceknife-cli serve`）；不能被其他机器或其他用户访问。
+- **无头模式**（`spaceknife-cli headless`）：在用户选定的地址（可能是网络上的地址）上经 HTTP(S) 提供界面和后端。带令牌的链接拥有运行它的那个账户的权限；没有令牌时，除了公开的页面文件什么都不能访问，页面也只接受自己的来源。
 - **文件操作**：删除篮、回收站，以及受保护的系统和程序目录；「移到回收站」的请求绝不能变成永久删除。
-- **安装包与更新**：目前还没有代码签名，请用每个版本附带的 `SHA256SUMS.txt` 校验下载的文件。应用内的更新下载会自己按这份校验和核对文件，并且只启动按本项目发布文件命名的文件。便携版的程序文件由新版本自带的 SpaceKnife 后端程序（`--apply-update`）替换，不经过脚本。SpaceKnife 从不自己安装更新：每次安装都从用户在更新卡片里的点击开始，也不会加自动安装的选项。
+- **安装包与更新**：目前还没有代码签名，请用每个版本附带的 `SHA256SUMS.txt` 校验下载的文件。应用内的更新下载会自己按这份校验和核对文件，发布里没有列出这个文件的校验值时不下载，并且只启动按本项目发布文件命名的文件。便携版的程序文件由新版本自带的 SpaceKnife 程序（`--apply-update`）在确认新版本能启动之后替换，不经过脚本。SpaceKnife 从不自己安装更新：每次安装都从用户在更新卡片里的点击开始，也不会加自动安装的选项。
 
 SpaceKnife 没有遥测。它自己发起的网络请求只有两种：检查更新（每天最多一次，从 `api.github.com` 读取本项目的发布列表，不发送任何关于你或你的文件的信息），以及发现新版本后（或你点击下载时）从 `github.com` 下载发布文件和它的校验值。可以在「设置 › 关于与更新」里关掉检查。

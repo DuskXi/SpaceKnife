@@ -50,7 +50,7 @@ An MFT quick scan shows its phases instead of a percentage: `Waiting for adminis
 A full scan lists folders in batches: each call lists up to 256 folders and returns after at most 50 ms with what it has. Batches run on a pool of **listing threads**; the main thread folds every batch into the tree, which is why the picture can grow while the scan runs.
 
 - **Listing threads**: one per CPU, between 2 and 16. On macOS twice the CPUs, between 4 and 16, because APFS listings wait in the kernel often enough that extra threads keep the CPUs busy. `SPACEKNIFE_SCAN_THREADS` sets the number (1 to 64).
-- **Native walker**: the listing is done by a native extension written in Rust, included in every installer. Without it (a source checkout without Rust) a Python walker runs in worker processes and is several times slower.
+- **Native walker**: the listing is done by SpaceKnife's own Rust code, with the system calls below.
 - **System calls**: on Windows one `NtQueryDirectoryFile` call returns names, sizes, size on disk, times, attributes and file IDs together; on Linux `openat`, `getdents64` and `fstatat`; on macOS `getattrlistbulk` for files and `fstatat` for folders.
 - **How many batches run at once** is decided by the disk-load limit and the kind of disk (below).
 

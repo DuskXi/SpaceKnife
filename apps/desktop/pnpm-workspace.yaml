@@ -1,0 +1,5 @@
+# A project of its own (like apps/electron): its own lockfile, not part of a repository-wide workspace.
+allowBuilds:
+  "@parcel/watcher": true
+  "@tauri-apps/cli": true
+  esbuild: true

@@ -1,10 +1,14 @@
 name: Release check
 
-# Reads a published release the way an installed SpaceKnife reads it (tools/release.py check):
+# Reads a published release the way an installed SpaceKnife reads it (the app's own update code,
+# cargo run -p sk-core --example release_check):
 # it must be the newest of its channel, every kind of install must find its file under the exact
 # name, and every file must match the checksum the app would read for it (each file is downloaded
-# and hashed). Runs when a release is published (also a draft the Release workflow left, published
-# by hand), and by hand for any version.
+# and hashed). Then the way an installed 0.3.4 reads it, with 0.3.4's own code (v0.3.4's tree and
+# Python environment, and its window's update.ts: tools/compat034.mjs): 0.3.4 picks the newest
+# release first and only then looks for its file by 0.3.4's names, so every release has to keep
+# them. Runs when a release is published (also a draft the Release workflow left, published by
+# hand), and by hand for any version.
 on:
   release:
     types: [published]
@@ -25,15 +29,39 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+      - name: Set up Rust
+        run: rustup toolchain install --no-self-update # the one rust-toolchain.toml pins
 
-      - name: Install Python 3.12 and the backend
-        run: |
-          uv python install 3.12
-          uv sync --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-check
 
       - name: Every kind of install finds its file and checksum
         env:
           VERSION: ${{ inputs.version || github.event.release.tag_name }}
-        run: COLUMNS=160 uv run python tools/release.py check "${VERSION#v}" --download
+        run: cargo run --locked -q -p sk-core --example release_check -- "${VERSION#v}" --download
+
+  compat034:
+    name: Read the release as 0.3.4 does
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: v0.3.4's tree and its Python environment
+        run: |
+          set -euo pipefail
+          git fetch --quiet --depth=1 origin tag v0.3.4
+          pipx install uv==0.8.4
+          mkdir -p "$RUNNER_TEMP/v034"
+          git archive --format=tar v0.3.4 | tar -x -C "$RUNNER_TEMP/v034"
+          ~/.local/bin/uv sync --project "$RUNNER_TEMP/v034" --frozen --no-default-groups --package spaceknife-backend --python 3.12
+
+      - name: Every 0.3.4 install finds its file and checksum
+        env:
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
+        run: node tools/compat034.mjs --tree "$RUNNER_TEMP/v034" --version "${VERSION#v}" --github

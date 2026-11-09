@@ -1,25 +1,20 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-dist/
-build/
-!design/build/
-!apps/electron/build/
-
-# Node / Electron
-node_modules/
-out/
-.vite/
-
 # Rust
 target/
 target-*/
-.venv-*/
+
+# Node (apps/desktop, site)
+node_modules/
+dist/
+!design/build/
+*.tsbuildinfo
+
+# Nuxt / Tauri (apps/desktop)
+.nuxt/
+.output/
+apps/desktop/src-tauri/gen/
+
+# Electron shell (apps/electron-shell): electron-vite's build
+apps/electron-shell/out/
 
 # OS / editors
 .DS_Store
@@ -36,5 +31,3 @@ Thumbs.db
 # Profiler output
 /prof*.out
 *.pdb
-*.so
-*.tsbuildinfo

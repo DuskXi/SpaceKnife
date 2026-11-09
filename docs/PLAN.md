@@ -10,7 +10,9 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 | 决定 | 结论 | 拍板时间 |
 |---|---|---|
-| 原生扩展 | 允许在 Python 3.12 后端里内嵌 Rust 扩展（PyO3 + maturin，abi3-py312，由 uv 管理），每条原生路径都保留纯 Python 回退 | 2026-10-15 |
+| 原生扩展 | 允许在 Python 3.12 后端里内嵌 Rust 扩展（PyO3 + maturin，abi3-py312，由 uv 管理），每条原生路径都保留纯 Python 回退（0.3.5 起被下一条取代） | 2026-10-15 |
+| 后端改写为 Rust（0.3.5） | 采纳 dev-rust（PR #22）的纯 Rust 后端（`crates/sk-native`、`sk-protocol`、`sk-store`、`sk-core`、`sk-server`；命令行 `spaceknife-cli`），协议 v1 不变，作为 0.3.5 发布（不叫 0.4.0）；界面改为 Nuxt 4 + Vue 3（`apps/desktop/app`）。合并的关卡：不新增缺陷、不比 0.3.4 差（与 v0.3.4 的 Python 后端做协议对等测试 `tests/parity`），0.3.4 的每种安装都能干净地更新上来（发布文件沿用 0.3.4 的名字，以后每个版本都沿用），0.3.4 的数据原样读回。Python 后端（`packages/`）与 0.3.x 的 Electron 应用（`apps/electron/`）已从仓库删去，留在 git 历史和 `v0.3.4` 里。性能代码在 `sk-native`，它不依赖任何别的 sk-* crate | 2026-11-08 |
+| 两个外壳：Tauri 为默认，Electron 只兜底 | 同一份界面跑在两个外壳里：Tauri 2（`apps/desktop/src-tauri`，系统 WebView，后端在应用进程里）是默认，用于 Windows 安装包、Windows 与 macOS 的便携版、macOS 的 dmg、Ubuntu / Debian 的 deb 和新的小巧 Linux 便携版；Electron（`apps/electron-shell`，只有主进程和 preload，后端是子进程 `spaceknife-cli serve`）只用在 Tauri 跑不了的地方：RHEL 9 的 rpm（RHEL 9 没有 WebKitGTK 4.1）、AppImage，以及沿用 0.3.4 文件名的 Linux 便携版（给 RHEL 9 上 0.3.4 便携版用户的更新路径）。无头模式保留（`spaceknife-cli headless` 和 0.3.4 的启动写法） | 2026-11-08 |
 | 平台下限 | Windows 10+、RHEL 9+ / Ubuntu 22.04+（glibc 2.34）、macOS 14+；不支持 RHEL 8 / Ubuntu 20.04 | 2026-10-15 |
 | 视觉一致的口径 | 共享设计 token、同一套字体和图标、同样的布局；树图由同一份绘制列表渲染并做截图比对（像素接近）；标准控件高度相似即可，不要求逐像素 | 2026-10-15 |
 | 提权方式 | UI 和后端以普通权限运行；MFT/USN 快扫通过 UAC 单独拉起一个只读、带令牌鉴权的扫描助手进程；整个程序不提权 | 2026-10-15 |
@@ -18,11 +20,31 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 | UI 范围 | 线框 W1–W8、树图元素规范、主界面里出现的**全部功能和状态都保留，必须全部实现**，逐条列在 [UI-SPEC.md](UI-SPEC.md) | 2026-10-18 |
 | 可视化组件 | 图形区做成可替换的组件，为以后的插件预备：树图之外加火焰图和火焰-极坐标图，每个视图随时切换（扫描中也可以）。后端引擎、线上布局、前端组件三层分开，契约见 [visuals.md](visuals.md)。火焰图默认根在下；火焰图和火焰-极坐标图默认「顶层分支」配色，每种可视化记住自己的配色；分支色板 8 色 × 4 档，待设计评审与色盲检查 | 2026-10-19 |
 
-默认取舍（用户未反对，可随时改）：后端承担逻辑和布局，前端只负责显示；节点用列式存储，不为每个文件建 Python 对象；先做 Electron v1，再做 Qt 和 WinUI3；硬链接只计一次；删除默认进回收站；过滤语法合理兼容 SpaceSniffer（见 filter-syntax.md）；键位提供「现代」和「SpaceSniffer 经典」两套预设。需求里写的「QtSlide」按 PySide6 理解。
+默认取舍（用户未反对，可随时改）：后端承担逻辑和布局，前端只负责显示；节点用列式存储，不为每个文件建对象；先做 Electron v1，再做 Qt 和 WinUI3（0.3.5 起窗口默认是 Tauri，Electron 只兜底，见上表；原生的 Qt / WinUI3 界面即 M7 仍是挂起，不是取消，恢复时接到 Rust 后端上）；硬链接只计一次；删除默认进回收站；过滤语法合理兼容 SpaceSniffer（见 filter-syntax.md）；键位提供「现代」和「SpaceSniffer 经典」两套预设。需求里写的「QtSlide」按 PySide6 理解。
 
 ---
 
 ## 2. 总体架构
+
+现状（0.3.5 起）：
+
+```
+ 同一份界面（Nuxt 4 + Vue 3 + WebGL2，只经 window.sk 与宿主打交道）
+   Tauri 2 外壳（系统 WebView）   Electron 外壳（兜底：rpm、AppImage、    浏览器（无头模式：
+                                  0.3.4 文件名的 Linux 便携版）          spaceknife-cli headless）
+        └────────────── WebSocket v1：JSON 控制帧 + 二进制数据帧 ──────────────┘
+ 后端 Rust（sk-server：tokio + axum；Tauri 外壳里在应用进程里，Electron 外壳里是子进程
+            spaceknife-cli serve；sk-protocol：serde + schemars 描述所有消息）
+   会话与视图状态机 · 可视化引擎注册表 · 过滤引擎 · 快照与对比 · 导出模板        （sk-core）
+   删除篮与文件操作 · 洞察规则库 · 日志
+   列式节点仓库（列存 + 名称堆）                                               （sk-store）
+   扫描编排 + IO 限速器 ──► 硬扫描 / MFT 读取                                   （sk-core、sk-native）
+                         文件监控（分层）
+ └─ 提权只读扫描助手（spaceknife-cli 的 helper 子命令，只在需要 MFT / USN 时拉起）
+ （原生 Qt / WinUI3 界面即 M7：挂起，恢复时作为另一种前端接到同一个协议和 Rust 后端上）
+```
+
+0.3.x 时的架构（Python 后端 + Electron）：
 
 ```
  Electron (React + WebGL2)      Qt (PySide6 / QML)      WinUI3 (win32more)
@@ -40,10 +62,10 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 **原则**：
 - 后端持有树、视图状态并计算布局，三个前端只负责光栅化、动画插值、命中测试和发送操作意图。三端的逻辑和树图画面一致靠这一点保证。
-- 可视化可替换：后端按 id 注册引擎（`layout/registry.py`），每种线上布局有自己的列契约和能力名，前端按布局注册绘制组件；宿主代码不直接依赖任何一种可视化（[visuals.md](visuals.md)）。
-- 节点不建 Python 对象：650 万节点用列式存储约 0.5 GB，建成对象要几个 GB。
+- 可视化可替换：后端按 id 注册引擎（`crates/sk-core/src/layout/registry.rs`；0.3.x 是 `layout/registry.py`），每种线上布局有自己的列契约和能力名，前端按布局注册绘制组件；宿主代码不直接依赖任何一种可视化（[visuals.md](visuals.md)）。
+- 节点不建对象：650 万节点用列式存储约 0.5 GB，建成对象要几个 GB。
 - 多进程一律用显式 spawn，线程起来之后不再 fork；进程间只传紧凑的列式批数据；缓存和快照写入做成原子操作；后端检测到 stdin EOF 就退出，防止留下孤儿进程；提权助手只读并强制鉴权。
-- Python 3.12 下不要用线程池做逐文件 stat（实测因 GIL 争用慢 3.5–35 倍）；并行靠原生线程（释放 GIL）或 spawn 多进程。
+- （Python 后端时期）Python 3.12 下不要用线程池做逐文件 stat（实测因 GIL 争用慢 3.5–35 倍）；并行靠原生线程（释放 GIL）或 spawn 多进程。
 
 ---
 
@@ -88,15 +110,17 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 ---
 
 ## 4. 协议
-- 连接：`ws://127.0.0.1:{随机端口}/v1`，子协议 `spaceknife.v1`；启动时生成随机 token，经 stdin 交给后端；握手 `session.hello` 校验 token、协商版本与能力；Origin 白名单；关闭 permessage-deflate。
-- 控制帧：JSON-RPC 2.0 风格（请求/响应/事件/订阅/取消/进度），全部 pydantic 校验。
-- 数据帧：pydantic 描述的帧头 + 小端列式二进制数据（绘制列表、子项列表、扫描批次），JS 端零拷贝读取。实测 10 万节点走 pydantic JSON 约 240 ms，走二进制约 1 ms。
+- 连接：`ws://127.0.0.1:{随机端口}/v1`，子协议 `spaceknife.v1`；启动时生成随机 token（应用内直接交给进程内的服务端；独立的 `spaceknife-cli serve --token-stdin` 经 stdin 交给它）；握手 `session.hello` 校验 token、协商版本与能力；Origin 白名单；关闭 permessage-deflate。
+- 控制帧：JSON-RPC 2.0 风格（请求/响应/事件/订阅/取消/进度），全部按模型校验（0.3.x 是 pydantic，现在是 `crates/sk-protocol`）。
+- 数据帧：JSON 帧头 + 小端列式二进制数据（绘制列表、子项列表、扫描批次），JS 端零拷贝读取。实测 10 万节点走 pydantic JSON 约 240 ms，走二进制约 1 ms。
 - JSON 里不出现超过 2^53 的整数，节点一律用后端内部 u32 id。
-- pydantic 模型是唯一事实来源：生成 JSON Schema → TypeScript 类型；Python 前端直接复用模型；CI 检查生成物与源码一致。
+- 模型是唯一事实来源（0.3.x 是 pydantic；现在是 `crates/sk-protocol`）：生成 JSON Schema 与 TypeScript 类型（`cargo run -p sk-protocol --bin gen-ts`，`--check` 检查生成物与源码一致）。
 
 ---
 
 ## 5. 前端
+
+现状（0.3.5 起）：唯一的窗口是 `apps/desktop`（Tauri 2 + Nuxt 4 + Vue 3 + Pinia，界面跑在系统 WebView 里；绘制代码从 Electron 版原样移过来，仍是 WebGL2 + Canvas2D）。下表是 0.3.x 时的计划。
 
 | 前端 | 技术 | 树图渲染 |
 |---|---|---|
@@ -106,7 +130,7 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 - 图形区按线上布局注册组件（`visual/registry.ts`）：树图和火焰图用 WebGL2 instanced 矩形，火焰-极坐标图用扇区实例程序（每个扇区 32 段三角形带，片元着色器按极坐标距离场画填充、缝、条纹和阴影）；宿主负责上下文、调度、缩放与切换的交叉淡入、闪烁和呼吸。Qt 和 WinUI3 恢复后照 [visuals.md](visuals.md) 各实现三个组件。
 - Qt 与 WinUI3 共用 `spaceknife-client`：WS 客户端跑在核心线程，状态与视图模型不引入任何 GUI 库，通过 UiPort 适配（Qt Signal / DispatcherQueue）回到 UI 线程。
-- 视觉统一：一份设计 token（DTCG JSON）经 `tools/gen_design.py` 生成 CSS / TS / QML / XAML / Python 产物（M0 实测后改用自研生成器替代 Style Dictionary：不引入额外的 Node 依赖，输出确定、可在 CI 用 `--check` 校验，QML/XAML 的写法也能完全掌控）；三端打包同一套字体（Geist、Geist Mono、Noto Sans SC）和同一套 SVG 图标；golden 截图对比做回归测试。
+- 视觉统一：一份设计 token（DTCG JSON）经自研生成器产出各端的产物（M0 实测后替代 Style Dictionary：输出确定、可在 CI 用 `--check` 校验）。现在是 `node tools/gen_design.mjs [--check]`，只产出 `design/build/tokens.css`、`tokens.ts`、`icons.ts`、`icons/*.svg`（QML / XAML / Python 产物已去掉）；三端打包同一套字体（Geist、Geist Mono、Noto Sans SC）和同一套 SVG 图标；golden 截图对比做回归测试。
 - 视觉基线 A2 的色板、字体、尺寸、树图元素语义见 [UI-SPEC.md](UI-SPEC.md) 的「主界面与共享外框」和「树图元素与交互」两节。
 
 ---
@@ -133,6 +157,30 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 ## 7. 仓库结构
 
+现状（0.3.5 起）：
+
+```
+Cargo.toml                     # Cargo workspace 根
+crates/
+  sk-native/    原生扫描：MFT 读取与解析、并行硬扫描（普通 Rust 库）
+  sk-protocol/  协议消息模型（serde + schemars，唯一事实来源；生成 TS 类型与 JSON Schema）
+  sk-store/     列式节点仓库、名字堆、快照
+  sk-core/      扫描编排、IO 限速、布局、过滤、监控、导出、更新检查、提权助手
+  sk-server/    WebSocket 服务端（sk_server::start）与命令行 spaceknife-cli
+apps/desktop/                      Nuxt 4 + Vue 3 的界面（app/）与 Tauri 2 外壳（src-tauri/）
+apps/electron-shell/               Electron 外壳（只有主进程和 preload，界面用 apps/desktop 的构建）
+packaging/                          打包后的测试（冒烟、无头、更新、从 0.3.4 更新）、SpaceKnife.com 控制台启动器
+tests/parity/                       协议对等关卡（对照 v0.3.4 的 Python 后端，金样回放进 cargo test）
+design/tokens/                      DTCG 设计 token → node tools/gen_design.mjs
+design/icons/                       共享 SVG 图标
+crates/sk-core/locales/、apps/desktop/app/locales/   英文词表
+docs/                               PLAN.md、UI-SPEC.md、protocol.md、visuals.md 等
+tools/                              代码生成、发布、检查脚本（Node）
+site/                               项目网站与使用文档
+```
+
+`packages/`（Python）与 `apps/electron/` 已删去，见 git 历史与 `v0.3.4`。0.3.x 时的结构：
+
 ```
 pyproject.toml                 # uv workspace 根
 packages/
@@ -143,7 +191,7 @@ packages/
   ui-qt/      spaceknife-qt         PySide6 / QML
   ui-winui/   spaceknife-winui      win32more / WinUI3
 apps/electron/                      electron-vite + React + WebGL2
-design/tokens/                      DTCG 设计 token → tools/gen_design.py
+design/tokens/                      DTCG 设计 token → tools/gen_design.mjs
 design/icons/                       共享 SVG 图标
 i18n/                               zh-CN、en
 docs/                               PLAN.md、UI-SPEC.md、protocol.md、visuals.md 等
@@ -180,7 +228,7 @@ tools/                              代码生成、基准测试
 | M4 原生加速与快扫 | 完成（2026-10-18） | 接口与实测见 [native.md](native.md)。Rust 扩展：流式 MFT 读取与解析（32 MiB 窗口，读与解析重叠，占空比限速；C: 837 万项在安静档 22 秒，助手峰值 1.6 GB，整块读入要 10.6 GB）、并行硬扫描遍历（Windows `NtQueryDirectoryFile`、Linux `getdents64`，与纯 Python 逐字段一致；macOS 代码未编译验证）；只读扫描助手（命名管道、一次性令牌、受保护 DACL；后端已有管理员权限时不弹 UAC，拒绝授权回退硬扫描）；每块物理磁盘一个 IO 限速器（忙碌度与队列深度折算的负载、AIMD + 占空比闸门、基线探测、五档 + 自定义、系统低 I/O 优先级）；扫描方式自动选择（整个本地 NTFS 卷用 MFT）、硬扫描中途切换 MFT；W2 完整：暂停/继续、扫描中改档、并发与自动调节、近 60 秒负载曲线、状态栏实时负载。另：MFT 快扫可计入备用数据流、快照记录扫描方式、MFT 伪目录的项禁用「在资源管理器中显示/加入删除篮」、MFT 建树峰值下降且看门狗计入建树。修复：`$BadClus:$Bad` 被算成整卷大小（C: 显示 7.2 TB）；两次内存暴涨（扫描中读到半写入的子项区间、无界并发计算），见 [memory.md](memory.md)。未做或未验证：满速 MFT 扫描与限速精度没有在用户磁盘上压测（按约定只做短时低强度实测）；硬扫描端到端受 Python 归并限制（约 25 万项/秒，向量化归并待做）；Linux/macOS 的提权助手未实现；已停止扫描的「继续扫描」随 M5。测试：后端 Windows 974 项、Linux（WSL）782 项，前端 vitest 105 项 |
 | M5 文件变化钩子 | 完成（2026-10-18） | 契约与实测见 [monitor.md](monitor.md)。监视器：Windows ReadDirectoryChangesExW（递归，事件自带大小，溢出 / 根目录被删或移走都会报告）、Linux inotify（进程内共享额度，超出与队列溢出后轮询对账）、macOS FSEvents（未实机验证）、通用轮询；网络卷与 WSL 的 9P 盘用轮询。提权助手 query_usn / read_usn：溢出时按 USN 日志补列被动过的目录（只用已在运行的助手）。节点表增量修改（store/mutate.py：update_stats、relist、compact，GONE 行与结构锁）；变化流水线（合并窗口、深目录先 relist、新目录增量扫描、事件风暴与溢出时子树标脏安静后重扫、扫描中延后有待扫描子目录的目录、MFT 读取期间暂存事件）；视图 id 重映射与树图闪烁（减少动画时静态角标）；状态栏实时监控状态与开关；F5 重新扫描当前视图；已停止扫描的「继续扫描」。WSL：9P 挂载的 Windows 盘标为不推荐、隐藏基础设施挂载；ext4 root 保留块不再算作已用；虚拟盘识别。验收：4 个写线程并发压测后节点表与重新扫描逐项一致（Windows、Linux）。未做：10 万次变化的长时间压测、Linux fanotify、扫描中「正在扫描」闪烁。测试：后端 Windows 1063 项、Linux（WSL）865 项，前端 vitest 105 项 |
 | M6 管理与分析 | 完成（2026-10-18） | 契约见 [manage.md](manage.md)。W5：统一右键菜单（键盘与结果列表同样可用）、复制路径四种格式（POSIX 用单引号、Windows 的 POSIX 形式为 WSL 路径）、后端持有的删除篮（去重与吸收、硬链接与云占位、占用检测）、移到回收站（从不变成永久删除，撤销即还原）与 5 秒延迟的永久删除。W6：快照对比引擎（800 万 + 750 万行约 5 秒），只保留变化的「变化树」复用视图管线，面积 = 变化量、色阶与图例、变化单元排行与原因注释、悬停卡、时间轴、「现在」随文件变化重算。W7：文件类别编辑、标签显示名、设置导出 / 导入（含 SpaceSniffer 配置，导入前预览）、高级页工具、字号 / 对比度 / 元素比例 / 帧率 / 拖尾。模板导出（SpaceSniffer 模板语言 + CSV / JSON / HTML）、`spaceknife run` 命令行、洞察规则库（110 条）。协议 79 个方法。未完成项（原生 Shell 菜单、DynaZoom、改键、对比报告导出、自定义导出模板、洞察卡片、预览）见 [TODO.md](../TODO.md)。测试：后端 Windows 1431 项、Linux（WSL）1245 项，前端 vitest 105 项 |
-| M7 原生 UI | 挂起（2026-10-18） | 用户决定暂不做；Qt / WinUI3 的打包与 Windows App Runtime 一并挂起。待办见 [TODO.md](../TODO.md) |
+| M7 原生 UI | 挂起（2026-10-18） | 用户决定暂不做；Qt / WinUI3 的打包与 Windows App Runtime 一并挂起。2026-11-08：后端已改写为 Rust（见第 1 节），M7 仍是挂起、不是取消，恢复时 Qt / WinUI3 前端接到 Rust 后端（协议 v1，`spaceknife-cli serve`）上，不再经过 Python 的 spaceknife-client。待办见 [TODO.md](../TODO.md) |
 | M7.5 国际化 | 完成（2026-10-18） | 见 [i18n.md](i18n.md)。gettext 式：中文原文即消息 id，英文词表按区域分文件（后端 3 份、前端 4 份，约 1,550 条，术语表统一）；「界面语言」跟随系统 / 简体中文 / English，即时切换（Electron 把系统界面语言传给后端；后端按设置翻译设置项、命令面板、错误、事件、导出报告与命令行；前端整树重渲染、树图标签重画）；过滤关键字一套 ASCII，内置类别名中英两套；检查脚本 tools/i18n_check.py 进测试。测试：后端 Windows 1456 项、Linux（WSL）1258 项，前端 vitest 108 项 |
 | M8 打包与发布 | Electron 安装包完成（2026-10-18），干净机器测试待做 | 见 [packaging.md](packaging.md)。范围：Windows 与 Linux 的 Electron 安装包；macOS 打包、签名与公证暂不做（Apple 开发者证书需要付费）。应用图标（用户选定「D 斜切」，`.ico` / hicolor / 标题栏标识统一）；后端 PyInstaller onedir（扫描助手 `--helper` 与 spawn 工作进程走同一个可执行文件，`-X utf8`），Linux 上不带构建机的 GCC 运行库，整包 glibc ≤ 2.34（RHEL 9 下限，有检查）；electron-builder：NSIS（引导式，当前用户 / 所有用户，跟随系统语言，未签名）135 MB，AppImage 164 MB、deb 131 MB、rpm 118 MB。冒烟测试（后端：原生扩展、两种扫描路径与握手；应用：最小化启动、后端就绪、卷列表、关窗口后前后端都退出）在 Windows 11 与 WSL（Ubuntu 22.04）上通过。测试：后端 Windows 1457 项、Linux（WSL）1259 项，前端 vitest 108 项 |
 | 可视化组件 | 完成（2026-10-19），端到端检查待做 | 契约见 [visuals.md](visuals.md)，需求见 UI-SPEC V 节（28 条）。图形区做成可替换组件：后端引擎注册表、行契约检查（按注册表参数化）、`Engine` / `Visualization` 接口（`ENGINE_API = 1`）；前端组件注册表、宿主（上下文生命周期、调度、缩放与切换的交叉淡入、闪烁、呼吸、拖尾）、一致性测试（`VISUAL_API = 1`）。新增火焰图（`flame.v1`，默认根在下）和火焰-极坐标图（`polar.v1`，角度每圈 2^20 单位），共用分区引擎，每帧最多 5 万行、没有 O(N) 计算；树图金样在 Windows 和 Linux（WSL）上逐字节不变。「顶层分支」配色（8 色 × 4 档，待设计评审与色盲检查），每种可视化记住自己的配色；工具栏三段切换、V / Shift+V、命令面板、设置（新视图默认可视化、分区布局默认配色、火焰图方向）。协议 1.1：能力 `visuals.v1`、`layout.flame.v1`、`layout.polar.v1`，`visual.list`，旧前端只收到树图。性能（100 万节点合成树，内存中，取 3 次最好成绩）：火焰图 1080p 层级 5 / 15 为 0.8 / 8.5 ms，4K 为 0.8 / 23.9 ms（781 行）；火焰-极坐标图 1080p 0.8 / 13.2 ms，4K 0.9 / 29.2 ms（908 行），都在 120 ms 验收线内。未做：端到端检查与截图回归、Linux 全量测试（只跑了布局与可视化的 269 项）、窄窗口收起、分支色板评审，见 [TODO.md](../TODO.md)。测试：后端 Windows 1729 项，前端 vitest 334 项 |
@@ -189,7 +237,7 @@ tools/                              代码生成、基准测试
 - 每条 `UI-` 需求按其验收标准测试，三端各自勾选；交付时附需求追踪表。
 - 扫描正确性：与 `GetDiskFreeSpaceEx` / `statfs` 合计、`FSCTL_QUERY_FILE_LAYOUT` 结果、`du` 交叉校验。
 - 性能基准：MFT 扫描、硬扫描吞吐（冷/热缓存、SSD/HDD）、布局耗时、绘制帧时间、WS 吞吐。
-- 视觉回归：同一份绘制列表在三端渲染后做截图比对；树图、火焰图、火焰-极坐标图都要有截图（`tools/demo/screenshots.py` 待加后两种）。
+- 视觉回归：同一份绘制列表在三端渲染后做截图比对；树图、火焰图、火焰-极坐标图都要有截图（`node tools/demo/screenshots.mjs` 待加后两种）。
 - 过滤语法、导出模板语言、命令行解析各有独立测试集。
 
 ---

@@ -1,0 +1,57 @@
+{
+  "comment": "The release list the harness and the replayer serve on 127.0.0.1 as SPACEKNIFE_UPDATE_FEED (GitHub's releases API shape). Both backends run as 0.3.4 portable installs.",
+  "releases": [
+    {
+      "tag_name": "v0.3.6",
+      "name": "SpaceKnife 0.3.6",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2026-11-01T10:00:00Z",
+      "html_url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.3.6",
+      "body": "Parity feed: a newer patch release.",
+      "assets": [
+        {"name": "SHA256SUMS.txt", "browser_download_url": "http://127.0.0.1:9/none/SHA256SUMS.txt", "size": 100}
+      ]
+    },
+    {
+      "tag_name": "v0.4.0-beta.2",
+      "name": "SpaceKnife 0.4.0 beta 2",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-11-03T10:00:00Z",
+      "html_url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+      "body": "Parity feed: a newer minor pre-release (channel preview only).",
+      "assets": []
+    },
+    {
+      "tag_name": "v0.4.0-beta.1",
+      "name": "SpaceKnife 0.4.0 beta 1",
+      "draft": true,
+      "prerelease": true,
+      "published_at": "2026-11-02T10:00:00Z",
+      "html_url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.1",
+      "body": "A draft: ignored.",
+      "assets": []
+    },
+    {
+      "tag_name": "v0.3.4",
+      "name": "SpaceKnife 0.3.4",
+      "draft": false,
+      "prerelease": true,
+      "published_at": "2026-10-26T10:00:00Z",
+      "html_url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.3.4",
+      "body": "The running version.",
+      "assets": []
+    },
+    {
+      "tag_name": "nightly",
+      "name": "Not a version",
+      "draft": false,
+      "prerelease": false,
+      "published_at": "2026-10-20T10:00:00Z",
+      "html_url": "https://github.com/DuskXi/SpaceKnife/releases/tag/nightly",
+      "body": "Ignored: not a semantic version.",
+      "assets": []
+    }
+  ]
+}

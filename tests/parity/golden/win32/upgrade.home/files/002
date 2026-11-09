@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "values": {
+    "appearance.accent": "#FF8800",
+    "appearance.theme": "dark",
+    "general.update_channel": "stable",
+    "scan.unit_base": "1000",
+    "tags.name_red": "Delete me",
+    "treemap.initial_detail": 7
+  }
+}

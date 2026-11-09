@@ -1,0 +1,1326 @@
+{
+ "format": 1,
+ "scenario": "system",
+ "platform": "win32",
+ "steps": [
+  {
+   "i": 0,
+   "call": "update.status",
+   "result": {
+    "current": "0.3.4",
+    "install_kind": "portable",
+    "enabled": true,
+    "channel": "preview",
+    "checking": false,
+    "checked_at": null,
+    "error": null,
+    "level": "none",
+    "latest": null,
+    "dismissed": false,
+    "series": null,
+    "muted": false,
+    "download": {
+     "state": "idle",
+     "version": null,
+     "received": 0,
+     "total": 0,
+     "path": null,
+     "verified": null,
+     "error": null
+    },
+    "next_check_at": "<time>"
+   }
+  },
+  {
+   "i": 1,
+   "call": "update.releases",
+   "result": {
+    "releases": []
+   }
+  },
+  {
+   "i": 2,
+   "call": "update.check",
+   "result": {
+    "current": "0.3.4",
+    "install_kind": "portable",
+    "enabled": true,
+    "channel": "preview",
+    "checking": false,
+    "checked_at": "<time>",
+    "error": null,
+    "level": "minor",
+    "latest": {
+     "version": "0.4.0-beta.2",
+     "tag": "v0.4.0-beta.2",
+     "name": "SpaceKnife 0.4.0 beta 2",
+     "published_at": "<time>",
+     "prerelease": true,
+     "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+     "notes": "Parity feed: a newer minor pre-release (channel preview only).",
+     "asset": null
+    },
+    "dismissed": false,
+    "series": "0.4",
+    "muted": false,
+    "download": {
+     "state": "idle",
+     "version": null,
+     "received": 0,
+     "total": 0,
+     "path": null,
+     "verified": null,
+     "error": null
+    },
+    "next_check_at": "<time>"
+   }
+  },
+  {
+   "i": 3,
+   "call": "update.releases",
+   "result": {
+    "releases": [
+     {
+      "version": "0.4.0-beta.2",
+      "tag": "v0.4.0-beta.2",
+      "name": "SpaceKnife 0.4.0 beta 2",
+      "published_at": "<time>",
+      "prerelease": true,
+      "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+      "notes": "Parity feed: a newer minor pre-release (channel preview only).",
+      "asset": null
+     },
+     {
+      "version": "0.3.6",
+      "tag": "v0.3.6",
+      "name": "SpaceKnife 0.3.6",
+      "published_at": "<time>",
+      "prerelease": false,
+      "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.3.6",
+      "notes": "Parity feed: a newer patch release.",
+      "asset": null
+     },
+     {
+      "version": "0.3.4",
+      "tag": "v0.3.4",
+      "name": "SpaceKnife 0.3.4",
+      "published_at": "<time>",
+      "prerelease": true,
+      "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.3.4",
+      "notes": "The running version.",
+      "asset": null
+     }
+    ]
+   }
+  },
+  {
+   "i": 4,
+   "call": "update.dismiss",
+   "result": {
+    "current": "0.3.4",
+    "install_kind": "portable",
+    "enabled": true,
+    "channel": "preview",
+    "checking": false,
+    "checked_at": "<time>",
+    "error": null,
+    "level": "minor",
+    "latest": {
+     "version": "0.4.0-beta.2",
+     "tag": "v0.4.0-beta.2",
+     "name": "SpaceKnife 0.4.0 beta 2",
+     "published_at": "<time>",
+     "prerelease": true,
+     "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+     "notes": "Parity feed: a newer minor pre-release (channel preview only).",
+     "asset": null
+    },
+    "dismissed": false,
+    "series": "0.4",
+    "muted": false,
+    "download": {
+     "state": "idle",
+     "version": null,
+     "received": 0,
+     "total": 0,
+     "path": null,
+     "verified": null,
+     "error": null
+    },
+    "next_check_at": "<time>"
+   }
+  },
+  {
+   "i": 5,
+   "call": "update.dismiss",
+   "result": {
+    "current": "0.3.4",
+    "install_kind": "portable",
+    "enabled": true,
+    "channel": "preview",
+    "checking": false,
+    "checked_at": "<time>",
+    "error": null,
+    "level": "minor",
+    "latest": {
+     "version": "0.4.0-beta.2",
+     "tag": "v0.4.0-beta.2",
+     "name": "SpaceKnife 0.4.0 beta 2",
+     "published_at": "<time>",
+     "prerelease": true,
+     "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+     "notes": "Parity feed: a newer minor pre-release (channel preview only).",
+     "asset": null
+    },
+    "dismissed": false,
+    "series": "0.4",
+    "muted": false,
+    "download": {
+     "state": "idle",
+     "version": null,
+     "received": 0,
+     "total": 0,
+     "path": null,
+     "verified": null,
+     "error": null
+    },
+    "next_check_at": "<time>"
+   }
+  },
+  {
+   "i": 6,
+   "call": "update.mute",
+   "result": {
+    "current": "0.3.4",
+    "install_kind": "portable",
+    "enabled": true,
+    "channel": "preview",
+    "checking": false,
+    "checked_at": "<time>",
+    "error": null,
+    "level": "minor",
+    "latest": {
+     "version": "0.4.0-beta.2",
+     "tag": "v0.4.0-beta.2",
+     "name": "SpaceKnife 0.4.0 beta 2",
+     "published_at": "<time>",
+     "prerelease": true,
+     "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+     "notes": "Parity feed: a newer minor pre-release (channel preview only).",
+     "asset": null
+    },
+    "dismissed": false,
+    "series": "0.4",
+    "muted": false,
+    "download": {
+     "state": "idle",
+     "version": null,
+     "received": 0,
+     "total": 0,
+     "path": null,
+     "verified": null,
+     "error": null
+    },
+    "next_check_at": "<time>"
+   }
+  },
+  {
+   "i": 7,
+   "call": "update.mute",
+   "result": {
+    "current": "0.3.4",
+    "install_kind": "portable",
+    "enabled": true,
+    "channel": "preview",
+    "checking": false,
+    "checked_at": "<time>",
+    "error": null,
+    "level": "minor",
+    "latest": {
+     "version": "0.4.0-beta.2",
+     "tag": "v0.4.0-beta.2",
+     "name": "SpaceKnife 0.4.0 beta 2",
+     "published_at": "<time>",
+     "prerelease": true,
+     "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+     "notes": "Parity feed: a newer minor pre-release (channel preview only).",
+     "asset": null
+    },
+    "dismissed": false,
+    "series": "0.4",
+    "muted": false,
+    "download": {
+     "state": "idle",
+     "version": null,
+     "received": 0,
+     "total": 0,
+     "path": null,
+     "verified": null,
+     "error": null
+    },
+    "next_check_at": "<time>"
+   }
+  },
+  {
+   "i": 8,
+   "call": "update.mute",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "series"
+    ]
+   }
+  },
+  {
+   "i": 9,
+   "call": "update.cancel",
+   "result": {
+    "current": "0.3.4",
+    "install_kind": "portable",
+    "enabled": true,
+    "channel": "preview",
+    "checking": false,
+    "checked_at": "<time>",
+    "error": null,
+    "level": "minor",
+    "latest": {
+     "version": "0.4.0-beta.2",
+     "tag": "v0.4.0-beta.2",
+     "name": "SpaceKnife 0.4.0 beta 2",
+     "published_at": "<time>",
+     "prerelease": true,
+     "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0-beta.2",
+     "notes": "Parity feed: a newer minor pre-release (channel preview only).",
+     "asset": null
+    },
+    "dismissed": false,
+    "series": "0.4",
+    "muted": false,
+    "download": {
+     "state": "idle",
+     "version": null,
+     "received": 0,
+     "total": 0,
+     "path": null,
+     "verified": null,
+     "error": null
+    },
+    "next_check_at": "<time>"
+   }
+  },
+  {
+   "i": 10,
+   "call": "update.download",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 11,
+   "call": "system.maintenance",
+   "result": {
+    "helper_running": false,
+    "helper_elevated": false,
+    "cache_dir": "$HOME/cache",
+    "cache_bytes": 0,
+    "snapshots_dir": "$HOME/data/snapshots",
+    "snapshots_bytes": 0,
+    "snapshot_count": 0,
+    "saved_tags": 0
+   }
+  },
+  {
+   "i": 12,
+   "call": "system.cache_clear",
+   "result": {
+    "helper_running": false,
+    "helper_elevated": false,
+    "cache_dir": "$HOME/cache",
+    "cache_bytes": 0,
+    "snapshots_dir": "$HOME/data/snapshots",
+    "snapshots_bytes": 0,
+    "snapshot_count": 0,
+    "saved_tags": 0
+   }
+  },
+  {
+   "i": 13,
+   "call": "tags.clear_saved",
+   "result": {
+    "helper_running": false,
+    "helper_elevated": false,
+    "cache_dir": "$HOME/cache",
+    "cache_bytes": 0,
+    "snapshots_dir": "$HOME/data/snapshots",
+    "snapshots_bytes": 0,
+    "snapshot_count": 0,
+    "saved_tags": 0
+   }
+  },
+  {
+   "i": 14,
+   "call": "filter.vocab",
+   "result": {
+    "classes": [
+     {
+      "id": "video",
+      "name": "Video",
+      "aliases": [
+       "Videos",
+       "Movies",
+       "Video/Movies",
+       "视频"
+      ],
+      "extensions": [
+       "mp4",
+       "mkv",
+       "mov",
+       "avi",
+       "wmv",
+       "webm",
+       "m4v",
+       "flv",
+       "ts",
+       "m2ts",
+       "mts",
+       "vob",
+       "mpg",
+       "mpeg",
+       "mpe",
+       "m1s",
+       "qt",
+       "rm",
+       "rmvb",
+       "3gp",
+       "f4v",
+       "ogv",
+       "mxf",
+       "dv",
+       "divx",
+       "y4m",
+       "m2t",
+       "m2v",
+       "h264",
+       "h265",
+       "hevc",
+       "ivf",
+       "asf",
+       "wtv",
+       "mk3d",
+       "ogm",
+       "lrv",
+       "insv",
+       "braw",
+       "r3d",
+       "bik",
+       "bk2",
+       "usm"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "image",
+      "name": "Pictures",
+      "aliases": [
+       "Image",
+       "Images",
+       "Picture",
+       "Pictures/Images",
+       "Photos",
+       "图片"
+      ],
+      "extensions": [
+       "jpg",
+       "jpeg",
+       "png",
+       "gif",
+       "bmp",
+       "tif",
+       "tiff",
+       "heic",
+       "heif",
+       "webp",
+       "avif",
+       "jxl",
+       "svg",
+       "ico",
+       "psd",
+       "raw",
+       "nef",
+       "rw2",
+       "cr2",
+       "cr3",
+       "arw",
+       "dng",
+       "orf",
+       "raf",
+       "srw",
+       "x3f",
+       "pef",
+       "rwl",
+       "mrw",
+       "dcr",
+       "kdc",
+       "erf",
+       "mef",
+       "mos",
+       "nrw",
+       "sr2",
+       "srf",
+       "iiq",
+       "3fr",
+       "jfif",
+       "jpe",
+       "jp2",
+       "j2k",
+       "jxr",
+       "hdp",
+       "wdp",
+       "apng",
+       "qoi",
+       "svgz",
+       "exr",
+       "hdr",
+       "dds",
+       "ktx",
+       "ktx2",
+       "tga",
+       "pcx",
+       "pbm",
+       "pgm",
+       "ppm",
+       "pnm",
+       "icns",
+       "cur",
+       "ani",
+       "psb",
+       "xcf",
+       "kra",
+       "clip",
+       "pdn",
+       "sai",
+       "afphoto",
+       "afdesign",
+       "ai",
+       "eps",
+       "emf",
+       "wmf",
+       "cdr",
+       "sketch",
+       "fig",
+       "xd"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "audio",
+      "name": "Audio",
+      "aliases": [
+       "Music",
+       "Audio/Music",
+       "音频"
+      ],
+      "extensions": [
+       "mp3",
+       "flac",
+       "wav",
+       "m4a",
+       "aac",
+       "ogg",
+       "opus",
+       "wma",
+       "aif",
+       "aiff",
+       "alp",
+       "au",
+       "ac3",
+       "amr",
+       "mp2",
+       "voc",
+       "ape",
+       "mid",
+       "midi",
+       "dsf",
+       "3gp",
+       "m4b",
+       "m4r",
+       "caf",
+       "mka",
+       "wv",
+       "tta",
+       "dts",
+       "mpc",
+       "spx",
+       "weba",
+       "oga",
+       "gsm",
+       "ra",
+       "aifc",
+       "w64",
+       "rf64",
+       "dff",
+       "xm",
+       "s3m",
+       "it",
+       "sf2",
+       "wem",
+       "bnk"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "archive",
+      "name": "Archives",
+      "aliases": [
+       "压缩包",
+       "镜像",
+       "Archive",
+       "Disk images",
+       "Archives/Disk images",
+       "压缩包/镜像"
+      ],
+      "extensions": [
+       "zip",
+       "7z",
+       "7zip",
+       "rar",
+       "tar",
+       "gz",
+       "tgz",
+       "bz2",
+       "xz",
+       "zst",
+       "lz",
+       "lzma",
+       "cab",
+       "iso",
+       "img",
+       "dmg",
+       "wim",
+       "esd",
+       "vhd",
+       "vhdx",
+       "vmdk",
+       "qcow2",
+       "tbz",
+       "tbz2",
+       "txz",
+       "tzst",
+       "lz4",
+       "lzo",
+       "br",
+       "sz",
+       "zpaq",
+       "zipx",
+       "arj",
+       "lha",
+       "lzh",
+       "cpio",
+       "xar",
+       "sit",
+       "sitx",
+       "vdi",
+       "qcow",
+       "avhdx",
+       "hdd",
+       "hds",
+       "vmem",
+       "vmsn",
+       "ova",
+       "xva",
+       "sparseimage",
+       "nrg"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "exec",
+      "name": "Programs",
+      "aliases": [
+       "程序",
+       "系统",
+       "Program",
+       "Executable",
+       "Executables",
+       "System files",
+       "Executables/System files",
+       "程序/系统"
+      ],
+      "extensions": [
+       "exe",
+       "dll",
+       "sys",
+       "msi",
+       "msix",
+       "appx",
+       "com",
+       "bat",
+       "cmd",
+       "ps1",
+       "sh",
+       "so",
+       "dylib",
+       "ko",
+       "efi",
+       "drv",
+       "ocx",
+       "cpl",
+       "ini",
+       "log",
+       "apk",
+       "aab",
+       "xapk",
+       "ipa",
+       "deb",
+       "rpm",
+       "snap",
+       "appimage",
+       "jar",
+       "war",
+       "ear",
+       "vsix",
+       "crx",
+       "xpi",
+       "pyd",
+       "node",
+       "wasm",
+       "msp",
+       "msu",
+       "mui",
+       "tlb",
+       "winmd",
+       "dmp",
+       "mdmp",
+       "etl",
+       "evtx"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "doc",
+      "name": "Documents",
+      "aliases": [
+       "Document",
+       "Docs",
+       "文档"
+      ],
+      "extensions": [
+       "pdf",
+       "doc",
+       "docx",
+       "xls",
+       "xlsx",
+       "ppt",
+       "pptx",
+       "odt",
+       "ods",
+       "odp",
+       "rtf",
+       "txt",
+       "md",
+       "csv",
+       "epub",
+       "pages",
+       "numbers",
+       "key",
+       "docm",
+       "dotx",
+       "dotm",
+       "xlsm",
+       "xlsb",
+       "pptm",
+       "odg",
+       "wps",
+       "et",
+       "dps",
+       "hwp",
+       "ofd",
+       "xps",
+       "oxps",
+       "djvu",
+       "chm",
+       "mobi",
+       "azw",
+       "azw3",
+       "fb2",
+       "tex",
+       "rst",
+       "org",
+       "tsv",
+       "vsd",
+       "vsdx",
+       "one",
+       "eml",
+       "msg",
+       "pst",
+       "ost",
+       "mbox"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "game",
+      "name": "Games",
+      "aliases": [
+       "Game",
+       "游戏"
+      ],
+      "extensions": [],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "code",
+      "name": "Code",
+      "aliases": [
+       "代码",
+       "开发",
+       "Source code",
+       "Development",
+       "Dev",
+       "代码/开发"
+      ],
+      "extensions": [
+       "c",
+       "h",
+       "cc",
+       "cpp",
+       "cxx",
+       "hh",
+       "hpp",
+       "hxx",
+       "cs",
+       "java",
+       "kt",
+       "kts",
+       "scala",
+       "groovy",
+       "gradle",
+       "go",
+       "rs",
+       "swift",
+       "m",
+       "mm",
+       "py",
+       "pyi",
+       "pyw",
+       "pyx",
+       "ipynb",
+       "js",
+       "mjs",
+       "cjs",
+       "jsx",
+       "ts",
+       "tsx",
+       "mts",
+       "cts",
+       "vue",
+       "svelte",
+       "css",
+       "scss",
+       "sass",
+       "less",
+       "php",
+       "rb",
+       "pl",
+       "pm",
+       "lua",
+       "r",
+       "jl",
+       "dart",
+       "ex",
+       "exs",
+       "erl",
+       "hs",
+       "elm",
+       "clj",
+       "cljs",
+       "fs",
+       "fsx",
+       "vb",
+       "cmake",
+       "pyc",
+       "pyo",
+       "class",
+       "o",
+       "lib",
+       "a",
+       "pdb",
+       "ilk",
+       "idb",
+       "pch",
+       "ipch",
+       "tlog",
+       "whl",
+       "egg",
+       "gem",
+       "nupkg"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "data",
+      "name": "Data",
+      "aliases": [
+       "数据",
+       "模型",
+       "Datasets",
+       "Models",
+       "Databases",
+       "数据/模型"
+      ],
+      "extensions": [
+       "safetensors",
+       "gguf",
+       "ggml",
+       "ckpt",
+       "pt",
+       "pth",
+       "onnx",
+       "tflite",
+       "mlmodel",
+       "h5",
+       "hdf5",
+       "he5",
+       "nc",
+       "npy",
+       "npz",
+       "pkl",
+       "pickle",
+       "joblib",
+       "parquet",
+       "arrow",
+       "feather",
+       "avro",
+       "orc",
+       "tfrecord",
+       "jsonl",
+       "ndjson",
+       "json",
+       "fits",
+       "fts",
+       "fit",
+       "mat",
+       "db",
+       "sqlite",
+       "sqlite3",
+       "db3",
+       "duckdb",
+       "mdb",
+       "accdb",
+       "ldb",
+       "vscdb",
+       "realm",
+       "ibd",
+       "myd",
+       "myi",
+       "mdf",
+       "ldf",
+       "ndf",
+       "dbf",
+       "kdbx",
+       "sql"
+      ],
+      "color": "",
+      "color_light": ""
+     },
+     {
+      "id": "other",
+      "name": "Other",
+      "aliases": [
+       "Others",
+       "Unclassified",
+       "其他"
+      ],
+      "extensions": [],
+      "color": "",
+      "color_light": ""
+     }
+    ],
+    "unsupported_attrs": [
+     "ads"
+    ],
+    "unsupported_ages": []
+   }
+  },
+  {
+   "i": 15,
+   "call": "volume.list",
+   "result": {
+    "elevated": "bool",
+    "volumes": [
+     {
+      "cluster_size": "number",
+      "device": "string",
+      "free": "number",
+      "fs_type": "string",
+      "is_remote": "bool",
+      "is_removable": "bool",
+      "is_system": "bool",
+      "label": "string",
+      "media": "string",
+      "mount_point": "string",
+      "note": "string",
+      "reason": "string",
+      "remote_path": "string",
+      "reserved": "number",
+      "serial": "string",
+      "total": "number",
+      "used": "number"
+     }
+    ]
+   }
+  },
+  {
+   "i": 16,
+   "call": "io.status",
+   "result": {
+    "disks": []
+   }
+  },
+  {
+   "i": 17,
+   "call": "machine.disks",
+   "result": {
+    "collected_at": "string",
+    "disks": [
+     {
+      "controller_link": {
+       "kind": "string",
+       "max_pcie_gen": "number",
+       "max_pcie_width": "number",
+       "pcie_gen": "number",
+       "pcie_width": "number"
+      },
+      "firmware": "string",
+      "health": {
+       "available_spare": "number",
+       "critical_warning": "number",
+       "media_errors": "number",
+       "percentage_used": "number",
+       "power_cycles": "number",
+       "power_on_hours": "number",
+       "read_bytes": "number",
+       "source": "string",
+       "spare_threshold": "number",
+       "temperature_c": "number",
+       "unsafe_shutdowns": "number",
+       "written_bytes": "number"
+      },
+      "health_note": "string",
+      "id": "string",
+      "interface": "string",
+      "io": {
+       "read_bytes": "number",
+       "since": "string",
+       "written_bytes": "number"
+      },
+      "link": {
+       "kind": "string",
+       "max_pcie_gen": "number",
+       "max_pcie_width": "number",
+       "max_rate_mbps": "number",
+       "pcie_gen": "number",
+       "pcie_width": "number",
+       "rate_mbps": "number"
+      },
+      "media": "string",
+      "model": "string",
+      "number": "number",
+      "parts": [
+       {
+        "bytes": "number",
+        "mount_point": "string"
+       }
+      ],
+      "removable": "bool",
+      "serial": "string",
+      "size": "number",
+      "system": "bool",
+      "trim": "bool",
+      "vendor": "string"
+     }
+    ],
+    "volumes": [
+     {
+      "disks": [
+       "string"
+      ],
+      "history": [],
+      "volume": {
+       "cluster_size": "number",
+       "device": "string",
+       "free": "number",
+       "fs_type": "string",
+       "is_remote": "bool",
+       "is_removable": "bool",
+       "is_system": "bool",
+       "label": "string",
+       "media": "string",
+       "mount_point": "string",
+       "note": "string",
+       "reason": "string",
+       "remote_path": "string",
+       "reserved": "number",
+       "serial": "string",
+       "total": "number",
+       "used": "number"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "i": 18,
+   "subscribe": "log",
+   "result": {
+    "sub": "<sub#1>"
+   }
+  },
+  {
+   "i": 19,
+   "subscribe": "io",
+   "result": {
+    "sub": "<sub#2>"
+   }
+  },
+  {
+   "i": 20,
+   "events": "io.load",
+   "got": [],
+   "timeout": true
+  },
+  {
+   "i": 21,
+   "subscribe": "no-such-topic",
+   "error": {
+    "code": -32004,
+    "loc": null
+   }
+  },
+  {
+   "i": 22,
+   "subscribe": "scan",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  },
+  {
+   "i": 23,
+   "call": "$/unsubscribe",
+   "error": {
+    "code": -32005,
+    "loc": null
+   }
+  },
+  {
+   "i": 25,
+   "wait_scan": {
+    "state": "done"
+   },
+   "monotonic": true
+  },
+  {
+   "i": 27,
+   "call": "export.targets",
+   "result": {
+    "targets": [
+     {
+      "name": "Grouped by folder",
+      "title": "Grouped by folder",
+      "description": "One section per folder that directly contains files: its full path and size on disk, followed by its files (sizes right-aligned).",
+      "kind": "template",
+      "extension": "txt",
+      "file_name": "File report.txt",
+      "spacesniffer": true
+     },
+     {
+      "name": "First level folders",
+      "title": "First-level folders",
+      "description": "Each folder on the first level below the root: full path and size on disk.",
+      "kind": "template",
+      "extension": "txt",
+      "file_name": "First level.txt",
+      "spacesniffer": true
+     },
+     {
+      "name": "Simple file list",
+      "title": "File list",
+      "description": "The full path of each file, one per line.",
+      "kind": "template",
+      "extension": "txt",
+      "file_name": "File list.txt",
+      "spacesniffer": true
+     },
+     {
+      "name": "Summary",
+      "title": "Summary",
+      "description": "Total size on disk, number of folders and number of files.",
+      "kind": "template",
+      "extension": "txt",
+      "file_name": "Summary.txt",
+      "spacesniffer": true
+     },
+     {
+      "name": "Folder tree",
+      "title": "Folder tree",
+      "description": "Folders and their size on disk, indented by level.",
+      "kind": "template",
+      "extension": "txt",
+      "file_name": "Folder tree.txt",
+      "spacesniffer": false
+     },
+     {
+      "name": "csv",
+      "title": "CSV table",
+      "description": "",
+      "kind": "format",
+      "extension": ".csv",
+      "file_name": "",
+      "spacesniffer": false
+     },
+     {
+      "name": "json",
+      "title": "JSON data",
+      "description": "",
+      "kind": "format",
+      "extension": ".json",
+      "file_name": "",
+      "spacesniffer": false
+     },
+     {
+      "name": "html",
+      "title": "HTML report",
+      "description": "",
+      "kind": "format",
+      "extension": ".html",
+      "file_name": "",
+      "spacesniffer": false
+     }
+    ]
+   }
+  },
+  {
+   "i": 28,
+   "call": "export.check",
+   "result": {
+    "ok": true,
+    "issues": []
+   }
+  },
+  {
+   "i": 29,
+   "call": "export.check",
+   "result": {
+    "ok": true,
+    "issues": []
+   }
+  },
+  {
+   "i": 30,
+   "call": "export.run",
+   "result": {
+    "path": "$TMP/out.csv",
+    "issues": []
+   }
+  },
+  {
+   "i": 31,
+   "read": [
+    "﻿path,name,type,depth,size,disk_size,files,folders,modified,created,accessed,attributes",
+    "$ROOT/small,small,folder,0,261000,270336,4,3,<time>,<time>,<time>,",
+    "$ROOT/small/b,b,folder,1,200000,200704,1,1,<time>,<time>,<time>,",
+    "$ROOT/small/b/c,c,folder,2,200000,200704,1,0,<time>,<time>,<time>,",
+    "$ROOT/small/b/c/three.mp4,three.mp4,file,3,200000,200704,,,<time>,<time>,<time>,archive",
+    "$ROOT/small/a,a,folder,1,60000,65536,2,0,<time>,<time>,<time>,",
+    "$ROOT/small/a/two.jpg,two.jpg,file,2,50000,53248,,,<time>,<time>,<time>,archive",
+    "$ROOT/small/a/one.txt,one.txt,file,2,10000,12288,,,<time>,<time>,<time>,archive",
+    "$ROOT/small/top.bin,top.bin,file,1,1000,4096,,,<time>,<time>,<time>,archive",
+    ""
+   ]
+  },
+  {
+   "i": 32,
+   "call": "export.run",
+   "result": {
+    "path": "$TMP/out.json",
+    "issues": []
+   }
+  },
+  {
+   "i": 33,
+   "read": [
+    "{\"format\": \"spaceknife-export\", \"version\": 1, \"generator\": \"SpaceKnife 0.1.0\", \"generated_at\": \"<time>\", \"filter\": null,",
+    "\"roots\": [",
+    "{\"path\": \"$ROOT/small\", \"name\": \"small\", \"type\": \"folder\", \"size\": 261000, \"disk_size\": 270336, \"files\": 4, \"folders\": 3, \"modified\": \"<time>\", \"created\": \"<time>\", \"accessed\": \"<time>\", \"attributes\": [], \"children\": [",
+    "  {\"name\": \"b\", \"type\": \"folder\", \"size\": 200000, \"disk_size\": 200704, \"files\": 1, \"folders\": 1, \"modified\": \"<time>\", \"created\": \"<time>\", \"accessed\": \"<time>\", \"attributes\": [], \"children\": [",
+    "    {\"name\": \"c\", \"type\": \"folder\", \"size\": 200000, \"disk_size\": 200704, \"files\": 1, \"folders\": 0, \"modified\": \"<time>\", \"created\": \"<time>\", \"accessed\": \"<time>\", \"attributes\": [], \"children\": [",
+    "      {\"name\": \"three.mp4\", \"type\": \"file\", \"size\": 200000, \"disk_size\": 200704, \"modified\": \"<time>\", \"created\": \"<time>\", \"accessed\": \"<time>\", \"attributes\": [\"archive\"]}]}]},",
+    "  {\"name\": \"a\", \"type\": \"folder\", \"size\": 60000, \"disk_size\": 65536, \"files\": 2, \"folders\": 0, \"modified\": \"<time>\", \"created\": \"<time>\", \"accessed\": \"<time>\", \"attributes\": [], \"children\": [",
+    "    {\"name\": \"two.jpg\", \"type\": \"file\", \"size\": 50000, \"disk_size\": 53248, \"modified\": \"<time>\", \"created\": \"<time>\", \"accessed\": \"<time>\", \"attributes\": [\"archive\"]},",
+    "    {\"name\": \"one.txt\", \"type\": \"file\", \"size\": 10000, \"disk_size\": 12288, \"modified\": \"<time>\", \"created\": \"<time>\", \"accessed\": \"<time>\", \"attributes\": [\"archive\"]}]},",
+    "  {\"name\": \"top.bin\", \"type\": \"file\", \"size\": 1000, \"disk_size\": 4096, \"modified\": \"<time>\", \"created\": \"<time>\", \"accessed\": \"<time>\", \"attributes\": [\"archive\"]}]}",
+    "]}",
+    ""
+   ]
+  },
+  {
+   "i": 34,
+   "call": "export.run",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 35,
+   "call": "export.run",
+   "error": {
+    "code": -32012,
+    "loc": null
+   }
+  },
+  {
+   "i": 36,
+   "call": "settings.export",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 37,
+   "call": "system.helper_stop",
+   "result": {
+    "helper_running": false,
+    "helper_elevated": false,
+    "cache_dir": "$HOME/cache",
+    "cache_bytes": 0,
+    "snapshots_dir": "$HOME/data/snapshots",
+    "snapshots_bytes": 0,
+    "snapshot_count": 0,
+    "saved_tags": 0
+   }
+  },
+  {
+   "i": 38,
+   "call": "app.shutdown",
+   "result": {
+    "accepted": true
+   }
+  },
+  {
+   "i": 39,
+   "exit": true
+  }
+ ]
+}

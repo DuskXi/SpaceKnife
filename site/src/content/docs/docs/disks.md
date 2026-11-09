@@ -99,7 +99,7 @@ When rights can't be asked for, the card says why:
 |---|---|
 | The user declined to grant administrator rights | You closed the password dialog. The button stays; click it again any time. |
 | No authentication agent can ask for the administrator password (in an SSH session, say, or without a graphical desktop) | Desktop environments come with a polkit authentication agent; SSH sessions and systems without a desktop have none. |
-| The AppImage can't run the helper as administrator; use the deb or rpm package instead | An AppImage runs from a mount only you can read, which root can't. The deb and rpm packages install to `/opt/SpaceKnife`. |
+| The AppImage can't run the helper as administrator; use the deb or rpm package instead | An AppImage runs from a mount only you can read, which root can't. The deb and rpm packages install to `/usr/bin`. |
 | pkexec not found: asking for administrator rights needs polkit | The system has no polkit (`pkexec`). |
 
 ### Volumes and the capacity bar
