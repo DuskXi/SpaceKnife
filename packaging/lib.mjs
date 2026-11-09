@@ -311,6 +311,16 @@ export function isElectron(folder) {
   return existsSync(join(folder, "resources", "app.asar")) || existsSync(join(folder, "SpaceKnife.app", "Contents", "Resources", "app.asar"));
 }
 
+/** The .asar files below `dir` (treeOf: no link followed; a folder named so is none). Electron's fs
+ * takes one for a folder, so an Electron app cannot remove a folder that holds one: 0.3.4 removes
+ * its staging folder that way before it unpacks an update again, and a refused swap leaves none
+ * there (sk_core::update::swap leave_removable). */
+export function asarFilesIn(dir) {
+  return treeOf(dir)
+    .filter((e) => e.kind === "file" && /\.asar$/i.test(e.path))
+    .map((e) => e.path);
+}
+
 /** The processes whose program or command line lies in one of `roots` (the test's folders: what
  * it unpacked, installed and started, and whatever those started in turn, the swap helper and the
  * new version among them, in a session of their own): [{pid, cmd}]. This process is never one. */
