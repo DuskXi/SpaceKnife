@@ -26,13 +26,12 @@
 // msedgewebview2.exe's name holding their lockfile), a 0.3.4 whose registry keys are gone found
 // by its files (SkFindByFiles), which GUID keys the uninstaller may delete and its scope
 // (un.SkKeysOurs / un.SkScopeFor, from values it is given), the new program's --startup-check
-// (SkStartupCheck, stand-ins answering as it does), the exit code
-// of a failed run and what the outer instance then starts again (SkFailureLevel,
-// SkAfterElevatedFailed), the pins of a relocated installation (SkMigrateShortcutsIn on a folder of
-// the sandbox), a start with SW_HIDE (SkShowIfStartedHidden), the log opened for each line — and that
-// the app the installer starts gets its environment (cmd.exe stands in for it: on your own desktop
-// run this from packaging/hidden-desktop.ps1, so its console window and the stand-ins' window stay
-// out of sight). Windows only; it writes in a temporary folder only, never the registry, and checks
+// (SkStartupCheck, stand-ins answering as it does), the exit code of a failed run and what the
+// outer instance then starts again (SkFailureLevel, SkAfterElevatedFailed), the pins of a
+// relocated installation (SkMigrateShortcutsIn on a folder of the sandbox), a start with SW_HIDE
+// (SkShowIfStartedHidden), the log opened for each line — and that the app the installer starts
+// gets its environment (cmd.exe stands in for it: on your own desktop run this from
+// packaging/hidden-desktop.ps1, so its console window and the stand-ins' window stay out of sight). Windows only; it writes in a temporary folder only, never the registry, and checks
 // first that the functions its cases run name none of the user's own folders, keys or pins.
 //
 //   node packaging/nsis-logic.mjs [--makensis PATH] [--utils PATH] [--helpers PATH]
@@ -165,14 +164,18 @@ try {
    */
   function runAsync(kind, cmdline = "", extra = {}, { program = exe, prepare = () => {}, during = () => {}, timeout = 120_000 } = {}) {
     const c = setUp(kind, extra, { program, prepare });
-    return new Promise((done) => {
+    return new Promise((done, fail) => {
       const child = spawn(c.program, cmdline ? [cmdline] : [], { windowsVerbatimArguments: true, stdio: "ignore", env: c.env });
       let error = null;
       const timer = setTimeout(() => child.kill(), timeout);
       child.on("error", (e) => (error = e));
       child.on("close", (status) => {
         clearTimeout(timer);
-        done({ got: output(kind, cmdline, c.out, status, error), box: c.box, status });
+        try {
+          done({ got: output(kind, cmdline, c.out, status, error), box: c.box, status });
+        } catch (e) {
+          fail(e);
+        }
       });
       during(c.box);
     });
@@ -759,8 +762,8 @@ try {
       // goes, so nothing they wrote is left (an uninstaller that tried the folder first and found
       // it gone left their profile behind)
       const { got, fake, shellAfter, log } = await withFakes("/S", (box, shell) => [
-        { pid: 9001, cmd: browser(join(shell, "webview", "EBWebView")), profile: join(shell, "webview", "EBWebView"), at: 300, exits: 1800 },
-        { pid: 9002, cmd: crashpad(join(shell, "webview", "EBWebView")), profile: join(shell, "webview", "EBWebView", "Crashpad"), at: 400, exits: 1500 },
+        { pid: 9001, cmd: browser(join(shell, "webview", "EBWebView")), profile: join(shell, "webview", "EBWebView"), at: 300, exits: 2200 },
+        { pid: 9002, cmd: crashpad(join(shell, "webview", "EBWebView")), profile: join(shell, "webview", "EBWebView", "Crashpad"), at: 400, exits: 2000 },
         ...others(box),
       ]);
       expect(
