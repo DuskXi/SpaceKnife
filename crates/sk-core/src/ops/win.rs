@@ -27,7 +27,7 @@ use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetDiskFreeSpaceExW, GetDriveTypeW, GetFileInformationByHandleEx,
-    GetLongPathNameW, GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+    GetLongPathNameW, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
 };
 use windows_sys::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx,
@@ -238,6 +238,49 @@ pub fn bin_settings(guid: &str, total: u64) -> BinSettings {
     }
 }
 
+/// Whether the recycle bin of the volume mounted at `root` keeps a folder per user
+/// (`$Recycle.Bin\<SID>`): volumes that keep permissions do (NTFS, ReFS, WinBtrfs). FAT and
+/// exFAT keep none, and the shell puts every user's items into `$Recycle.Bin` itself. True when
+/// it cannot be told.
+pub fn per_user_bin(root: &str) -> bool {
+    volume_flags(root).is_none_or(|f| f & FILE_PERSISTENT_ACLS != 0)
+}
+
+const FILE_PERSISTENT_ACLS: u32 = 0x8;
+const FILE_SUPPORTS_REPARSE_POINTS: u32 = 0x80;
+
+/// The file system flags of the volume mounted at `root` (GetVolumeInformation), None when they
+/// cannot be read.
+fn volume_flags(root: &str) -> Option<u32> {
+    let w = wide(root);
+    let mut flags = 0u32;
+    // SAFETY: a NUL-terminated root; no name buffers asked for, an out pointer for the flags.
+    let ok = unsafe {
+        GetVolumeInformationW(
+            w.as_ptr(),
+            null_mut(),
+            0,
+            null_mut(),
+            null_mut(),
+            &mut flags,
+            null_mut(),
+            0,
+        )
+    } != 0;
+    ok.then_some(flags)
+}
+
+/// The folder this user's items deleted on the volume at `root` go into: `$Recycle.Bin\<SID>`, or
+/// `$Recycle.Bin` itself where the bin keeps no folder per user ([`per_user_bin`]).
+pub fn bin_folder(root: &str) -> io::Result<PathBuf> {
+    let top = Path::new(root).join("$Recycle.Bin");
+    Ok(if per_user_bin(root) {
+        top.join(user_sid()?)
+    } else {
+        top
+    })
+}
+
 /// (bytes, items) in this user's recycle bin on the volume at `root`, as its `$I` records tell
 /// (each holds its item's size): the bin's folder listed, each record read once (kept by its
 /// path, length and time: a record never changes), the items themselves never walked.
@@ -249,10 +292,10 @@ pub fn bin_usage(root: &str) -> (i64, i64) {
     type Known = HashMap<PathBuf, (u64, Option<SystemTime>, i64)>;
     static RECORDS: std::sync::Mutex<Option<Known>> = std::sync::Mutex::new(None);
     let _phase = super::probe::phase("bin_usage");
-    let Ok(sid) = user_sid() else {
+    // (FAT, exFAT: the volume's one bin, every user's items: what the shell shows too)
+    let Ok(folder) = bin_folder(root) else {
         return (-1, -1);
     };
-    let folder = Path::new(root).join("$Recycle.Bin").join(sid);
     super::probe::call(super::probe::Call::List);
     let listing = match std::fs::read_dir(&folder) {
         Ok(it) => it,
@@ -371,12 +414,15 @@ pub fn notify_changed(path: &str, folder: bool) {
 
 /// The current user's recycle-bin folder on the volume mounted at `root`, when this process may
 /// put items into it itself: `$Recycle.Bin` and `$Recycle.Bin\<SID>` both real folders (neither a
-/// reparse point), the latter owned by this user (what the shell made it), the former by this
-/// user or the system (SYSTEM, Administrators, TrustedInstaller: what Windows and the shell make
-/// it). A `$Recycle.Bin` another user made (on a data volume any user may create folders on)
-/// lets that user swap this user's folder for a link between this check and the renames: such a
-/// volume is left to the shell. None leaves the volume to the shell: it makes the folder when
-/// there is none, and knows what to do with one it did not make (FAT has no owners at all).
+/// reparse point), each owned by this user or the system (SYSTEM, Administrators,
+/// TrustedInstaller: what Windows and the shell make them; the user's own folder is the
+/// Administrators' where the shell made it for an elevated program). A `$Recycle.Bin` another
+/// user made (on a data volume any user may create folders on) lets that user swap this user's
+/// folder for a link between this check and the renames: such a volume is left to the shell.
+/// FAT and exFAT keep neither owners nor links: their one `$Recycle.Bin`, a real folder, is
+/// every user's ([`per_user_bin`]), as the shell has it (which walked the whole bin for each
+/// item there, a second and more apiece). None leaves the volume to the shell: it makes the
+/// folder when there is none, and knows what to do with one it did not make.
 pub fn own_bin(root: &str) -> Option<PathBuf> {
     use std::os::windows::fs::MetadataExt;
     const DIRECTORY: u32 = 0x10;
@@ -387,21 +433,29 @@ pub fn own_bin(root: &str) -> Option<PathBuf> {
         "S-1-5-32-544",
         "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
     ];
-    let sid = user_sid().ok()?;
-    let top = Path::new(root).join("$Recycle.Bin");
-    let mine = top.join(&sid);
-    for p in [&top, &mine] {
+    let real_folder = |p: &Path| {
         super::probe::call(super::probe::Call::Stat);
-        let attrs = std::fs::symlink_metadata(p).ok()?.file_attributes();
-        if attrs & DIRECTORY == 0 || attrs & REPARSE_POINT != 0 {
-            return None;
-        }
+        std::fs::symlink_metadata(p)
+            .is_ok_and(|m| m.file_attributes() & (DIRECTORY | REPARSE_POINT) == DIRECTORY)
+    };
+    let top = Path::new(root).join("$Recycle.Bin");
+    let flags = volume_flags(root)?;
+    if flags & (FILE_PERSISTENT_ACLS | FILE_SUPPORTS_REPARSE_POINTS) == 0 {
+        return real_folder(&top).then_some(top);
     }
-    let top_owner = owner_of(&top)?;
-    if !(top_owner.eq_ignore_ascii_case(&sid) || TRUSTED.contains(&top_owner.as_str())) {
+    let sid = user_sid().ok()?;
+    let mine = top.join(&sid);
+    if !(real_folder(&top) && real_folder(&mine)) {
         return None;
     }
-    owner_of(&mine)?.eq_ignore_ascii_case(&sid).then_some(mine)
+    let trusted = |owner: &str| owner.eq_ignore_ascii_case(&sid) || TRUSTED.contains(&owner);
+    if !trusted(&owner_of(&top)?) {
+        return None;
+    }
+    // the user's folder: theirs, or the Administrators' where an elevated program deleted
+    // something first and the shell made it then (a data volume's bin, often): nobody else can
+    // swap it for a link either
+    trusted(&owner_of(&mine)?).then_some(mine)
 }
 
 /// The string SID of the owner of the file or folder `path`.

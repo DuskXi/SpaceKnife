@@ -15,6 +15,9 @@
 //! trash run moved to the recycle bin is taken out of it again: exactly the `$I`/`$R` pairs whose
 //! recorded original path lies below `<dir>` (Windows), or the trash entries it made (elsewhere).
 //! `SPACEKNIFE_OPS_DEVICE=<µs>[,<qd>]` puts a simulated slow device in front of the counted calls.
+//! `OPS_BENCH_EXPECT=ok` makes it fail (exit 1) unless every item was done, nothing is left of
+//! them and what went to the trash was all taken out again; `OPS_BENCH_EXPECT=no_trash` unless
+//! every item was refused for want of a trash and is still there (CI's file-system matrix).
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -137,8 +140,29 @@ fn unbin(results: &[OpResult], root: &Path) -> usize {
     gone
 }
 
-/// Elsewhere: removes what this run put into the trash (its info file and its payload).
-#[cfg(not(windows))]
+/// macOS: removes what this run put into the trash (the trashed item; its reference is a JSON
+/// pair of the trashed and the original path).
+#[cfg(target_os = "macos")]
+fn unbin(results: &[OpResult], _root: &Path) -> usize {
+    let mut gone = 0;
+    for r in results.iter().filter(|r| r.ok && !r.trash_ref.is_empty()) {
+        let v: serde_json::Value = serde_json::from_str(&r.trash_ref).unwrap();
+        let trashed = PathBuf::from(v["trashed"].as_str().unwrap());
+        assert!(
+            trashed
+                .components()
+                .any(|c| c.as_os_str() == ".Trash" || c.as_os_str() == ".Trashes"),
+            "not in a trash: {}",
+            trashed.display()
+        );
+        let _ = std::fs::remove_dir_all(&trashed).or_else(|_| std::fs::remove_file(&trashed));
+        gone += 1;
+    }
+    gone
+}
+
+/// Linux: removes what this run put into the trash (its info file and its payload).
+#[cfg(all(unix, not(target_os = "macos")))]
 fn unbin(results: &[OpResult], _root: &Path) -> usize {
     let mut gone = 0;
     for r in results.iter().filter(|r| r.ok && !r.trash_ref.is_empty()) {
@@ -570,6 +594,10 @@ fn main() {
         .iter()
         .map(|t| (t.path.clone(), t.root.clone()))
         .collect();
+    let bytes: HashMap<String, i64> = targets
+        .iter()
+        .filter_map(|t| t.bytes.map(|b| (t.path.clone(), b)))
+        .collect();
 
     probe::reset();
     let mut done = 0usize;
@@ -580,6 +608,7 @@ fn main() {
         cancel: Some(&never),
         sizes: trash.then_some(&sizes),
         longest: trash.then_some(&longest),
+        bytes: trash.then_some(&bytes),
         roots: Some(&roots),
         ..OpOptions::default()
     };
@@ -641,4 +670,16 @@ fn main() {
         },
     });
     println!("RESULT {line}");
+    if let Ok(want) = std::env::var("OPS_BENCH_EXPECT") {
+        let n = targets.len();
+        let wrong = match want.as_str() {
+            "ok" => ok != n || left_over != 0 || (trash && unbinned != ok),
+            "no_trash" => codes.get("no_trash").copied().unwrap_or(0) != n || left_over != n,
+            other => panic!("OPS_BENCH_EXPECT={other}"),
+        };
+        if wrong {
+            eprintln!("ops_bench: expected {want} for all {n} items: {line}");
+            std::process::exit(1);
+        }
+    }
 }
