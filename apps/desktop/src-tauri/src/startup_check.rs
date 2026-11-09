@@ -34,8 +34,8 @@ use crate::dialog::{self, Context};
 pub const MIN_WEBVIEW2: [u32; 4] = [89, 0, 774, 44];
 
 /// The flag the swap helper starts this program with when it refused to put it in place: explain
-/// why to the user, then end ([`explain`]).
-pub const STARTUP_PROBLEM: &str = "--startup-problem";
+/// why to the user, then end ([`explain`]). The helper's own constant, so the two can't drift apart.
+pub const STARTUP_PROBLEM: &str = sk_core::update::swap::STARTUP_PROBLEM;
 
 /// What keeps the window from opening.
 #[derive(Clone, Debug, PartialEq, Eq)]

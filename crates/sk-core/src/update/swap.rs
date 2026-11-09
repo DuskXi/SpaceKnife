@@ -1904,6 +1904,16 @@ fn show_startup_problem(plan: &Plan, log: &Log) {
     }
     let env = app_env(&std::env::vars().collect(), plan);
     let program = plan.new_program();
+    // The helper was started by the app the user was clicking in, so it may hand the foreground
+    // on: without this the explanation can end up flashing in the taskbar behind other windows.
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
+        // SAFETY: plain Win32 call without pointers; failing only means no foreground hand-off.
+        unsafe {
+            AllowSetForegroundWindow(ASFW_ANY);
+        }
+    }
     let started = {
         let _quiet = ERROR_MODES.quiet();
         spawn_detached(&program, &[STARTUP_PROBLEM], &env)
