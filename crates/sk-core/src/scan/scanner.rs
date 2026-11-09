@@ -7,7 +7,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, Instant};
 
-use sk_native::hardscan::{self, LinkSet, Ref, RootOptions, SliceOptions, SliceResult, Task};
+use sk_native::hardscan::{
+    self, DeviceHint, LinkSet, Prior, Ref, RootOptions, SliceOptions, SliceResult, Task,
+};
 use sk_protocol::DateTime;
 use sk_store::{Flags, Kind, NodeId, Store, Times};
 
@@ -459,11 +461,13 @@ impl Scanner {
                     path: Some(path.clone()),
                     verify_names: verify_names(vol.as_ref()),
                     listed_alloc: super::winopts::listed_alloc(vol.as_ref()),
+                    device: DeviceHint::default(),
                 });
                 queue.push_back(Task {
                     target: Ref::Node(node as u64),
                     path: path.clone(),
                     root: (root_opts.len() - 1) as u32,
+                    prior: Prior::UNKNOWN,
                 });
                 infos.push(RootInfo {
                     path,

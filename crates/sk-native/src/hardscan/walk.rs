@@ -13,6 +13,12 @@
 //! Windows its open handle, docs/native.md 2.2). Each subdirectory takes it when its job starts,
 //! so a directory stays open only until its last subdirectory has started.
 //!
+//! On the shared carriers a folder is listed in one of the pace's two lanes (pace/, docs/native.md
+//! 2.2 「列目录线程」): its prior — its parent's posterior that it waits for the disk — sends it to
+//! the IO lane or the CPU lane, and its listing (wall time, the CPU its thread used, entries) is a
+//! sample the pace learns from; its posterior becomes its subfolders' prior. A call keeps one
+//! parked stack per lane, so a folder waiting for a full lane does not hold back the other's.
+//!
 //! Windows folders a name cannot reach (case-only siblings, case.rs) are not left to the frontier
 //! like the others once the budget is spent: as a task a path would open them by name. A folder
 //! opened by file id, and everything below it, is *pinned*: listed in this call, up to a cap, and
@@ -21,7 +27,7 @@
 
 use std::cell::RefCell;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -29,8 +35,9 @@ use rayon::{Scope, ThreadPool, ThreadPoolBuilder};
 
 use super::case::{mark, msg};
 use super::common::{Arena, NativePath, RootOpts};
+use super::pace::{self, CPU, IO, Pace};
 use super::slots::{self, Slots};
-use super::{Entries, Error, ListingError, Ref, SliceResult, Task, native_to_path, pace, sys};
+use super::{Entries, Error, ListingError, Prior, Ref, SliceResult, Task, native_to_path, sys};
 use crate::util::FxHashMap;
 pub use crate::util::lower_ext;
 
@@ -40,6 +47,11 @@ pub struct Node {
     /// Found by this call (open without following a symlink) rather than given as a task.
     pub discovered: bool,
     pub care: Care,
+    /// The probability that its listing waits for the disk, before it is listed: its parent's
+    /// posterior (NaN: none; the pace's global cold fraction stands in).
+    pub prior: f32,
+    /// The lane it was admitted to (pace::IO / pace::CPU).
+    pub lane: AtomicU8,
     /// How to open it from its listed parent (taken when its job starts).
     pub via: Mutex<Option<sys::Via>>,
     pub state: OnceLock<State>,
@@ -108,8 +120,8 @@ pub struct Child {
 }
 
 impl Node {
-    pub fn new(path: NativePath, root: u32, discovered: bool) -> Self {
-        Self::with_via(path, root, discovered, Care::Plain, None)
+    pub fn new(path: NativePath, root: u32, discovered: bool, prior: f32) -> Self {
+        Self::with_via(path, root, discovered, Care::Plain, None, prior)
     }
 
     pub fn with_via(
@@ -118,15 +130,22 @@ impl Node {
         discovered: bool,
         care: Care,
         via: Option<sys::Via>,
+        prior: f32,
     ) -> Self {
         Self {
             path,
             root,
             discovered,
             care,
+            prior,
+            lane: AtomicU8::new(CPU as u8),
             via: Mutex::new(via),
             state: OnceLock::new(),
         }
+    }
+
+    fn lane(&self) -> usize {
+        self.lane.load(Ordering::Relaxed) as usize
     }
 
     fn take_via(&self) -> Option<sys::Via> {
@@ -166,15 +185,13 @@ pub struct Ctx {
     pub listed: AtomicUsize,
     pub entries: AtomicUsize,
     pub arenas: Vec<Mutex<Arena>>,
-    /// The width of the shared carriers (pace.rs), for a call listing on them.
-    pub width: Option<&'static Slots>,
     /// The disk's gate (slots.rs `ListingGate`), when the call names one.
     pub gate: Option<Arc<Slots>>,
-    /// The adaptive width, told about every listing of a call on the carriers.
-    pub pace: Option<&'static pace::Pace>,
+    /// The shared carriers' pace (pace/): the lanes' limits, told about every listing.
+    pub pace: Option<&'static Pace>,
     /// Folders of this call holding their slots, and how many may at once: the threads of its
     /// pool (an admitted folder never waits in a queue holding slots another call could use);
-    /// on the carriers also its share of the width (`Ctx::share`).
+    /// on the carriers also its share of the lanes' widths (`Ctx::share`).
     pub running: AtomicUsize,
     pub most_running: usize,
     /// Set by the caller to end the call early: nothing more is listed, what is left waits in
@@ -191,7 +208,9 @@ enum Admit {
     Resolved,
     /// It holds a slot of each limit: list it.
     Taken,
-    /// A limit is full (or the gate paused): it waits.
+    /// Its lane is full: it waits (the other lane's folders may still start).
+    LaneFull,
+    /// The call's share or the gate is full (or the gate paused): nothing more starts now.
     Refused,
 }
 
@@ -244,55 +263,62 @@ impl Ctx {
         }
     }
 
-    /// A slot of each limit for `node`, unless it is settled without a listing. A folder that must
-    /// be listed in this call goes through a paused gate (never past its limit).
-    fn admit(&self, node: &Node, stopped: bool) -> Admit {
+    /// The limit of `lane`'s listings in flight (none off the carriers).
+    fn lane_slots(&self, lane: usize) -> Option<&'static Slots> {
+        self.pace.map(|p| p.lane(lane))
+    }
+
+    /// A slot of each limit for `node` in `lane`, unless it is settled without a listing. A
+    /// folder that must be listed in this call goes through a paused gate (never past its limit).
+    fn admit(&self, node: &Node, stopped: bool, lane: usize) -> Admit {
         if !self.settle(node, stopped) {
             return Admit::Resolved;
         }
         if self.running.load(Ordering::Relaxed) >= self.share() {
             return Admit::Refused;
         }
-        if let Some(w) = self.width
+        let slots = self.lane_slots(lane);
+        if let Some(w) = slots
             && !w.try_take(true)
         {
-            return Admit::Refused;
+            return Admit::LaneFull;
         }
         if let Some(g) = &self.gate
             && !g.try_take(stopped)
         {
-            if let Some(w) = self.width {
+            if let Some(w) = slots {
                 w.untake();
             }
             return Admit::Refused;
         }
+        node.lane.store(lane as u8, Ordering::Relaxed);
         self.running.fetch_add(1, Ordering::Relaxed);
         Admit::Taken
     }
 
-    /// How many of its folders a call may list at once. On the carriers: its share of the width
-    /// among the calls on them, rounded up (all of it for a call alone, as at a scan's start; one
-    /// each for as many calls as the width, as the scanner's calls are on a warm cache; two each
-    /// at the cold width). A call that lists several folders at once lists siblings at the same
-    /// time, which costs the file system more: on ReFS, warm, about 15 % more kernel time than
-    /// one folder at a time per call, for the same wall time.
+    /// How many of its folders a call may list at once. On the carriers: its share of the lanes'
+    /// widths together among the calls on them, rounded up (all of it for a call alone, as at a
+    /// scan's start; about two each for as many calls as the scanner keeps, scanner.rs). A call
+    /// that lists several folders at once lists siblings at the same time, which costs the file
+    /// system more: on ReFS, warm, about 15 % more kernel time than one folder at a time per call,
+    /// for the same wall time.
     fn share(&self) -> usize {
-        match self.width {
-            Some(w) => w
-                .limit()
+        match self.pace {
+            Some(p) => p
+                .width()
                 .div_ceil(CALLS.load(Ordering::Relaxed).max(1))
                 .clamp(1, self.most_running),
             None => self.most_running,
         }
     }
 
-    /// The slots of a listing that took `took` go back.
-    fn give(&self, took: Duration) {
+    /// The slots of a listing of `lane` that took `took` go back.
+    fn give(&self, took: Duration, lane: usize) {
         self.running.fetch_sub(1, Ordering::Relaxed);
         if let Some(g) = &self.gate {
             g.give(took);
         }
-        if let Some(w) = self.width {
+        if let Some(w) = self.lane_slots(lane) {
             w.give(took);
         }
     }
@@ -305,10 +331,12 @@ impl Ctx {
         }
     }
 
-    /// The slots held may go to the next folder: no limit was lowered below the listings in
-    /// flight, and the gate is not paused (but for a folder that must be listed: `stopped`).
-    fn may_keep(&self, stopped: bool) -> bool {
-        self.width.is_none_or(|w| w.inflight() <= w.limit())
+    /// The slots held in `lane` may go to the next folder of the lane: no limit was lowered below
+    /// the listings in flight, and the gate is not paused (but for a folder that must be listed:
+    /// `stopped`).
+    fn may_keep(&self, stopped: bool, lane: usize) -> bool {
+        self.lane_slots(lane)
+            .is_none_or(|w| w.inflight() <= w.limit())
             && self
                 .gate
                 .as_ref()
@@ -329,77 +357,104 @@ impl Ctx {
 
 const WAIT_MAX: Duration = Duration::from_millis(10);
 
-/// A call's folders waiting for a slot, the next one on top (children are pushed in reverse, so a
-/// carrier goes on with the first subfolder of the folder it listed: depth-first).
+/// A call's folders waiting for a slot, one stack per lane, the next one on top (children are
+/// pushed in reverse, so a carrier goes on with the first subfolder of the folder it listed:
+/// depth-first within a lane).
 pub struct Parked<'n> {
-    stack: Mutex<Vec<&'n Node>>,
+    stacks: Mutex<[Vec<&'n Node>; 2]>,
     any: AtomicBool,
+    pace: Option<&'static Pace>,
 }
 
 impl<'n> Parked<'n> {
-    fn new(nodes: &'n [Node]) -> Self {
-        Self {
-            stack: Mutex::new(nodes.iter().rev().collect()),
+    fn new(nodes: &'n [Node], pace: Option<&'static Pace>) -> Self {
+        let parked = Self {
+            stacks: Mutex::new([Vec::new(), Vec::new()]),
             any: AtomicBool::new(!nodes.is_empty()),
+            pace,
+        };
+        {
+            let mut st = parked.stacks.lock().unwrap_or_else(|e| e.into_inner());
+            for node in nodes.iter().rev() {
+                st[parked.lane_of(node)].push(node);
+            }
         }
+        parked
+    }
+
+    /// The lane a node waits in: by its prior on the carriers, else the one lane.
+    fn lane_of(&self, node: &Node) -> usize {
+        self.pace.map_or(CPU, |p| p.lane_for(node.prior))
     }
 
     fn push(&self, children: &'n [Child]) {
         if children.is_empty() {
             return;
         }
-        let mut st = self.stack.lock().unwrap_or_else(|e| e.into_inner());
-        st.extend(children.iter().rev().map(|c| &c.node));
+        let mut st = self.stacks.lock().unwrap_or_else(|e| e.into_inner());
+        for c in children.iter().rev() {
+            st[self.lane_of(&c.node)].push(&c.node);
+        }
         self.any.store(true, Ordering::Release);
     }
 
-    /// Takes off the top every node that is settled or gets its slots, until one is refused;
-    /// those to list go to `out`, the next one first.
+    /// Takes off the top of each lane's stack every node that is settled or gets its slots, until
+    /// one is refused; those to list go to `out`.
+    fn admit_locked(
+        st: &mut [Vec<&'n Node>; 2],
+        ctx: &Ctx,
+        out: &mut Vec<&'n Node>,
+        stopped: bool,
+    ) {
+        for lane in [IO, CPU] {
+            while let Some(&node) = st[lane].last() {
+                match ctx.admit(node, stopped, lane) {
+                    Admit::Resolved => {}
+                    Admit::Taken => out.push(node),
+                    Admit::LaneFull => break,
+                    Admit::Refused => return,
+                }
+                st[lane].pop();
+            }
+        }
+    }
+
     fn admit(&self, ctx: &Ctx, out: &mut Vec<&'n Node>) {
         if !self.any.load(Ordering::Acquire) {
             return;
         }
-        let mut st = self.stack.lock().unwrap_or_else(|e| e.into_inner());
-        let stopped = ctx.stopped();
-        while let Some(&node) = st.last() {
-            match ctx.admit(node, stopped) {
-                Admit::Resolved => {}
-                Admit::Taken => out.push(node),
-                Admit::Refused => break,
-            }
-            st.pop();
-        }
-        self.any.store(!st.is_empty(), Ordering::Release);
+        let mut st = self.stacks.lock().unwrap_or_else(|e| e.into_inner());
+        Self::admit_locked(&mut st, ctx, out, ctx.stopped());
+        self.any
+            .store(st.iter().any(|s| !s.is_empty()), Ordering::Release);
     }
 
-    /// After a listing whose slots are still held: the first folder to list takes them over (when
-    /// `Ctx::may_keep`), then `admit` goes on. True: they were taken over (`out[0]` holds them).
-    fn admit_after(&self, ctx: &Ctx, out: &mut Vec<&'n Node>) -> bool {
+    /// After a listing of `lane` whose slots are still held: the lane's next folder takes them
+    /// over (when `Ctx::may_keep`), then `admit` goes on. True: they were taken over (`out[0]`
+    /// holds them).
+    fn admit_after(&self, ctx: &Ctx, out: &mut Vec<&'n Node>, lane: usize) -> bool {
         if !self.any.load(Ordering::Acquire) {
             return false;
         }
-        let mut st = self.stack.lock().unwrap_or_else(|e| e.into_inner());
+        let mut st = self.stacks.lock().unwrap_or_else(|e| e.into_inner());
         let stopped = ctx.stopped();
         let mut kept = false;
-        while let Some(&node) = st.last() {
-            let admitted = if kept {
-                ctx.admit(node, stopped)
-            } else if !ctx.settle(node, stopped) {
-                Admit::Resolved
-            } else if ctx.may_keep(stopped) {
-                kept = true;
-                Admit::Taken
-            } else {
-                Admit::Refused
-            };
-            match admitted {
-                Admit::Resolved => {}
-                Admit::Taken => out.push(node),
-                Admit::Refused => break,
+        while let Some(&node) = st[lane].last() {
+            if !ctx.settle(node, stopped) {
+                st[lane].pop();
+                continue;
             }
-            st.pop();
+            if ctx.may_keep(stopped, lane) {
+                node.lane.store(lane as u8, Ordering::Relaxed);
+                out.push(node);
+                st[lane].pop();
+                kept = true;
+            }
+            break;
         }
-        self.any.store(!st.is_empty(), Ordering::Release);
+        Self::admit_locked(&mut st, ctx, out, stopped);
+        self.any
+            .store(st.iter().any(|s| !s.is_empty()), Ordering::Release);
         kept
     }
 
@@ -524,10 +579,11 @@ fn process<'s, 'n: 's>(scope: &Scope<'s>, node: &'n Node, ctx: &'s Ctx, parked: 
     loop {
         let took = list_one(node, ctx, parked);
         ready.clear();
-        if parked.admit_after(ctx, &mut ready) {
+        let lane = node.lane();
+        if parked.admit_after(ctx, &mut ready, lane) {
             ctx.hand_over(took);
         } else {
-            ctx.give(took);
+            ctx.give(took, lane);
         }
         let Some((&next, rest)) = ready.split_first() else {
             return;
@@ -553,6 +609,7 @@ fn list_one<'n>(node: &'n Node, ctx: &Ctx, parked: &Parked<'n>) -> Duration {
     let mark = arena.mark();
     let mut subdirs: Vec<(u32, NativePath, sys::Hint)> = Vec::new();
     let root = node.root as usize;
+    let cpu0 = ctx.pace.and_then(|_| pace::cpu_mark());
     let started = Instant::now();
     let res = sys::list_dir(
         &node.path,
@@ -564,14 +621,19 @@ fn list_one<'n>(node: &'n Node, ctx: &Ctx, parked: &Parked<'n>) -> Duration {
         &mut subdirs,
     );
     let took = started.elapsed();
+    let cpu = match (cpu0, cpu0.and_then(|_| pace::cpu_mark())) {
+        (Some(a), Some(b)) => Some(pace::cpu_ns(a, b, took.as_nanos() as u64)),
+        _ => None,
+    };
     match res {
         Ok((parent, pinned)) => {
             let count = arena.len() - mark.entries;
             let name_end = arena.names.len();
             drop(arena);
-            if let Some(p) = ctx.pace {
-                p.listed(took, count);
-            }
+            let child_prior = match ctx.pace {
+                Some(p) => learn(p, node, took, cpu, count),
+                None => f32::NAN,
+            };
             ctx.entries.fetch_add(count, Ordering::Relaxed);
             ctx.listed.fetch_add(1, Ordering::Relaxed);
             if stopped {
@@ -597,7 +659,7 @@ fn list_one<'n>(node: &'n Node, ctx: &Ctx, parked: &Parked<'n>) -> Duration {
                     };
                     Child {
                         j,
-                        node: Node::with_via(path, node.root, true, care, via),
+                        node: Node::with_via(path, node.root, true, care, via, child_prior),
                     }
                 })
                 .collect();
@@ -624,6 +686,33 @@ fn list_one<'n>(node: &'n Node, ctx: &Ctx, parked: &Parked<'n>) -> Duration {
     took
 }
 
+/// A listing of `node` that took `took` (`cpu`: of which its thread used the CPU; None: no
+/// clock) and found `entries` entries: a sample for the pace, and the prior of its subfolders
+/// (the node's posterior, mixed with the global cold fraction).
+fn learn(p: &'static Pace, node: &Node, took: Duration, cpu: Option<u64>, entries: usize) -> f32 {
+    let wall_ns = took.as_nanos() as u64;
+    let wait_ns = cpu.map_or(wall_ns, |c| wall_ns.saturating_sub(c));
+    let x = pace::feature(wait_ns);
+    let params = p.params();
+    let prior = if node.prior.is_nan() {
+        params.unknown_prior()
+    } else {
+        node.prior
+    };
+    let lane = node.lane();
+    p.listed(pace::Sample {
+        lane,
+        wall_ns,
+        x,
+        prior,
+        units: pace::units(entries),
+        inflight: p.lane(lane).inflight() as u32,
+        cpu_ns: cpu.unwrap_or(0),
+    });
+    let (post, _) = params.posterior(prior, x);
+    params.child_prior(post)
+}
+
 /// Walks `nodes` (the slice's tasks, in order) on `pool`. The calling thread admits the first
 /// folders (waiting for a slot when its limits are full), the carriers the rest as they go; when
 /// the carriers run out of admitted folders while some still wait, it admits them again.
@@ -636,11 +725,11 @@ pub fn walk(pool: &ThreadPool, nodes: &[Node], ctx: &Ctx) {
             }
         }
     }
-    let _call = OnCarriers(ctx.width.is_some());
-    if ctx.width.is_some() {
+    let _call = OnCarriers(ctx.pace.is_some());
+    if ctx.pace.is_some() {
         CALLS.fetch_add(1, Ordering::Relaxed);
     }
-    let parked = Parked::new(nodes);
+    let parked = Parked::new(nodes, ctx.pace);
     let parked = &parked;
     let mut ready = Vec::new();
     loop {
@@ -788,6 +877,7 @@ pub fn flatten(nodes: &[Node], tasks: Vec<Task>, arenas: &[Arena]) -> Result<Sli
                 target: r,
                 path: take_path(input, node),
                 root: node.root,
+                prior: Prior::of(node.prior),
             }),
         }
     }

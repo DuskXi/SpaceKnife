@@ -405,6 +405,7 @@ impl Ctl {
         };
     }
 
+    #[cfg(test)]
     pub fn lane_for(&self, prior: f32) -> usize {
         lane_for(self.cfg.mode, prior)
     }
@@ -595,11 +596,6 @@ impl Ctl {
         self.counter.is_none_or(|(t, _, dirs)| {
             now.saturating_sub(t) >= COUNTER_NS && self.dirs - dirs >= COUNTER_DIRS
         })
-    }
-
-    /// The lanes' phases (the report).
-    pub fn phases(&self) -> [Phase; 2] {
-        [self.lanes[IO].phase(), self.lanes[CPU].phase()]
     }
 
     /// The timeline starts over (a scan's report begins).

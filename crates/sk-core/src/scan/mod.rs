@@ -256,6 +256,7 @@ pub fn fold_slice(
                 target: Ref::Node(node as u64),
                 path: t.path,
                 root: t.root,
+                prior: t.prior, // the walker's lean for the folder, for the call that lists it
             })
         })
         .collect();

@@ -140,7 +140,6 @@ impl Params {
 }
 
 pub struct Model {
-    medium: Medium,
     prior: Params,
     /// Decayed sums per cluster: weight, Σx, Σx².
     n: [f64; 2],
@@ -165,7 +164,6 @@ impl Model {
     pub fn new(medium: Medium) -> Self {
         let prior = Params::prior(medium);
         Model {
-            medium,
             prior,
             n: [0.0; 2],
             s1: [0.0; 2],
@@ -180,10 +178,6 @@ impl Model {
             samples: 0,
             vetoed: 0,
         }
-    }
-
-    pub fn medium(&self) -> Medium {
-        self.medium
     }
 
     pub fn params(&self) -> Params {
