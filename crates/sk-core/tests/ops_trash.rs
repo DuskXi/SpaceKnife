@@ -604,6 +604,11 @@ mod windows {
         let _one = Threads::set(1); // the link is checked first
         let dir = tempfile::tempdir().unwrap();
         let here = win::volume_root(&s(dir.path())).unwrap();
+        if win::own_bin(&here).is_none() {
+            // (a fresh account: the shell makes the bin folder first; a dangling link is its call)
+            eprintln!("skipped: this volume's bin is the shell's to write to");
+            return;
+        }
         let Some(other) = ('C'..='Z')
             .map(|c| format!("{c}:\\"))
             .find(|r| !r.eq_ignore_ascii_case(&here) && win::drive_type(r) == win::DRIVE_FIXED)
