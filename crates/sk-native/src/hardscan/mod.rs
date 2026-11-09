@@ -185,6 +185,34 @@ impl Default for RootOptions {
     }
 }
 
+/// The storage a scan root lies on, as the backend knows it at once (docs/native.md 2.2
+/// 「列目录线程」, 设备提示: Windows `IOCTL_STORAGE_QUERY_PROPERTY`, Linux `/sys/class/block`,
+/// macOS `diskutil`): where the walker's listing lanes start, how wide they go, what a cold
+/// listing is expected to wait. Never learnt; [`Medium::Unknown`] when nothing is known.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Medium {
+    #[default]
+    Unknown,
+    /// NVMe SSD.
+    Nvme,
+    /// SATA and other SSDs.
+    Ssd,
+    /// A spinning disk (also behind USB).
+    Hdd,
+    /// USB flash drives, SD cards.
+    Flash,
+    /// A network share.
+    Network,
+    /// A virtual disk.
+    Virtual,
+}
+
+/// What the backend tells the walker about a root's device ([`RootOptions::device`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct DeviceHint {
+    pub medium: Medium,
+}
+
 /// Private knobs that make Windows behave as WinBtrfs does, for tests (win.rs `RootState`).
 /// Not part of the stable interface.
 #[doc(hidden)]

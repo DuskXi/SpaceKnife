@@ -60,6 +60,18 @@ use std::time::{Duration, Instant};
 use super::common::Unit;
 use super::slots::Slots;
 
+// the new controller (docs/native.md 2.2): wired into the walker in the next step
+#[allow(dead_code)]
+mod ctl;
+#[allow(dead_code)]
+mod lane;
+#[allow(dead_code)]
+mod model;
+#[cfg(test)]
+mod sim;
+#[cfg(test)]
+mod v1;
+
 /// Shortest window a decision is made on, and the most folders it needs (fewer are enough once it
 /// lasted MAX_WINDOW).
 const MIN_WINDOW: Duration = Duration::from_millis(120);
