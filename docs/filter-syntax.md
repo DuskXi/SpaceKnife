@@ -313,7 +313,7 @@ bare       = 不含 ";" "\" "|" "<" ">" 的非空文本 ;
 
 ### 9.1 实测方法
 
-`tools/spacesniffer_oracle.py` 用 SpaceSniffer 的命令行（`scan <目录> filter <表达式> export "Simple file list" <文件> autoclose`）对一个精确控制大小、时间、属性、类别和文件夹名的测试目录（原 Python 测试的 `filter_fixture.py`，16 个文件，外加一个用于区分进制和月、年长度的小目录；Rust 的回放在内存里按同样的大小、时间和属性建出这棵树）逐条求值。SpaceSniffer 运行在一个从不显示的独立桌面上；表达式非法时它会弹出「Filter contains errors」，工具读取弹窗原文后结束进程。共 170 条探针，结果在 `crates/sk-core/tests/data/spacesniffer_filter_oracle.json`，由 `crates/sk-core/tests/filter_compat.rs` 逐条回放。
+原先的 `tools/spacesniffer_oracle.py`（Python 版随 0.3.5 删除，需要时再写 Node 版）用 SpaceSniffer 的命令行（`scan <目录> filter <表达式> export "Simple file list" <文件> autoclose`）对一个精确控制大小、时间、属性、类别和文件夹名的测试目录（原 Python 测试的 `filter_fixture.py`，16 个文件，外加一个用于区分进制和月、年长度的小目录；Rust 的回放在内存里按同样的大小、时间和属性建出这棵树）逐条求值。SpaceSniffer 运行在一个从不显示的独立桌面上；表达式非法时它会弹出「Filter contains errors」，工具读取弹窗原文后结束进程。共 170 条探针，结果在 `crates/sk-core/tests/data/spacesniffer_filter_oracle.json`，由 `crates/sk-core/tests/filter_compat.rs` 逐条回放。
 
 ### 9.2 扩展（SpaceSniffer 判为非法，SpaceKnife 赋予含义）
 

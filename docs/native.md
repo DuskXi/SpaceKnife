@@ -102,7 +102,7 @@ def parse_mft(data, record_size: int, cluster_size: int) -> MftTable:
 - 环：不经根可达的父链环里，每个环断开最小的那一行放进 `$孤立文件`；环长超过 4096 时（numpy 建树的标签传播到此为止）整个环的成员都断开。两种建树相同。
 - 与硬扫描的有意差异：云占位文件保留 MFT 里真实的 alloc（硬扫描记 0）；MFT 能看到硬扫描被拒绝访问的目录（如 System Volume Information）；元文件放在伪目录里。
 
-测试钩子（不属于公开接口）：`_mft_image_info(path)`、`_read_mft_image(path)`、`_scan_mft_image(path, duty=1.0, window=0, progress=None, stats=None)`、`_parse_mft_stream(data, record_size, cluster_size, window_records, concurrent=False, seed=0)`，读带引导扇区的卷镜像或按小窗口驱动流式解析器（`concurrent`：窗口按 `seed` 打乱的顺序并行解析，再按记录号并入，与顺序喂入逐字节相同）。镜像文件在 Windows 上也走重叠 IO 引擎（不提权也能测到它），其他系统用读线程。基准用的环境变量 `SPACEKNIFE_MFT_WINDOW` / `_DEPTH`（固定深度）/ `_SPARE` / `_PIECE` 改窗口大小和深度，不属于接口。
+测试钩子（不属于公开接口）：`_mft_image_info(path)`、`_read_mft_image(path)`、`_scan_mft_image(path, duty=1.0, window=0, progress=None, stats=None)`、`_parse_mft_stream(data, record_size, cluster_size, window_records, concurrent=False, seed=0)`，读带引导扇区的卷镜像或按小窗口驱动流式解析器（`concurrent`：窗口按 `seed` 打乱的顺序并行解析，再按记录号并入，与顺序喂入逐字节相同）。镜像文件在 Windows 上也走重叠 IO 引擎（不提权也能测到它），其他系统用读线程。基准用的环境变量 `SPACEKNIFE_MFT_WINDOW` / `SPACEKNIFE_MFT_DEPTH`（固定深度）/ `SPACEKNIFE_MFT_SPARE` / `SPACEKNIFE_MFT_PIECE` 改窗口大小和深度，不属于接口。
 
 ### 2.2 并行硬扫描（`src/hardscan/`）
 
@@ -228,7 +228,7 @@ def scan_slice(
   - 磁盘负载上限（`ListingGate`，见 4.2）：总量照旧由限速器的闸门封顶：两条道在列的加起来不超过它的并发，暂停时不再开始新的。闸门不放时两条道都是需求不足，不会因此加宽或变窄。暂停时能等的文件夹不再开始，原样作为任务交回（预算之内暂停的调用也立刻交回）；必须在本次调用里列的（按文件 ID 打开的文件夹下面的、名字与别的项相同的，见上「预算」）照样列，但不超过上限。限速器的最大并发（`listing_max`）是两条道最宽之和。
   - 线程池：线程数至少是两条道的宽度之和，向上取到 8 的倍数（宽度几毫秒变一次，池不跟着每次重建）；宽度之和 2 s 都低于池的线程数减 8 时（或扫描结束）换回小的池。还在旧池上的调用在旧池上做完，旧池的线程随后退出。
   - 测量和日志：扫描的耗时分解多出调用数的范围和时间平均、两条道的宽度范围和时间平均、各道列了多少文件夹、冷比例随时间的曲线（每秒一个点，太长时两两合并）、读盘否决起作用的样本比例；`listing_threads()` 给出两条道的宽度和 `calls`，`pace_report(reset)` 给出这些曲线。`SPACEKNIFE_WALK_TRACE=<文件>` 把每一轮的决定追加进文件（道、阶段、宽度、速率、平均在列、用时、π、两个簇心、κ）。
-  - 环境变量（测量用，不属于接口）：`SPACEKNIFE_SCAN_THREADS=N`（1–64）不分道，宽度和扫描器的调用数都固定为 N；`SPACEKNIFE_WALK_ADAPT=0` 不分道、固定在起步宽度；`SPACEKNIFE_WALK_LANES=0` 不分道，所有文件夹都走一条按曲线走的道（量分道本身值多少）；`SPACEKNIFE_WALK_MAX`（默认 64，1–256；POSIX 另外不超过 RLIMIT_NOFILE 软上限减 128 后的一半，两条道合起来）是 IO 道的最宽；`SPACEKNIFE_WALK_TRACE=<文件>`。
+  - 环境变量（测量用，不属于接口）：`SPACEKNIFE_SCAN_THREADS=N`（1–64）不分道，宽度和扫描器的调用数都固定为 N；`SPACEKNIFE_WALK_ADAPT=0` 不分道、固定在起步宽度；`SPACEKNIFE_WALK_LANES=0` 不分道，所有文件夹都走一条按曲线走的道（量分道本身值多少）；`SPACEKNIFE_WALK_MAX`（默认 64，1–256；POSIX 另外不超过 RLIMIT_NOFILE 软上限减 128 后的一半，两条道合起来）是 IO 道的最宽；`SPACEKNIFE_WALK_TRACE=<文件>`；`SPACEKNIFE_SCAN_SHARED=0` 不用共用的列目录线程，回到每次调用一个列目录线程（`scan/mod.rs` 的 `shared_listing`）。
   - 模拟器（`pace/sim.rs`，只在测试里编译）：用模拟的设备、CPU 和目录树驱动真正的控制器代码（模型和两条道，与遍历器用的是同一份），模拟时间、固定种子，几秒跑完。设备是 NVMe、SATA SSD、网络和机械盘（各自的读延迟随队列深度的曲线和吞吐上限），缓存状态按子树：全冷、全热、扫了一半（前一半热）、不均匀（随机 30% 的子树热）、边读边热（读一个冷文件夹时它的子文件夹的记录有一部分一起进了缓存），CPU 有每项的开销和锁争用（不争、像 NTFS 那样轻、像 ReFS 那样重）。「粗糙的卷」照 ReFS 盘（NVMe）冷缓存的追查做：元数据读得慢（每次 400 µs，抖动大）、15% 的子树里列一个冷文件夹要读 10 倍的次数（元数据散在卷上）、卷时不时把所有读压住几十 ms（像一把锁，平均每 150 ms 一次、每次约 30 ms，第一次来得早：追查过的每次 ReFS 盘冷扫描在最初 100 ms 里都有一轮慢了十倍），再加 ReFS 那样的锁争用；一轮和一轮的速率差十倍，最好的固定宽度是 32（ReFS 盘上快的几次 IO 道也在 32–40）。0.3.5 的规则（v1，下面）也在模拟器里跑，作为基线。每个场景检查（第一次扫描，没有任何先验）：总速率不低于这个场景最好的固定宽度的 90%；不比 v1 慢（模拟器自己的噪声留 3%）；达到最好固定宽度平均速率的 80% 不晚于那个固定宽度自己（加它用时的 5%）。粗糙的两个场景各跑 12 个种子：每个种子都要过 90% 那一条，后两条按 12 次的合计算（一棵树上 v1 或者第一次停顿的早晚可能碰巧占便宜）。每个场景 8 千到 15 万个文件夹，32 个 CPU（另有三个 4 个 CPU 的场景），在调试构建里一共约 2 s（每个场景各宽度并行地跑）。结果（`cargo test -p sk-native --lib sim -- --nocapture`；百分比是总速率相对最好的固定宽度，后面是第一次扫描从开头到速率达到最好固定宽度平均速率 80% 的时间）：
 
     | 场景 | 最好的固定宽度 | 新算法 | v1 |
