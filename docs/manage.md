@@ -120,14 +120,14 @@ Linux（WSL 2 的 ext4，热缓存，同样交替 3 次）：永久删除 2 万�
 
 #### 2.3.2 各文件系统（0.3.5）
 
-用户报告：exFAT 的三星 T7 USB SSD（L:）上从删除篮永久删除 19 个文件夹，19 项全报「操作失败：参数错误。」，一个也没删（dev 3150111）。原因：exFAT、FAT 没有 POSIX 删除语义，按经典方式标记删除的文件夹要等它的句柄关掉才真的删掉，而旧引擎删父文件夹时子文件夹的句柄还开着（把 TMP 放到那块盘上跑 3150111 的 ops_trash，14 个测试失败，正是这条消息）。2.3.1 的新引擎先关子再删父，之后把每种文件系统上的移到回收站和永久删除都查了一遍：
+用户报告：一块 exFAT 的 USB SSD 上从删除篮永久删除 19 个文件夹，19 项全报「操作失败：参数错误。」，一个也没删（dev 3150111）。原因：exFAT、FAT 没有 POSIX 删除语义，按经典方式标记删除的文件夹要等它的句柄关掉才真的删掉，而旧引擎删父文件夹时子文件夹的句柄还开着（把 TMP 放到那块盘上跑 3150111 的 ops_trash，14 个测试失败，正是这条消息）。2.3.1 的新引擎先关子再删父，之后把每种文件系统上的移到回收站和永久删除都查了一遍：
 
 | 文件系统 | 移到回收站 | 永久删除 | 在哪验证过 |
 |---|---|---|---|
-| NTFS（Windows） | `$Recycle.Bin\<SID>`，后端自己写 `$I` 再改名（2.3） | POSIX 语义：名字立即消失，别的程序开着（允许删除）的文件也一样 | 本机 C:；CI 虚拟盘 |
-| ReFS | 同 NTFS。`<SID>` 的属主常是 Administrators（提升权限的程序先删过东西时 shell 建的），以前因此交给 shell：19 个小文件夹 23.6 s，现在 0.03 s（调试版 ops_bench） | POSIX 语义（本机 ReFS 支持） | 本机 W:；CI windows-2025 虚拟盘 |
-| exFAT、FAT32（Windows，固定磁盘） | 卷上只有一个所有用户共用的 `$Recycle.Bin`，没有 `<SID>` 文件夹（这两种文件系统没有属主和权限，shell 就这样放）。以前：还原（撤销）报「不是可还原的回收站条目」，回收站占用算成 0，每项交给 shell 要 1.3 s（它把整个回收站走一遍）。现在还原认这个位置，占用按它算，放进去也由后端自己做（没有属主也没有链接，没人能在检查之后把它换掉）：19 项 24.4 s → 0.27 s（调试版 ops_bench） | 没有 POSIX 语义：子项的句柄先关、文件夹最后删。别的程序（杀毒、预览、同步）开着、允许删除的文件要等它关掉名字才消失：文件夹先再问约 1 s（10–500 ms 递增），关了就删掉；还开着就说明（见下），不是「目录不是空的」 | 本机 L:（exFAT USB SSD）；CI 虚拟盘（FAT32 有 8.3 短名，exFAT 没有） |
-| Btrfs（WinBtrfs） | 同 NTFS（属主同 ReFS 的情况） | POSIX 语义；名字不是合法 Unicode 的项建不出来 | 本机 H: |
+| NTFS（Windows） | `$Recycle.Bin\<SID>`，后端自己写 `$I` 再改名（2.3） | POSIX 语义：名字立即消失，别的程序开着（允许删除）的文件也一样 | 本机系统盘；CI 虚拟盘 |
+| ReFS | 同 NTFS。`<SID>` 的属主常是 Administrators（提升权限的程序先删过东西时 shell 建的），以前因此交给 shell：19 个小文件夹 23.6 s，现在 0.03 s（调试版 ops_bench） | POSIX 语义（本机 ReFS 支持） | 本机 ReFS 卷；CI windows-2025 虚拟盘 |
+| exFAT、FAT32（Windows，固定磁盘） | 卷上只有一个所有用户共用的 `$Recycle.Bin`，没有 `<SID>` 文件夹（这两种文件系统没有属主和权限，shell 就这样放）。以前：还原（撤销）报「不是可还原的回收站条目」，回收站占用算成 0，每项交给 shell 要 1.3 s（它把整个回收站走一遍）。现在还原认这个位置，占用按它算，放进去也由后端自己做（没有属主也没有链接，没人能在检查之后把它换掉）：19 项 24.4 s → 0.27 s（调试版 ops_bench） | 没有 POSIX 语义：子项的句柄先关、文件夹最后删。别的程序（杀毒、预览、同步）开着、允许删除的文件要等它关掉名字才消失：文件夹先再问约 1 s（10–500 ms 递增），关了就删掉；还开着就说明（见下），不是「目录不是空的」 | 本机一块 exFAT 的 USB SSD；CI 虚拟盘（FAT32 有 8.3 短名，exFAT 没有） |
+| Btrfs（WinBtrfs） | 同 NTFS（属主同 ReFS 的情况） | POSIX 语义；名字不是合法 Unicode 的项建不出来 | 本机 WinBtrfs 卷 |
 | 网络位置（SMB） | 没有回收站：逐项 `no_trash`「网络位置没有回收站，只能永久删除」，原样不动 | 经典语义（同 FAT）；名字只差大小写时按文件 ID 核对（2.3） | 本机 `\\localhost\C$`；CI 同样（`RUNNER_TEMP` 所在盘的管理共享） |
 | 可移动磁盘（U 盘、SD 卡） | 「可移动磁盘没有回收站，只能永久删除」 | 同它的文件系统 | 没有实测（USB SSD、USB 机械盘是固定磁盘，有回收站） |
 | ext4、XFS（Linux） | freedesktop：家目录所在文件系统用 `$XDG_DATA_HOME/Trash`，别的卷在卷顶建 `$topdir/.Trash-$uid`；卷顶有管理员建的、带粘滞位的 `.Trash` 时用其中的 `.Trash/$uid`（CI 的 xfs 卷这样建，本机 WSL 2 的 tmpfs 上也试过） | `unlinkat` | CI loop 镜像；本机 WSL 2 的 ext4 |
@@ -141,7 +141,7 @@ Linux（WSL 2 的 ext4，热缓存，同样交替 3 次）：永久删除 2 万�
 
 **引擎**：一个文件夹里有删不掉、不进入的项时，它和它上面的文件夹不再去删（只会失败，Windows 上还要白等删除待定）。删除线程里出了错（panic，测试里接缝做的事出错也算）不再让别的线程永远等它的任务（以前整个操作卡住、界面一直「进行中」：SMB 上测试建联接点失败时就是这样）：那一项报「内部错误：…」，别的项照常。
 
-**FAT、exFAT 上每删一项少写一次**（用户报告：同一块 T7 上永久删除 11 个文件夹、约 14.5 万项、43.1 GB 用了 5 分 28 秒，每秒约 440 项；前面报错的那次 9 秒就结束，是因为第一个文件夹就出错，一项也没删）。量出来的：
+**FAT、exFAT 上每删一项少写一次**（用户报告：同一块盘上永久删除 11 个文件夹、约 14.5 万项、43.1 GB 用了 5 分 28 秒，每秒约 440 项；前面报错的那次 9 秒就结束，是因为第一个文件夹就出错，一项也没删）。量出来的：
 - 这块盘是 Windows 给 USB 盘的默认删除策略「快速删除」：文件系统的每次元数据修改都在调用返回之前写到盘上（4–6 KiB 的小写入，约 0.3 ms 一次，排队深度 0）。exFAT 在一个卷上一次只删一项：1、4、16 个线程一样快。整个删除几乎不读盘。
 - 按句柄设置删除标志（FileDispositionInformation）时，FAT 和 exFAT 当场就把目录项写一次，关句柄真删时再写目录项和位图：每个文件 3.06 次写入（`DeleteFileW`、PowerShell 的 `Remove-Item` 也是）。`cmd` 的 `rd /s /q` 打开时就带 FILE_DELETE_ON_CLOSE：2.05 次。
 - 现在没有 POSIX 语义时（`Item.posix` 已被拒绝），在核对过的句柄之外，再以它为根、不带名字打开同一项一次（`NtCreateFile`，带 FILE_DELETE_ON_CLOSE），两个句柄都关掉时删除：文件 3.06 → 2.04 次，文件夹 3.02 → 2.02 次，与 `rd` 相同。这样打开的一定是核对过的那一项，不按路径找。`ReOpenFile` 对文件夹报 ERROR_ACCESS_DENIED，所以直接用 `NtCreateFile`。打开时就定下关闭时删除，核对必须在这之前做完；它没法撤销（FAT、exFAT 没有 FileDispositionInformationEx 的 FILE_DISPOSITION_ON_CLOSE）。
@@ -149,20 +149,20 @@ Linux（WSL 2 的 ext4，热缓存，同样交替 3 次）：永久删除 2 万�
 - 只读文件这样打开会被拒（STATUS_CANNOT_DELETE），照旧先去掉只读再删，之后同样关闭时删除。别的拒绝（不能这样打开的文件系统，例如网络位置）出现后，这一项剩下的都改回设置删除标志。
 - 有 POSIX 语义的 NTFS、ReFS、WinBtrfs 不变。
 
-本机 L:（exFAT，三星 T7，USB，快速删除）上 5000 个小文件的树（ops_bench `tree:5000`）：
+一块 exFAT 的 USB SSD（快速删除策略）上 5000 个小文件的树（ops_bench `tree:5000`）：
 - 写入 15280 → 10220 次（`rd /s /q` 10276 次）。
 - 盘忙的时间 4.8–4.9 s → 3.4–3.5 s。
 - 整个删除 10.4–10.7 s → 8.8–9.1 s，约快 15%。1 个和 4 个线程一样。
 
 剩下的时间一半不在盘上，而是删除线程在内核里的 CPU 时间：每次当场写到盘上的元数据修改，exFAT 驱动要花约 0.9 ms CPU。2000 个文件只设置再清除删除标志（不删），每个文件写一次，内核 1.75 s；只打开再关掉是 0.06 s。所以删一项约 1.8 ms，约 1.1 ms 是驱动的 CPU，约 0.7 ms 是盘。
 
-T7 自己的状态影响也大：刚删完 43 GB 后的十几分钟里，同一个测试慢一倍。
+盘自己的状态影响也大：刚删完 43 GB 后的十几分钟里，同一个测试慢一倍。
 
 慢的大头仍是「快速删除」策略。在设备管理器里把盘改成「更好的性能」，Windows 就会缓存这些写入，但拔盘前必须先安全弹出。这是用户的选择，程序不去改。没有改过这个设置，所以没测过能差多少。
 
 **测试矩阵**（CI 的 `fs-matrix` 任务，`.github/scripts/fs-matrix.sh` / `.ps1`）：`sk-core` 的 ops_trash、ops_basket、ops_case_twins、ops_paths、ops_locks、ops_fs 和 ops_bench（19 个文件夹项，两种操作，`OPS_BENCH_EXPECT` 核对每项都成功、没剩下、放进回收站的都拿出来了；SMB 上核对每项都是 `no_trash`、都还在）在每种文件系统的小卷上跑，TMP / TMPDIR 指到卷上。Windows（windows-2025）：diskpart 建的 NTFS、ReFS、exFAT、FAT32 虚拟盘和 `\\localhost\<盘>$`（`RUNNER_TEMP` 所在的盘，托管运行器上多是 D:）；Linux（ubuntu-24.04）：sudo 挂载的 ext4、xfs、btrfs、vfat、exfat、ntfs3 loop 镜像和 tmpfs（内核没有某个模块时是 warning，不算通过）；macOS（macos-15）：hdiutil 的 APFS、HFS+（日志式）、FAT32、ExFAT 镜像。`ops_fs` 是照后端的方式端到端走一遍：扫描、放进删除篮、按 `ops_service` 给的选项执行 19 个文件夹，逐项结果必须完全对；移到回收站时核对落在 `trash_status` 说的位置，再还原回来内容不变（Linux、macOS 只在 `SPACEKNIFE_FS_MATRIX=1` 时用真的回收站）。测试要用到文件系统没有的东西时运行时探测、跳过那一部分并打印原因（`skipped: …`，CI 的任务摘要里有）：链接（FAT、exFAT、SMB 上没有联接点）、区分大小写的文件夹、名字不是合法 Unicode（WinBtrfs、macOS）、名字以点或空格结尾、名字里的反斜杠（Linux 的 vfat、exfat、ntfs3）、文件夹权限（同上，或 root）、只读文件、8.3 短名（exFAT、ReFS、Btrfs）、回收站（没有的卷上核对是 `no_trash`、提示永久删除、原样不动，再跳过）。探测在测试自己的临时文件夹里真的试一次，有这个功能时那一部分一定跑。
 
-本机实测（2026-11-09，Windows 11）：NTFS（C: 的临时文件夹）、ReFS（W:）、WinBtrfs（H:）、exFAT USB SSD（L:）、SMB 回环上六个测试程序全部通过（跳过的只有上面那些），ops_bench 19 个文件夹项两种操作全部成功、没有剩下（SMB 的移到回收站是 19 个 `no_trash`）。回收站里只动了测试自己放进去的项（`$I` 记的原路径在测试的临时文件夹下的），别的条目前后一致。Linux：WSL 2（内核 6.6）的 ext4 和自己挂的 tmpfs 上 sk-core 的六个 ops 测试程序全部通过（tmpfs 上用真的回收站，卷顶的 `.Trash-$uid`，ops_bench 两种操作也是）。XFS、Btrfs、vfat、exfat、ntfs3 和 macOS 的四种只在 CI 上跑（推送之后）。
+本机实测（2026-11-09，Windows 11）：NTFS（系统盘的临时文件夹）、ReFS、WinBtrfs、exFAT 的 USB SSD、SMB 回环上六个测试程序全部通过（跳过的只有上面那些），ops_bench 19 个文件夹项两种操作全部成功、没有剩下（SMB 的移到回收站是 19 个 `no_trash`）。回收站里只动了测试自己放进去的项（`$I` 记的原路径在测试的临时文件夹下的），别的条目前后一致。Linux：WSL 2（内核 6.6）的 ext4 和自己挂的 tmpfs 上 sk-core 的六个 ops 测试程序全部通过（tmpfs 上用真的回收站，卷顶的 `.Trash-$uid`，ops_bench 两种操作也是）。XFS、Btrfs、vfat、exfat、ntfs3 和 macOS 的四种只在 CI 上跑（推送之后）。
 
 ### 2.4 服务层（`crates/sk-server/src/ops_service.rs`）
 

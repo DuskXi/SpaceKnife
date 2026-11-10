@@ -196,8 +196,8 @@
 
 起因：试过「按文件 ID 打开子目录」，结果在 C: 上悄悄漏扫了三分之一，在 WinBtrfs 上无限循环，后来去掉了（经过见 [docs/native.md](docs/native.md) 2.2「试过但去掉的」）。同时对照了小众软件论坛上各款空间分析软件在 WinSxS 上结果不一致的讨论。
 
-- [x] **非 ID、只保留访问时间的硬扫描：冷热缓存实测与整盘核对**（2026-10-22）：C:（NTFS 876 万项）、W:（ReFS 321 万项）、I:（WinBtrfs 149 万项）各冷 2 次、热 2 次，逐个文件夹与参照（C: 读 MFT，W:/I: Python 遍历器）比对，没有漏扫和扫错，差异都能归到期间的文件变动或已知的有意差异（docs/native.md 2.2）。
-- [x] **子目录相对父目录句柄、按名字打开**（`relative_open`，默认开；代替按 ID 打开）：每个目录打开后核对文件 ID；重解析点、没有 ID、名字带 `\`、接近长度上限的都按完整路径；WinBtrfs 的 FileIdExtd ID 不可信时改用 FileIdBoth。热缓存 W: 快约 25–30%、C: 约 4%，冷缓存看不出差别；三块盘逐个文件夹比对一致（docs/native.md 2.2）。
+- [x] **非 ID、只保留访问时间的硬扫描：冷热缓存实测与整盘核对**（2026-10-22）：C:（NTFS 876 万项）、ReFS 盘（321 万项）、WinBtrfs 盘（149 万项）各冷 2 次、热 2 次，逐个文件夹与参照（C: 读 MFT，ReFS 盘和 WinBtrfs 盘用 Python 遍历器）比对，没有漏扫和扫错，差异都能归到期间的文件变动或已知的有意差异（docs/native.md 2.2）。
+- [x] **子目录相对父目录句柄、按名字打开**（`relative_open`，默认开；代替按 ID 打开）：每个目录打开后核对文件 ID；重解析点、没有 ID、名字带 `\`、接近长度上限的都按完整路径；WinBtrfs 的 FileIdExtd ID 不可信时改用 FileIdBoth。热缓存 ReFS 盘快约 25–30%、C: 约 4%，冷缓存看不出差别；三块盘逐个文件夹比对一致（docs/native.md 2.2）。
 - [x] **保留访问时间在受保护的系统文件夹里不起作用**：`C:\Windows\WinSxS`、`DriverStore\FileRepository` 等只给 TrustedInstaller 写权限，管理员打开 `FILE_WRITE_ATTRIBUTES` 也被拒（系统盘上约 16% 的文件夹），硬扫描整个 C: 仍写 0.25–0.7 GB。不启用 `SeRestorePrivilege`（2026-10-22 用户决定）：这些文件夹照常列，关键是结果不能错、扫描要快，WinSxS 这类文件夹不占多数。
 - [x] Rust 单元测试（`cargo test --lib`，含 Windows 上相对打开的 ID 核对测试）在 CI 的 Python 任务里三个系统都跑（「Native unit tests」）。
 - [ ] WinBtrfs 上的硬扫描用时在约 1 s 和约 5.8 s（每次读 1.2 GB）之间跳，和开不开相对打开无关，看起来是 WinBtrfs 自己的缓存；Python 遍历器（FindFirstFileEx）有时不读盘。查清楚是不是 `FileIdExtdDirectoryInformation` 让它多读了 inode。
@@ -208,7 +208,7 @@
     - 其中与 System32 等共享：8.00 GiB（33,920 个文件）。
   - 后果：整盘合计会多算 10 GiB 以上，可能超过卷的已用空间（违反 UI-W7-18 的验收）。删除篮在 Windows 硬扫描下也判断不了硬链接（docs/manage.md）。
   - [ ] 原生遍历器把 `FileIdExtdDirectoryInformation` 已经给出的文件 ID 填进 `ino`，不多花系统调用。
-    - 注意 WinBtrfs（2026-10-22 实测）：它的 `FileIdExtdDirectoryInformation` 给每个子项填的都是被列目录自己的 ID（`I:\usr` 下 bin、games、include 都是 `I:\usr` 的 `…0775`），`FileIdBothDirectoryInformation` 和句柄上查到的 ID 才是对的。照搬就会把整个文件夹当成同一个文件的硬链接。相对打开已经按「一次列表里两个子目录同一 ID」识别它并改用 FileIdBoth（`win.rs` `shares_ids`），硬链接要用同一份判断；文件之间的重复 ID 本来就可能是硬链接，只能从子目录判断。
+    - 注意 WinBtrfs（2026-10-22 实测）：它的 `FileIdExtdDirectoryInformation` 给每个子项填的都是被列目录自己的 ID（`usr` 下 bin、games、include 都是 `usr` 的 `…0775`），`FileIdBothDirectoryInformation` 和句柄上查到的 ID 才是对的。照搬就会把整个文件夹当成同一个文件的硬链接。相对打开已经按「一次列表里两个子目录同一 ID」识别它并改用 FileIdBoth（`win.rs` `shares_ids`），硬链接要用同一份判断；文件之间的重复 ID 本来就可能是硬链接，只能从子目录判断。
   - [ ] 没有 nlink，要自己找重复：扫描结束时按 `ino` 排序（870 万项约 70 MB、1 秒量级），或者边扫边找；然后修正 `HARDLINK_DUP` 和各级合计。内存按 docs/memory.md 估算。
   - [ ] 三种扫描统一归属规则。现在：
     - MFT 快扫：算在 MFT 记录里第一个名字上；
@@ -235,7 +235,7 @@
   - 用正确的版本、按扫描器的调度方式，重测 8 / 16 / 32 个线程的用时和 CPU。
   - 再决定动态线程算法要不要盯「每 CPU 秒列出的项数」；默认上限仍按核数。
 - [ ] **WinBtrfs 上名字含 `\` 的 Linux 文件打不开**
-  - 现状：`I:\usr` 里有 8 个，例如 systemd 的 `app-chromium\x2dbrowser-.scope.d`。Windows 上 `\` 是分隔符，按路径打不开，现在记为错误。
+  - 现状：WinBtrfs 盘上一份 Linux 的 `usr` 里有 8 个，例如 systemd 的 `app-chromium\x2dbrowser-.scope.d`。Windows 上 `\` 是分隔符，按路径打不开，现在记为错误。
   - 可以试：相对父目录句柄、按单个名字打开（`RootDirectory` + 名字）。先查清 WinBtrfs 怎么把这类名字映射给 Windows。
 - [ ] **改打开或列目录的方式之前，先在真实的整盘上比对**
   - 做法：设 `SPACEKNIFE_TEST_SCAN_ROOT=<盘或目录>`，跑 `test_native_scan_of_a_real_tree_matches_the_python_walker`。Python 遍历器在前后各扫一次，排除扫描期间的文件变动。
@@ -254,9 +254,9 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
   - [x] 快照边压缩边写，zstd 最多 4 个线程，name_off 分块换基（docs/memory.md §4）
   - [x] Linux glibc：mmap 阈值 4 MiB、arena 最多 4 个，扫完和空闲时 malloc_trim（docs/memory.md §8；`SPACEKNIFE_GLIBC_DEFAULTS=1` 回退）
   - [x] 预派发切片（在途切片 = 1.5 × 列目录线程）：默认线程放置下热缓存 C:\Windows 按轮交替 8 次，墙钟 0.97 倍 [0.90–1.05]、CPU 0.98 倍，没有确定的收益（第一轮的 −4–5% 是绑 P 核时测的；归并移进 Rust 之后列目录线程已忙 91%），**不做**。
-- [ ] 第一步里还没做的一项（等用户决定）：NodeStore 的列放进预留地址空间、按需提交（第一轮：880 万行模拟 append 0.46 → 0.14 s，扫描结束时提交等于实际用量）：生命周期、提交失败回退、映射模式切换要设计，还差在 W: 上端到端测。
-- [ ] 第二步：载体池替换 rayon 小池（宽度先固定为今天的值），之前先查清同宽度下 W: 冷缓存慢约 30% 的原因，补上 POSIX 的 fd 预算和资源错误重排。并发提高以后在大并发下重测 glibc 的 `M_ARENA_MAX=4`（docs/memory.md §8）。
-- [ ] K:、W:（TOPMORE NVMe）冷缓存每臂至少 8 轮，按每次运行的读延迟分层或配对，确认第一步在这两块盘上冷缓存没有变慢（评审：按中位数慢 33%，但盘的延迟状态在两次运行之间差 5 倍）。
+- [ ] 第一步里还没做的一项（等用户决定）：NodeStore 的列放进预留地址空间、按需提交（第一轮：880 万行模拟 append 0.46 → 0.14 s，扫描结束时提交等于实际用量）：生命周期、提交失败回退、映射模式切换要设计，还差在 ReFS 盘上端到端测。
+- [ ] 第二步：载体池替换 rayon 小池（宽度先固定为今天的值），之前先查清同宽度下 ReFS 盘冷缓存慢约 30% 的原因，补上 POSIX 的 fd 预算和资源错误重排。并发提高以后在大并发下重测 glibc 的 `M_ARENA_MAX=4`（docs/memory.md §8）。
+- [ ] 两块 NVMe 数据盘（NTFS、ReFS）冷缓存每臂至少 8 轮，按每次运行的读延迟分层或配对，确认第一步在这两块盘上冷缓存没有变慢（评审：按中位数慢 33%，但盘的延迟状态在两次运行之间差 5 倍）。
 - [ ] 第三、四步：governor 的上限交给 Rust；控制器先作为默认关闭的选项（报告 §2.4 的几处先修，离线回放后再实机验证）。
 - [ ] 不做：父目录拒绝写属性就让子目录直接普通打开（预测错的文件夹会被更新访问时间，改变了访问时间行为）；绑 P 核及类似的机器专用设置。
 
