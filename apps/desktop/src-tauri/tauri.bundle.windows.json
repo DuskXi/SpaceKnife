@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "useLocalToolsDir": true,
+    "resources": {
+      "target-bundle/SpaceKnife.com": "SpaceKnife.com"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
+      "minimumWebview2Version": "89.0.774.44",
+      "nsis": {
+        "template": "windows/installer.nsi",
+        "installerHooks": "windows/spaceknife.nsh"
+      }
+    }
+  }
+}

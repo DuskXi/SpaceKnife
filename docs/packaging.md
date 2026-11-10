@@ -1,122 +1,157 @@
-# 打包与发布（M8）
+# 打包与发布
 
-Electron 版（UI v1）的安装包：Windows NSIS；Linux AppImage / deb / rpm；macOS dmg（Apple Silicon 与 Intel 各一个，ad-hoc 签名、未公证：Developer ID 签名与公证等 Apple 开发者账号下来再接上，见 [TODO.md](../TODO.md)）。
+0.3.5 起，同一份界面（`apps/desktop` 的 Nuxt 构建）有两个外壳：默认是 **Tauri 外壳**（`apps/desktop/src-tauri`，界面跑在系统已有的网页视图里，后端在应用进程里运行）；**Electron 外壳**（`apps/electron-shell`，后端是子进程 `spaceknife-cli serve`）只用在 Tauri 版跑不了的地方：RHEL 9 的 rpm（RHEL 9 没有 WebKitGTK 4.1）、AppImage，以及沿用 0.3.4 文件名的 Linux 便携版（0.3.4 在 RHEL 9 上的便携版也要能更新上来）。后端是 Rust（`crates/sk-server`），不再有冻结的 Python 后端；命令行程序 `spaceknife-cli` 装在应用旁边。macOS 的包是 ad-hoc 签名、未公证（Developer ID 签名与公证等 Apple 开发者账号，见 [TODO.md](../TODO.md)）。0.3.x 的打包方式见 git 历史与 [release-notes/0.3.4.md](../release-notes/0.3.4.md)。
 
-| 产物（`dist/electron/`） | 平台 | 大小（0.3.0） |
+| 产物 | 平台 | 外壳 |
 |---|---|---|
-| `SpaceKnife-<版本>-Setup-x64.exe` | Windows 10+ x64，NSIS，未签名 | 135 MB |
-| `SpaceKnife-<版本>-x86_64.AppImage` | Linux x64，免安装 | 164 MB |
-| `spaceknife_<版本>_amd64.deb` | Ubuntu 22.04+ / Debian 系 | 131 MB |
-| `spaceknife-<版本>.x86_64.rpm` | RHEL 9+ / Fedora 系 | 118 MB |
-| `SpaceKnife-<版本>-mac-arm64.dmg` | macOS 14+，Apple Silicon，ad-hoc 签名、未公证 | 141 MB |
-| `SpaceKnife-<版本>-mac-x64.dmg` | macOS 14+，Intel，ad-hoc 签名、未公证 | 148 MB |
-| `SpaceKnife-<版本>-win-x64-portable.zip` | Windows 10+ x64 便携版（`--portable`） | 174 MB |
-| `SpaceKnife-<版本>-linux-x64-portable.tar.gz` | Linux x64 便携版（`--portable`） | 161 MB |
-| `SpaceKnife-<版本>-win-arm64-portable.zip`、`SpaceKnife-<版本>-linux-arm64-portable.tar.gz` | Windows 11 ARM 版、ARM Linux 的便携版（在 arm64 机器上 `--portable --no-installers`） | — |
-| `SpaceKnife-<版本>-mac-arm64-portable.zip`、`SpaceKnife-<版本>-mac-x64-portable.zip` | macOS 14+ 便携版：`SpaceKnife.app` 旁边一个 `data` 文件夹（`--portable`，ditto 打包） | — |
-| `win[-arm64]-unpacked/`、`linux[-arm64]-unpacked/`、`mac[-arm64]/SpaceKnife.app` | 免安装目录（冒烟测试、体验环境用） | 约 400 MB |
+| `SpaceKnife-<版本>-Setup-x64.exe` | Windows 10+ x64 的安装包：NSIS，fork 的 Tauri 模板，接管 0.3.4 electron-builder 的安装（同一个卸载项 GUID、目录和快捷方式，第 5 节），未签名；Windows on ARM 上模拟运行 | Tauri |
+| `SpaceKnife-<版本>-win-x64-portable.zip`、`SpaceKnife-<版本>-win-arm64-portable.zip` | Windows 便携版 | Tauri |
+| `spaceknife_<版本>_amd64.deb` | Ubuntu 22.04+ / Debian 系，包名 `spaceknife` | Tauri |
+| `spaceknife-<版本>.x86_64.rpm` | RHEL 9+ / Fedora 系，包名 `spaceknife` | Electron |
+| `SpaceKnife-<版本>-x86_64.AppImage`（和 `.AppImage.zsync`） | Linux x64，免安装 | Electron |
+| `SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-linux-arm64-portable.tar.gz` | Linux 便携版，0.3.4 的名字：0.3.4 的 Linux 便携版都更新到它，glibc 2.34+ 就能用（RHEL 9 也行） | Electron |
+| `SpaceKnife-<版本>-linux-x64-tauri.tar.gz`、`SpaceKnife-<版本>-linux-arm64-tauri.tar.gz` | Linux 轻量便携版，要系统的 WebKitGTK 4.1；0.3.5 新增，0.3.4 永远拿不到它 | Tauri |
+| `SpaceKnife-<版本>-mac-arm64.dmg`、`SpaceKnife-<版本>-mac-x64.dmg` | macOS 14+，Apple Silicon / Intel | Tauri |
+| `SpaceKnife-<版本>-mac-arm64-portable.zip`、`SpaceKnife-<版本>-mac-x64-portable.zip` | macOS 便携版：`SpaceKnife.app` 旁边一个 `data` 文件夹 | Tauri |
+
+每个文件的大小写在那个版本的发布说明里：发布说明写 `{{size:文件名}}`，Release 工作流按真正发布的文件填进去（第 9 节）。macOS 的最低版本是 14（`tauri.conf.json` 的 `bundle.macOS.minimumSystemVersion`，与 0.3.x 相同）。
+
+文件名是 0.3.4 的命名，以后每个版本都沿用（第 9 节「发布时的约定」）：更新检查按这些名字找文件，唯一的来源是 `crates/sk-core/src/update/mod.rs` 的 `asset_templates`，`tools/release.mjs` 的 `expected` 按它发布。唯一的新名字是 0.3.4 没有的那种安装方式，Tauri 版的 Linux 便携包 `SpaceKnife-<版本>-linux-<架构>-tauri.tar.gz`（`expected` 里标着 `since: "0.3.5"`）：它不以 `-linux-<架构>-portable.tar.gz` 结尾，0.3.4 的模式（`{v}` 换成 `[0-9A-Za-z.+~_-]+`、整串匹配、区分大小写）怎么也匹配不到它，`tools/compat034.mjs` 用 0.3.4 自己的 `pick_asset` 核对；它的校验清单 `SHA256SUMS-tauri-linux-<架构>.txt` 里的词（tauri）不在 0.3.4 的文件名里，0.3.4 照旧先读 `SHA256SUMS-portable-linux-<架构>.txt`。两种 Linux 便携版各自只更新到同一种（外壳经 `SPACEKNIFE_SHELL` 告诉后端，`asset_templates` 按外壳给名字）。Tauri 打包器自己的名字（`SpaceKnife_<版本>_amd64.deb`、`SpaceKnife_<版本>_x64-setup.exe` 之类）由工作流改成上面的名字：deb 由 `tools/deb.mjs` 重新打包成包名 `spaceknife`，安装包由 `tools/release.mjs windows-installer` 改名，dmg 在 `macos.yml` 里改名。
 
 ## 1. 构建
 
-```bash
-uv sync --locked --group native --group package
-```
+需要：rustup（仓库根目录的 `rust-toolchain.toml` 固定 Rust 的版本（edition 2024）和 clippy、rustfmt，cargo 第一次在仓库里运行时装上；CI 的每个工作流用 `rustup toolchain install` 装同一个）、Node 24 与 pnpm 10。Linux 上还要 Tauri 的系统库：`libwebkit2gtk-4.1-dev`、`libgtk-3-dev`、`libayatana-appindicator3-dev`、`librsvg2-dev`、`libssl-dev`、`patchelf`。
+
+**Tauri 外壳**：
 
 ```bash
-uv run python tools/build_package.py
+cd apps/desktop
+pnpm install --frozen-lockfile
+pnpm bundle            # tauri build：Windows 上 NSIS，Linux 上 deb（还能出 AppImage、rpm，不发布），macOS 上 app + dmg
+pnpm bundle:portable   # 在 bundle 之后：target/portable/ 下的便携包
 ```
 
-在哪个系统上运行就出哪个系统的包（Windows 出 NSIS，Linux 出三种，macOS 按本机架构出 dmg：PyInstaller 冻结的是正在运行的解释器，交叉不了架构）。`--portable` 另外把免安装目录打成便携包（见第 4 节），`--no-installers` 只出免安装目录（和便携包）。一律为构建机自己的架构打包（`tools/build_package.py` 的 `build_arch`，看运行它的 Python）：x64，或在 ARM 机器上 arm64；Windows 和 Linux 的安装包只出 x64，arm64 只出免安装目录和便携包（要安装包时直接报错）。便携包由「Portable build」工作流（[.github/workflows/portable.yml](../.github/workflows/portable.yml)）在 `windows-latest`、`windows-11-arm`、`ubuntu-22.04` 与 `ubuntu-22.04-arm` 上构建（x64 和 arm64 各一份；Windows on ARM 的运行器没有 Rust，工作流先装 rustup，ARM Linux 上先补 Electron 要的库），解压后用 `smoke_app.py --portable` 跑冒烟测试，再测一遍便携版的「无缝更新」；NSIS 安装包的升级与卸载测试只在 x64 上跑。两个打包工作流都可以手动触发，dev 分支上改动打包相关文件时也会自动构建。macOS 的两个 dmg 和两个便携 zip 由 GitHub Actions 的「macOS build」工作流（[.github/workflows/macos.yml](../.github/workflows/macos.yml)，手动触发）分别在 `macos-15`（arm64）和 `macos-15-intel`（x64）上构建；便携 zip 用 ditto 解开后校验签名、以便携模式跑冒烟测试、再测一遍「无缝更新」，dmg、zip 与 SHA256 作为运行产物上传，再由维护者附到 Release 上。`--skip-backend` 复用已冻结的后端（只改了 Electron 时用），Linux 上 `--targets AppImage deb` 可以只出部分格式。
+在哪个系统上运行就出哪个系统的包（`src-tauri/tauri.{windows,linux,macos}.conf.json` 定目标），一律为构建机自己的架构。Linux 上发布的只有 deb（CI 用 `pnpm bundle --bundles deb`），rpm 和 AppImage 由 Electron 外壳出。Windows 和 Linux 的安装包只发 x64；arm64 只发便携包。安装包在 `target/release/bundle/<格式>/`，便携包在 `target/portable/`。
 
-需要：uv（Python 3.12）、Rust 工具链（原生扩展必须打进包，没有它扫描会慢很多：构建前检查它能加载，冻结后的冒烟测试再查一次）、Node 与 pnpm（`apps/electron` 里先 `pnpm install`）。Linux 的 rpm 需要 `rpmbuild`；electron-builder 第一次运行会下载 Electron、NSIS、AppImage 工具与 fpm 到它的缓存目录。
+`pnpm bundle`（[scripts/bundle.mjs](../apps/desktop/scripts/bundle.mjs)）是带路径重映射（下文「不带构建机路径」）的 `tauri build --config src-tauri/tauri.bundle.json`（Windows 上再加 `--config src-tauri/tauri.bundle.windows.json`：fork 的 NSIS 模板、`SpaceKnife.com`、WebView2 的安装方式和最低版本，第 5 节；macOS 上加 `tauri.bundle.macos.json`），后面的参数照传（CI 只出程序时用 `pnpm bundle --no-bundle`）。它的 `beforeBuildCommand` 先 `pnpm generate`（界面的静态文件 `.output/public`，嵌进应用），再运行 [scripts/prepare-bundle.mjs](../apps/desktop/scripts/prepare-bundle.mjs)：以 release 编译 `spaceknife-cli`，放成 `src-tauri/target-bundle/spaceknife-cli-<目标三元组>[.exe]` 作为 Tauri 的 `externalBin`（装在应用旁边，名字是 `spaceknife-cli`）；写出许可证 `src-tauri/target-bundle/licenses/`；Windows 上编 `SpaceKnife.com`（`packaging/console-launcher`）；macOS 上复制并签名替换助手。这些不放在基础配置 `tauri.conf.json` 里：Tauri 的构建脚本要求 externalBin 和资源已经存在，否则普通的 `cargo build` 和 `pnpm tauri dev` 都会失败。Windows 的打包配置 `tauri.bundle.windows.json` 设了 `useLocalToolsDir`：打包器用的 NSIS 3.13、nsis_tauri_utils 和 WebView2 引导程序都在 `target/.tauri`，不碰 `%LOCALAPPDATA%\tauri`。这些工具由 `node tools/nsis_fork.mjs tools <目录>` 事先准备：下载失败时重试（最多 5 次，间隔加倍），按 `windows/upstream.json` 里钉住的 SHA-1 核对，每次都从核对过的压缩包重新解出 NSIS；CI 用 actions/cache 按版本和 SHA-1 缓存下载。打包器发现 `NSIS.exe` 的 SHA-1 不符时会把那个文件夹整个删掉重下，所以不要手改里面的文件。
 
-脚本依次做：
+`pnpm bundle:portable`（[scripts/portable.mjs](../apps/desktop/scripts/portable.mjs)）把 `target/release` 里的程序（Windows 上叫 `SpaceKnife.exe`，Linux 上是 `spaceknife`）与 `spaceknife-cli`、替换助手 `resources/backend/spaceknife-backend[.exe]`（`spaceknife-cli` 的一份副本，Linux 上可执行）、许可证、无头模式用的界面（`ui`）和一个空的 `data` 文件夹（里面一份中英文说明）放进一个文件夹，Windows 上打成 zip（系统自带的 bsdtar），Linux 上打成 `-tauri.tar.gz`；macOS 上是 `pnpm bundle` 做出的 `SpaceKnife.app`（可执行文件 `Contents/MacOS/SpaceKnife`；`spaceknife-cli` 在包里；替换助手是包里的资源 `Contents/Resources/backend/spaceknife-backend`，用应用的身份签名）加旁边的 `data`，用 `ditto` 打成 zip（保留包内的链接、属性和签名）。程序名和替换助手是给 0.3.x 便携版的：它的「无缝更新」按确切的名字找新版本里的 `SpaceKnife.exe` / `spaceknife` / `SpaceKnife.app`，再运行 `resources/backend/spaceknife-backend --apply-update <计划 v1>`。
 
-0. **原生扩展的发布构建**：maturin 单独编译一份 wheel（`build/native-release`），用 `--remap-path-prefix` 把 Cargo、rustup 与仓库目录换成 `/cargo`、`/rustup`、`/spaceknife`，Windows 上 PDB 只记文件名（`/PDBALTPATH:%_PDB%`）：Rust 的 panic 信息和调试路径里会带上构建机的绝对路径（也就带上了用户名），Cargo 的 `trim-paths` 还没稳定。PyInstaller 用这一份，不用开发环境里的。
-1. **冻结后端**：PyInstaller onedir（[packaging/spaceknife-backend.spec](../packaging/spaceknife-backend.spec)）→ `dist/backend/spaceknife-backend/`。Windows 约 67 MB，Linux 约 141 MB（没有 strip，见第 6 节）。
-2. **后端冒烟测试**（[packaging/smoke_backend.py](../packaging/smoke_backend.py)）：`version`（原生扩展必须能加载：`· native 0.1.0`，不是 `none`）；用原生遍历和用 2 个工作进程各扫一次临时小目录；`serve --token-stdin` 握手、`system.info`、stdin 关闭后正常退出。
-3. **glibc 下限**（只在 Linux）：包里每个 ELF 需要的 glibc 符号版本不超过 2.34（RHEL 9）。
-4. `electron-vite build`；**许可证**（[tools/third_party_licenses.py](../tools/third_party_licenses.py) → `dist/licenses`）；然后 `electron-builder`（[apps/electron/electron-builder.yml](../apps/electron/electron-builder.yml)）。
-5. **不带构建机路径**：冻结的后端和打包好的应用目录里，任何文件都不能出现构建机的家目录（两种斜杠、转义、UTF-8 / UTF-16、不分大小写），否则构建失败；zip 文件（`base_library.zip`）和后端可执行文件里压缩的 Python 模块（PYZ）也逐项解开检查。
-6. **ad-hoc 签名**（只在 macOS）：`codesign --verify --deep --strict` 整个 `SpaceKnife.app` 通过，且是 ad-hoc 签名。Apple Silicon 不运行没有签名的代码；签名坏了的话，Gatekeeper 会说应用「已损坏」，而不是给出「仍要打开」。
+**Electron 外壳**：`pnpm -C apps/electron-shell package [electron-builder 参数]`（[scripts/package.mjs](../apps/electron-shell/scripts/package.mjs)）先用 `apps/desktop/scripts/prepare-bundle.mjs` 编 `spaceknife-cli`、写许可证，放进 `target/electron-shell/stage`；界面没有构建时先 `pnpm generate`；然后 `electron-vite build` 和 `electron-builder`，产物在 `target/electron-shell/dist`。配置是 [electron-builder.yml](../apps/electron-shell/electron-builder.yml)：与 0.3.4 同一个 appId、产品名、可执行文件名和 rpm 包名。发布的只有 Linux 的 rpm 和 AppImage（CI 在 Linux x64 上运行 `pnpm run package`，electron-builder 按 `linux.target` 出这两种）；`win` / `nsis` 那一段只给在 Windows 上本地试 Electron 外壳用，CI 不构建、不发布——Windows 的安装包是 Tauri 外壳的（第 5 节）。`publish: null`：没有发布目标，也就不写更新信息（`latest.yml`、`app-update.yml`），更新检查是 SpaceKnife 自己的；不写的话，环境里有 `GH_TOKEN`（CI 为 `gh release download` 设的）时 electron-builder 会去找 GitHub 仓库发布，找不到（「Cannot detect repository by .git/config」）就出错退出（`src/main/builder.test.ts` 用 electron-builder 自己的代码核对）。
 
-**许可证**：SpaceKnife 是 MIT（仓库根目录 `LICENSE`）。安装后的 `resources/licenses/` 里有 `LICENSE.txt` 和三份第三方清单：`THIRD-PARTY-backend.txt`（Python 运行时与打进后端的包，含各包自带的许可证文件）、`THIRD-PARTY-native.txt`（原生扩展链接的 Rust crate）、`THIRD-PARTY-ui.txt`（打进界面的 JavaScript，由 `rollup-plugin-license` 生成，加上 Geist / Noto Sans SC 字体的 OFL）。Electron 自己的 `LICENSE.electron.txt` 与 `LICENSES.chromium.html` 在可执行文件旁边。
+Linux 便携版：`pnpm -C apps/electron-shell package:portable`（[scripts/portable.mjs](../apps/electron-shell/scripts/portable.mjs)，在 `package` 之后；ARM 上先 `node scripts/package.mjs --linux dir --arm64`）把 electron-builder 解开的应用（`dist/linux-unpacked` 或 `linux-arm64-unpacked`：Electron 程序 `spaceknife`、旁边的 `spaceknife-cli`、`resources/ui`、`resources/licenses`）加上替换助手 `resources/backend/spaceknife-backend`（`spaceknife-cli` 的副本，可执行）和空的 `data` 文件夹，打成 `target/electron-shell/portable/SpaceKnife-<版本>-linux-<x64|arm64>-portable.tar.gz`（成员属主按数字记为 root）。这是 0.3.4 的 Linux 便携版要的样子：顶层一个文件夹，里面有确切名字的 `spaceknife` 和 `resources/backend/spaceknife-backend`。
 
-Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己的文件系统再构建，不在 `/mnt/c` 上跑（9P 很慢）。同步时不要删掉编译好的 `*.so`：原生包是可编辑安装，编译产物就在源码目录里，被删了以后包里会悄悄没有原生扩展（现在构建前的检查会拦下）。没有 root 时，`rpmbuild` 可以用 `apt-get download` 下载 Ubuntu 官方的 rpm 包，`dpkg-deb -x` 解到用户目录，再设 `PATH`、`LD_LIBRARY_PATH` 和 `RPM_CONFIGDIR`。rpm 包头里会记下构建机的主机名（Build Host）：在 `RPM_CONFIGDIR/macros.d/` 里放一个定义 `%_buildhost localhost` 的宏文件。
+CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）在 Windows 与 Linux 的 x64 / arm64 运行器上构建 Tauri 的便携包（Linux x64 上同时出 deb）并跑冒烟测试；「macOS build」（[macos.yml](../.github/workflows/macos.yml)）在 arm64 与 Intel 运行器上出 dmg 与便携 zip；「Windows installer build」（[windows-installer.yml](../.github/workflows/windows-installer.yml)）出 Windows 安装包；「Electron shell build」（[electron.yml](../.github/workflows/electron.yml)）出 Electron 外壳的 rpm、AppImage 和 Linux 便携版；「Release」（[release.yml](../.github/workflows/release.yml)）从 tag 调用这四个工作流并建发布（第 9 节）。
 
-## 2. 冻结的后端
+**许可证**：SpaceKnife 是 MIT（仓库根目录 `LICENSE`）。装好的 `licenses/`（Electron 外壳是 `resources/licenses/`）里有 `LICENSE.txt`、`THIRD-PARTY-rust.txt`（`spaceknife` 与 `spaceknife-cli` 链接的 crate，来自 `cargo metadata`）和 `THIRD-PARTY-ui.txt`（界面的 npm 生产依赖，来自 `pnpm licenses list --prod`，加上 Geist / Noto Sans SC 字体的 OFL）；相同的许可证文本只印一次。由 `prepare-bundle.mjs` 生成。
 
-- 入口 [packaging/backend_entry.py](../packaging/backend_entry.py)：`spaceknife-backend serve …` 就是 `python -m spaceknife serve …`；`spaceknife-backend --helper …` 是扫描助手（冻结后没有 `-m`，`helper_command()` 在冻结时返回 `[自身, "--helper"]`）；入口先调用 `multiprocessing.freeze_support()`，spawn 方式的扫描工作进程会重新进入这个可执行文件。
-- 以 `-X utf8` 冻结（spec 里的解释器选项），日志和 ready 行在所有平台都是 UTF-8。冻结的解释器只从自己的包里导入，不读 `PYTHON*` 环境变量，所以提权助手不需要 `-I`。
-- 收进包里的数据：`locales/*.json`、`insights/builtin.toml`、`export/builtin/*.sktpl`；`spaceknife*` 的所有子模块都按隐式导入收进来（请求处理器、各平台后端、MFT 读取器是按需导入的）。排除开发工具（pytest、hypothesis、mypy；`pydantic.mypy` 会把 mypy 整个拉进来）和 setuptools（见下面「命令行扫描的启动」）。
-- Windows 上带图标和版本信息（任务管理器里显示「SpaceKnife backend」）。
-- Linux 上不带构建机的 `libgcc_s.so.1` 和 `libstdc++.so.6`：目标系统都有（glibc 的 `pthread_cancel` 需要 libgcc_s，apt / dnf 需要 libstdc++），manylinux 的 wheel 也这样假设；而 Ubuntu 22.04 的 libgcc_s（GCC 12）需要 `GLIBC_2.35`，打进去在 RHEL 9 上会加载失败。剩下的部分最高需要 `GLIBC_2.34`（原生扩展在 glibc 2.35 上编译，pthread 符号绑定到 2.34 版本），正好是 RHEL 9 的下限；Electron 自身最高 `GLIBC_2.25`。
+**不带构建机路径**：Rust 的 panic 信息和调试路径里会带上构建机的绝对路径（也就带上了用户名）。所以发布用的构建（`pnpm bundle`，`prepare-bundle.mjs` 编的 `spaceknife-cli` 用同一组参数）给 rustc 加上 `--remap-path-prefix`：家目录、`CARGO_HOME`、`RUSTUP_HOME` 和仓库分别写成 `~`、`/cargo`、`/rustup`、`/spaceknife`（Cargo 的 trim-paths 还没稳定）；Windows 上再加 `-Clink-arg=/PDBALTPATH:%_PDB%`，程序里只留 PDB 的文件名（`tools/package_checks.mjs` 的 `remappedEnv`）。直接运行 `pnpm tauri build` 或 `cargo build --release` 不做这一步，只适合本机自用。做好的包由 `node tools/package_checks.mjs paths <文件或文件夹>…` 检查：任何文件里都不能出现构建机的家目录（UTF-8 和 UTF-16LE、两种斜杠、JSON / JS 转义、ASCII 字母不分大小写，后面不能紧跟别的名字字符），zip、tar、gzip、zstd 和 ar（deb）里的成员也看，成员里的压缩包再往里看；tar 成员的属主也不能是构建机的用户。读不了的格式（xz 等）算失败，不算通过。
+
+**glibc 下限**：Linux 的包里每个 ELF 文件都只能要 glibc 2.34 及以下（RHEL 9；Ubuntu 22.04 是 2.35）：`node tools/package_checks.mjs glibc <文件或文件夹>…`，和上面读同样的成员。判断是保守的：文件里出现的任何 `GLIBC_x.y` 都算；一个 ELF 文件都没有也算失败（多半是给错了文件夹）。
+
+**C 运行库静态链接**：安装包和便携版都不带 Visual C++ 运行库（Redistributable），所以 Windows 上发布的每个程序——`SpaceKnife.exe`、`spaceknife-cli.exe`、`SpaceKnife.com`、`resources/backend/spaceknife-backend.exe`——都把整个 C 运行库链接进程序（`+crt-static`）：仓库根目录的 `.cargo/config.toml` 给所有 MSVC 目标的构建（测试、开发构建也一样）加 `-C target-feature=+crt-static`；发布构建设了 `CARGO_ENCODED_RUSTFLAGS`，Cargo 就不再读那张表，所以 `remappedEnv` 自己也加上这个参数（`tools/package_checks.mjs` 的 `STATIC_CRT`）。Tauri 的构建脚本默认只静态链接 VC 运行库、UCRT 仍从系统取（`staticVCRuntime`），开了 `+crt-static` 时 `src-tauri/build.rs` 把它关掉，否则它会把 UCRT 又换回 `api-ms-win-crt-*.dll`。检查：`node tools/package_checks.mjs crt [--allow-ucrt 文件名 …] <文件或文件夹>…` 读每个 PE 文件（exe、dll、com，和上面读同样的成员）的导入表和延迟加载表，导入 `VCRUNTIME*`、`MSVCP*`、`api-ms-win-crt-*`、`ucrtbase`（以及更早的 `MSVCR*`、`CONCRT*`、`VCOMP*`）的算失败；`--allow-ucrt` 点名的别人预编译的文件可以从系统取 UCRT（Windows 10 起自带），VC 运行库仍然不行。一个 PE 文件都没有也算失败。
+
+三项检查在 CI 里跑：「Portable build」检查每个便携包（glibc 只在 Linux 上，C 运行库只在 Windows 上）和 deb；「Windows installer build」用 7-Zip 解开安装包（程序文件在以暂存变量命名的 `$_<n>_` 文件夹里），查路径和 C 运行库；「Electron shell build」检查它的 rpm（经 rpm2cpio）、AppImage（`--appimage-extract`）和 Linux 便携版；「macOS build」检查便携 zip 和 dmg 里的应用（只读挂载）。测试在 `tools/tests/package_checks.test.mjs`。rpm 包头里会记下构建机的主机名（Build Host）：没有 root 时用 `apt-get download` 取 Ubuntu 官方的 rpm 工具、`dpkg-deb -x` 解到用户目录，可以在 `RPM_CONFIGDIR/macros.d/` 里放一个定义 `%_buildhost localhost` 的宏文件。
+
+## 2. 后端与命令行
+
+- Tauri 外壳里后端就在应用进程里：`src-tauri/src/backend.rs` 调用 `sk_server::start`，在随机的回环端口上提供协议（每次启动一个新 token），界面连上它（[protocol.md](protocol.md) §1）。Electron 外壳的后端是子进程 `spaceknife-cli serve --token-stdin`（第 4 节）。
+- 提权的扫描助手（`sk_core::helper`）是应用旁边的 `spaceknife-cli helper …`，从来不是窗口程序；`<程序> --apply-update <计划>` 是便携版的「无缝更新」（`sk_core::update::swap`，第 8 节），在 `src-tauri/src/main.rs` 里、加载任何东西之前分派。
+- 命令行：`spaceknife-cli`（`crates/sk-server/src/bin/spaceknife-cli.rs`，`cli/mod.rs`）装在应用旁边：`scan`、`run`、`snapshot list | show`、`serve`（给界面用的 WebSocket 后端，`--ready-file` 等）、`headless`、`version`；0.3.4 应用自己的写法 `--headless` / `--listen <地址>` 仍然接受，没有命令打头时可以出现在任何位置，其余参数照 0.3.4 跳过（`cli/headless.rs` 的 `is_app_form`）。输出格式与 0.3.4 的 `scan` 逐字逐句相同（`crates/sk-server/src/cli/rich.rs`），外部基准（Disk-Scan-Benchmark）照旧解析；「最大的文件」用部分选择（第 k 大的值，并列时编号小的在前），不对全部文件排序。
 - 安装目录本身是受保护路径（不能在应用里删除或移动它）。
-- 命令行也能直接用：安装目录下 `resources/backend/spaceknife-backend scan …`、`run …`、`snapshot …`。
+- **就绪文件**（`SPACEKNIFE_READY_FILE`：端到端测试、演示，以及替换助手确认新版本已启动，第 8 节）：后端开始监听时把地址和 token 写进这个文件（只有当前用户能读；先写一个新建的临时文件——不能是已有的文件或链接，Unix 上另加 O_NOFOLLOW——再改名替换，不跟随链接；Unix 上别的用户的文件夹拒绝写，`cli/serve.rs` 的 `write_ready_file`）。两个外壳启动时就把这个变量从自己的环境里拿掉，只交给第一次启动的后端（Tauri：`main.rs` 在任何线程之前读出并删掉，`backend.rs` 写一次就忘，`crates/sk-server/tests/environment.rs` 只放行这一处改环境；Electron：`index.ts` 一开始 `takeReadyFile(process.env)`，只给第一个后端加 `--ready-file`）：之后启动的后端、更新的助手和安装程序、终端都不会继承一个可能已被别人重建的路径。
+- **最小化启动**（`SPACEKNIFE_START_MINIMIZED=1`：演示和打包测试）：两个外壳的窗口出现在任务栏里、不抢焦点（Tauri：`window.rs`；Electron：`index.ts`）。
 
-### 命令行扫描的启动
+## 3. Tauri 外壳
 
-`spaceknife-backend scan <路径> --no-snapshot …`（基准和脚本都这样用）的用时包括进程的启动和退出；目录小的时候它们比扫描本身还长。为此：
+- 应用在 `apps/desktop`：Nuxt 4 + Vue 3 的界面（`app/`），Tauri 2 的外壳（`src-tauri/`，crate `spaceknife-desktop`，可执行文件在 Windows 和 macOS 上叫 `SpaceKnife`，和 0.3.4 一样——0.3.4 的「无缝更新」按这个名字找新版本；Linux 上叫 `spaceknife`；`tauri.{windows,macos}.conf.json` 的 `mainBinaryName`）。见 [apps/desktop/PORTING.md](../apps/desktop/PORTING.md)「Commands」「Bundles」。`identifier` 是 `io.github.duskxi.spaceknife`。
+- 界面跑在系统的 WebView 里（Windows WebView2、macOS WKWebView、Linux WebKitGTK 4.1），不再自带 Chromium。Windows 上要 WebView2 Runtime 89.0.774.44 或更新（wry 用 ICoreWebView2Controller2 设 WebView 的背景色，没有它窗口建不起来；`startup_check.rs` 的 `MIN_WEBVIEW2`，`tauri.bundle.windows.json` 的 `minimumWebview2Version`，`tests/config.rs` 核对两者相同）。
+- 外壳自己的文件（`theme.json`、WebView 的配置目录）：设了 `SPACEKNIFE_HOME`（演示、测试）或是便携版时在 `<SPACEKNIFE_HOME 或便携版的 data>/desktop`，否则在 Tauri 的应用本地数据目录（按 identifier 命名），和后端的文件分开（`src-tauri/src/window.rs` 的 `ui_dir`）。自己的 `theme.json` 还没有时（从 0.3.4 升级后的第一次启动），读一次 0.3.4 的 Electron 版留下的 `theme.json`（同样的格式）：设了 `SPACEKNIFE_HOME` 或是便携版时是 `<那个目录>/electron/theme.json`，否则是系统配置目录（`%APPDATA%`、`~/Library/Application Support`、`$XDG_CONFIG_HOME` 或 `~/.config`）下的 `SpaceKnife/electron/theme.json`（`theme.rs` 的 `electron_theme_file`、`ThemeKeeper::restore`）；旧文件不动，自己的文件在页面发来第一个设置时写出。
+- 便携版的 `data`：打包后的应用启动时，可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就像设了 `SPACEKNIFE_HOME` 那样用它（`src-tauri/src/portable.rs`，`lib.rs` 的 `prepare_environment` 调 `sk_core::paths::set_home`；不改进程的环境变量，程序启动的子进程不会继承它）。Tauri 的进程不设 `SPACEKNIFE_SHELL`：后端没有它时就是 Tauri 外壳（`sk_core::update::shell`）。
+- macOS 的 `Info.plist` 带着「文件与文件夹」授权提示里显示的理由（和 0.3.4 的 `electron-builder.yml` `mac.extendInfo` 逐字相同）：`src-tauri/Info.plist`，由 `tauri.macos.conf.json` 的 `bundle.macOS.infoPlist` 合并进包里；`tests/config.rs` 守着它和最低版本，「macOS build」在做好的包里再查一遍。
+- 拖动窗口的元素带 `data-tauri-drag-region`。窗口只显示界面自己的页面（`src-tauri/src/navigation.rs`：`tauri://localhost`、`http(s)://tauri.localhost`，开发时加上 dev server），不开新窗口，项目的网页交给浏览器；CSP 在 `tauri.conf.json`，内联脚本的哈希由 Tauri 加上。
+- Windows 上 release 构建的 `SpaceKnife.exe` 是 GUI 子系统；终端里用的无头模式是控制台程序 `spaceknife-cli headless`。0.3.x 的 `SpaceKnife.com`（`packaging/console-launcher`，自成一个小工作区，`prepare-bundle.mjs` 在 Windows 上以重映射的路径构建，`portable.mjs` 放进便携版，安装包经 `tauri.bundle.windows.json` 的 `resources` 放到安装目录）照旧放在程序旁边：命令提示符和 PowerShell 先找 `.com`，所以终端里的 `SpaceKnife --headless …`、`--listen …`、`--help`（这些选项在任何位置）到了它这里，它以原样的参数运行旁边的 `spaceknife-cli.exe` 并等它结束（Y/N 在终端里问，Ctrl+C 交给 `spaceknife-cli`，退出码照传）；别的参数打开窗口，并和 0.3.4 的 `SpaceKnife.com` 一样等窗口关掉、照传它的退出码：在终端里不给窗口程序标准句柄、设 `SPACEKNIFE_CONSOLE=1`，窗口程序自己附到这个控制台（`src-tauri/src/console.rs`），启动器自己忽略 Ctrl+C；重定向时照原样给句柄，Ctrl+C 由启动器结束窗口程序（退出码 130）。和 0.3.4 不同的一处是修正：Tauri 外壳收到 Ctrl+C 时像点了窗口的关闭按钮那样退出（扫描停下、后端写完要保存的东西，退出码 130）。
+- 0.3.4 的无头启动方式（`SpaceKnife --headless`、`--listen <地址>`、`--help`，参数在任意位置）不开窗口，在本进程里运行无头模式（`main.rs`，`src-tauri/src/cli.rs`）：读参数的是 `spaceknife-cli` 读 0.3.4 写法的同一段代码（`sk_server::cli::headless` 的 `wants_headless`、`cli(…, Form::App)`），所以和 `spaceknife-cli --headless …`、`SpaceKnife.com`、Electron 外壳逐个情况一致。
+- 「无缝更新」换上新版本之前，替换助手问新版本的程序能不能在这台机器上启动：`<新程序> --startup-check`（`main.rs` 最先处理，`src-tauri/src/startup_check.rs`）。到这一步系统的加载器已经给了程序它链接的所有库（Linux 上的 WebKitGTK 4.1 和 GTK 等），剩下要问的是 WebView 的运行时：Windows 上用 WebView2 加载器的版本查询（`GetAvailableCoreWebView2BrowserVersionString`），没装、低于 89.0.774.44、版本是空的或读不出数字（旧的加载器没有运行时也可能回一个空版本）都算不能启动。它在 stdout 回一行 JSON（`{"ok":true,"webview":…}`，或 `{"ok":false,"error":…}` 并以 1 退出），不开窗口和 WebView，不读写应用的任何设置和文件。
+- Windows 上打开窗口之前也做这个检查（`main.rs`，`startup_check.rs` 的 `window_can_open`；日志在它之前就开始写，`backend.rs` 的 `init_logging`）。不能启动时原因写进日志和标准错误（经 `SpaceKnife.com` 从终端启动时就在终端里），再弹一个任务对话框（`src-tauri/src/dialog.rs`：comctl32 6 的 `TaskDialogIndirect`，用时按名字查找，没有时换成消息框），按系统的界面语言用中文或英文说缺什么、按钮打开微软的 WebView2 下载页（`https://developer.microsoft.com/microsoft-edge/webview2/`，下 “Evergreen Bootstrapper”）、数据文件夹没有任何改动、装好运行时之前手动替换文件也没有用、在此之前可以用 `SpaceKnife --headless`；关掉后以 1 退出。以前没有运行时是 Tauri 的英文提示框接着 panic，太旧时一声不响地退出、日志里也没有。检查通过、建窗口却失败（运行时损坏等，`lib.rs` 的 setup）时一样：日志、标准错误和对话框（再检查一次，缺或太旧就那样说，否则说 WebView2 可能损坏、从微软重装一次），以 1 退出。其他系统上加载器已经查过 WebKit，不做这一步；建窗口失败时只写日志和标准错误，不为它多带 GUI 库。
+- `SpaceKnife --startup-problem`（`main.rs` 和 `--startup-check` 一样最先处理，`startup_check.rs` 的 `explain`）：替换助手拒绝换上新版本时，以分离的方式启动新版本的这个程序，告诉用户为什么。它再做一次检查，用同一个对话框说找到的问题，换成更新的说法（「SpaceKnife <版本> 需要…」、更新没有安装、现在用的 SpaceKnife 照常可用，警告图标）；什么都没找到时说这个版本无法在这台电脑上启动、原因在 `updates` 文件夹的更新日志里。关掉后退出，找到问题时以 1，否则以 0；不开窗口和 WebView，不读写设置，不写日志。其他系统上只把说明写到标准错误。
 
-- 冻结后端不收 setuptools（spec 的 `excludes`）。它是构建工具，运行时没有代码导入它；但只要收进来，PyInstaller 就会带上运行时钩子 `pyi_rth_setuptools`，每次启动都导入 setuptools 和它自带的 jaraco、packaging 等包（冻结版加 `-X importtime` 在 Windows 上量到 130–230 ms）。可以用 PyInstaller 的 `CArchiveReader` 看可执行文件的目录：不该有 `pyi_rth_setuptools`。
-- `scan` 只导入它用得到的模块：`spaceknife.io` 的名字按需加载子模块（取 `io.priority` 不会带出调速器和协议的 pydantic 模型），`--disk-limit` 时才导入 `IoRegistry`；快照（文件头是 pydantic 模型）只在保存、列出、打开快照时导入；导出模板、`rich.progress`、`LogHub` 也在用到时才导入。界面语言：没有设置文件、文件读不了或不是 JSON、或者文件里的语言就是 `system` 时，`SettingsStore` 的结果一定是 `system`，直接用它；设了别的语言才用 `SettingsStore` 校验整个文件（`cli_scan.stored_language`，测试逐种情况与 `SettingsStore` 对比）。[test_cli_startup.py](../packages/backend/tests/test_cli_startup.py) 在新的解释器里跑一次 `scan --no-snapshot`，检查 pydantic、协议、设置、调速器、快照、导出、服务器和 `rich.progress` 都没有被导入：加了新的模块级导入时它会报出来。asyncio 去不掉：loguru 自己就导入它。
-- 输出不是终端（重定向）时不建进度条：rich 这时本来什么都不画，只在停止时打一个空行；这个空行照样打，输出与原来逐字节一致。
-- 输出写完（自动快照也已保存）后，`cli.main` 先 flush 标准输出和标准错误，再 `os._exit`，跳过解释器的收尾（等空闲的列目录线程、逐个释放节点表、清理模块）。只用于 `scan`，退出码不变；Python 遍历器的工作进程还没退完时照常退出。
-- 「最大的文件」用 `store.subtree.largest` 的部分选择（第 k 大的值，并列时编号小的在前），不对全部文件排序；行和顺序与整体排序相同（130 万项时 35 ms → 7 ms）。
-- 实测（i9-14900K，冻结版，热缓存，扫空文件夹，整个进程的墙钟，每臂 7 轮的中位数）：Windows 全部 CPU 408 → 219 ms、4 个 E 核 701 → 377 ms；WSL（Linux）全部 CPU 236 → 120 ms、4 CPU 228 → 120 ms。其中退出（最后一个字节到进程结束）Windows 28 → 3 ms，Linux 26 → 1 ms。Windows 上扫真实的文件夹（全部 CPU，每臂 5 轮）：34.8 万项的 NTFS 程序文件夹 906 → 666 ms，136 万项的 ReFS 文件夹 964 → 743 ms，130 万项的 NTFS 文件夹 2.82 → 2.62 s；打印 21–45 → 12–23 ms，退出 39–47 → 6–10 ms。
+## 4. Electron 外壳
 
-## 3. Electron
+- 只有主进程和 preload（`src/main`、`src/preload`，electron-vite 构建到 `out/`），没有自己的界面。窗口从 `app://spaceknife` 提供 `apps/desktop/.output/public`（打包后是 `resources/ui`），页面带 Content-Security-Policy 头，内联脚本的 sha256 按页面计算（`src/main/csp.ts`），指令与 Tauri 的相同。来源和 userData（`<appData>/SpaceKnife/electron`，设了 `SPACEKNIFE_HOME` 或是便携版时是 `<那个目录>/electron`）与 0.3.4 相同，页面的存储和 `theme.json` 都还在。
+- preload 只暴露 `window.skElectron`（版本信息、白名单内的 IPC 通道、拖放文件的路径）；界面的 `app/lib/electronHost.ts` 在它上面实现 `window.sk`，`app/lib/installHost.ts` 依次选：已有的 `window.sk`、Electron、Tauri、浏览器 shim。
+- 开发用的环境变量（`index.ts`、`backend.ts`）：`SPACEKNIFE_DEV_URL` 从 Nuxt 的开发服务器取界面（只在没打包时）；`SPACEKNIFE_CLI` 换后端程序、`SPACEKNIFE_UI` 换界面文件夹、`SPACEKNIFE_REPO` 指定检出目录——这三个打包后也认（`backend.test.ts` 钉住了 `SPACEKNIFE_CLI`），都不影响删除检查。
+- 后端是子进程 `spaceknife-cli serve --token-stdin --log-format plain`（与 0.3.4 的 Python 后端同一个契约：令牌走 stdin，stdout 一行 ready，stdin 关闭即退出，`src/main/backend.ts`）；版本、安装方式、系统语言和 `SPACEKNIFE_SHELL=electron` 经环境变量传；就绪文件只给第一个后端（第 2 节）。
+- Windows 和 Linux 上没有菜单栏（`Menu.setApplicationMenu(null)`，也就没有默认的重载和开发者工具快捷键）；页面申请的权限一律拒绝；导航只限 `app://spaceknife`，新窗口一律不开。
+- 0.3.4 的无头启动方式以原样的参数交给 `spaceknife-cli`（只有 `--help` / `-h` 时前面加 `--headless`，和 `SpaceKnife.com` 的分法一样），以继承终端的方式运行（`src/main/cli.ts`）。`--startup-check`（`src/main/cli.ts` 的 `STARTUP_CHECK`）在任何窗口、配置目录和后端之前回答。
+- 包和便携版里 `spaceknife-cli` 在主程序旁边，界面在 `resources/ui`，`spaceknife-cli headless` 默认就在那里找界面。便携版的「无缝更新」由 Electron 外壳做（`index.ts` 的 `replacePortable`，助手优先用新版本里的 `spaceknife-cli`），数据在 `data` 里（Chromium 的配置在 `data/electron`，和 0.3.4 一样）。
 
-- 打包后主进程运行 `process.resourcesPath/backend/spaceknife-backend[.exe] serve --token-stdin …`（`bundledBackend()`，[src/main/backend.ts](../apps/electron/src/main/backend.ts)）；从源码运行时仍是仓库 uv 环境里的 `python -m spaceknife`。
-- `appId` 是 `io.github.duskxi.spaceknife`（Windows 上也是 AppUserModelID：任务栏分组、固定的快捷方式）。
-- Chromium 配置目录（本地存储、缓存）：`<appData>/SpaceKnife/electron`，和后端的文件分开（Linux 上后端的配置目录也是 `~/.config/SpaceKnife`）；设了 `SPACEKNIFE_HOME` 时是 `$SPACEKNIFE_HOME/electron`。
-- 只保留界面的两种语言的 Chromium 语言包（`electronLanguages: en-US, zh-CN`）。
-- 不带 `node_modules`：渲染进程用到的库都由 Vite 打进 `out/`，`package.json` 里全是 devDependencies。
-- 窗口图标：Linux 用 `resources/icon.png`；Windows 打包后用 exe 自带的图标。
-- Windows 上 `SpaceKnife.exe` 旁边还有 `SpaceKnife.com`（[packaging/console-launcher](../packaging/console-launcher/src/main.rs)，无依赖的 Rust 小程序，`tools/build_package.py` 用和原生扩展相同的路径重映射编译到 `dist/console/`，electron-builder 的 `win.extraFiles` 复制过去）：控制台子系统的启动器，带同样的参数启动 `SpaceKnife.exe` 并等待它结束，让终端等得到无头模式（`SpaceKnife --headless`）的 Y/N 提问和 Ctrl+C。在终端里它不给子进程标准句柄（Electron 于是挂接到这个控制台，并设 `SPACEKNIFE_CONSOLE=1` 让主进程从 `CONIN$` 读回答）；输出被重定向时则原样传递句柄，Ctrl+C 由它结束子进程。
+## 5. Windows 安装包
 
-## 4. 安装包
+发布的安装包是 Tauri 版的 NSIS 包，用 fork 的模板：`apps/desktop/src-tauri/windows/installer.nsi`（`bundle.windows.nsis.template`，打包器仍按自己的数据渲染它）和 SpaceKnife 自己的逻辑 `spaceknife.nsh`（`installerHooks`），由 `tauri.bundle.windows.json` 接上；`files-0.3.4.nsh` 是真实的 0.3.4 安装包装进去的文件清单。它接管 0.3.4 electron-builder 的安装：
 
-**Windows（NSIS）**：引导式安装（不是一键安装），可选「仅当前用户」（默认，不需要管理员）或「所有用户」，可改安装目录；开始菜单与桌面快捷方式；安装向导跟随系统语言（中文 / 英文）；卸载时默认保留扫描、快照与设置（卸载程序第二页「你的数据」可以勾选一起删除）。没有代码签名证书：第一次运行时 SmartScreen 会提示「未知发布者」。
+- **同一套键**：electron-builder 按 appId 算出的 GUID（`3cb3f1fc-eef4-5813-9008-c29b5510458c`），`Software\{GUID}` 的 `InstallLocation`、`KeepShortcuts`、`ShortcutName` 和 `Uninstall\{GUID}` 的卸载项（`UninstallString` 是 `"<目录>\uninstall.exe" /currentuser`，`QuietUninstallString` 再加 ` /S`），「应用」里只有一条。卸载程序只在键里的 `InstallLocation` 为空、或规范化后就是它自己的目录时才删这两个键（`un.SkKeysOurs`）：在别的目录上运行的卸载程序不删那里装着的版本的键。它的范围也按哪个 hive 的键指向自己的目录来定，两边都不指向（键没了，或是别的安装的）时看目录在不在 Program Files 里（`un.SkScopeFor`），不再一律当成当前用户。
+- **键没了也认得 0.3.4**：0.3.4 的文件还在而两个键都不在时（`Uninstall SpaceKnife.exe` 和 `resources\app.asar` 都在才算，`SkIsEbFolder`），先看 `/D=` 给的目录、再看这个范围的默认目录（`SkFindByFiles`），没有范围参数时也按当前用户、再按所有用户的默认目录这样找（`SkDetectScope`）；找到了就和有键时一样接管（它自己的卸载程序、程序的文件版本当旧版本），不会把约 200 个 Electron 文件和 0.3.4 的卸载程序留在新版本旁边（那个卸载程序以后运行时会 `RMDir /r` 掉新版本）。
+- **同一个目录**：当前用户 `FOLDERID_UserProgramFiles\SpaceKnife`（通常 `%LOCALAPPDATA%\Programs\SpaceKnife`），所有用户 `C:\Program Files\SpaceKnife`。已有安装（0.3.4 或 fork 的）时沿用它的目录，不问；新装时 `/D=` 给的目录两种范围都认（`SkChooseFolder`）；目录页上选的（键入、浏览或 `/D=`）路径里没有「SpaceKnife」时补上 `\SpaceKnife`，和 0.3.4 的 electron-builder（`instFilesPre`）一样（`SkAppendName`）；静默安装的 `/D=` 照原样用，0.3.4 也是。绝不装进数据目录 `%LOCALAPPDATA%\SpaceKnife`、外壳的 `%LOCALAPPDATA%\io.github.duskxi.spaceknife`、`%APPDATA%\SpaceKnife` 及其上下级，也不装成盘根、`%LOCALAPPDATA%`、Programs、Program Files、Windows 这样的系统文件夹（`SkUnsafeDir`）：目录页上提示换一个，静默安装时退出，已有安装在那里时改装到默认目录。
+- **同样的快捷方式**：开始菜单和桌面的 `SpaceKnife.lnk`，同一个文件只改目标和 AppUserModelID（`io.github.duskxi.spaceknife`，`SkMigrateShortcut`；改了目标的再查一次指向哪里才写 AUMID）；用户删掉的不重建。换了目录的安装（旧目录不安全），当前用户 `User Pinned\TaskBar` 和 `User Pinned\StartMenu` 里指向旧程序的固定也改指新程序（`SkMigratePins`、`SkMigrateShortcutsIn`，以当前用户的身份，每改一个通知外壳），别的程序的固定不碰。应用启动时也设同一个 AUMID（`window.rs` 的 `set_app_user_model_id`），任务栏的固定图标和运行中的窗口归为一组。
+- **两套参数都认**：0.3.4 的 `--updated /S --force-run /currentuser|/allusers`（0.3.5 的「无缝更新」也用这一套，`install.rs` 的 `nsis_update_args`）和 Tauri 的 `/S /P /NS /UPDATE /R /ARGS`；带 `--updated` 时给应用加 `--updated`。manifest 是 asInvoker（0.3.4 和 0.3.5 都用 CreateProcess 启动安装程序，要求管理员的 manifest 会让它直接失败）；为所有用户安装又没有管理员权限时，自己以 `runas` 启动一份提权副本（`--sk-elevated`，参数和 `/D=` 照传）并等它，应用由外层重新启动（只有 `TokenElevationType=2` 时才借 explorer 的令牌，其余情况直接启动并继承环境，`SkStartApp`；借不到令牌时日志写「could not start」）；拒绝 UAC 时退出码 1223，0.3.4 重新启动。UAC 提示属于一个先拿到前台的窗口，不会只在任务栏闪：向导的窗口（提示答完、副本起来以后才隐藏，`SkRunElevated`），还没有窗口时（静默运行，或 `.onInit` 里就要提权）是一个小横幅。从「为谁安装」那一页提权时带 `--sk-wizard`，副本不再显示外层已经显示过的欢迎页。副本失败时，退出码 3 表示旧版本已经删掉、新版本没放完整（`SkFailureLevel`），外层不再启动任何东西；其他失败照旧重新启动旧版本（`SkAfterElevatedFailed`）。外层一启动就把当前目录换到 `%TEMP%`（0.3.4 从自己的目录启动它，外层等副本时不能占着 `Program Files\SpaceKnife`）。
+- **0.3.4 隐藏启动的向导照样显示**：0.3.4 用 Node 的 `windowsHide` 启动安装程序，向导也是（STARTUPINFO 里是 SW_HIDE，NSIS 第一次用 SW_SHOWDEFAULT 显示窗口时会拿到它，向导就一直看不见，再点一次还要等它的互斥锁 60 秒）。非静默运行时先让一个从不显示的窗口用掉这一次 SW_HIDE（Windows 只用一次启动时的显示方式），向导照常显示（`SkShowIfStartedHidden`）。
+- **和 0.3.4 的安装程序互斥**（electron-builder 同名的 mutex，最多等 60 秒）。降级到 0.3.4 时，0.3.4 的安装程序运行 fork 的卸载程序（`/S /KEEP_APP_DATA /currentuser --keep-shortcuts --updated _?=…`），它认这套参数，删自己的文件和键，数据和快捷方式留着。
 
-静默安装与卸载（命令行部署、测试）：`SpaceKnife-<版本>-Setup-x64.exe /S /currentuser`（或 `/allusers`，需要管理员）；卸载用注册表卸载项里的 `QuietUninstallString`（`"Uninstall SpaceKnife.exe" /currentuser /S`），卸载程序会复制到临时目录再运行，命令本身立即返回。electron-builder 的安装程序总会把自己复制一份到 `%LOCALAPPDATA%\spaceknife-electron-updater`（给 electron-updater 用，135 MB），卸载时也不删；SpaceKnife 不用 electron-updater（它自己的更新检查见下文），[build/installer.nsh](../apps/electron/build/installer.nsh) 在安装完和卸载时把它删掉。
+安装的顺序（`installer.nsi` 的 `Section WebView2` 和 `Section Install`），先做的几步失败时什么都没改：
 
-卸载时的清理（installer.nsh 的 `customUnInstall`，按卸载的那个用户的目录，所有用户安装也一样）：
+1. **WebView2**：缺少时用内嵌的引导程序安装（要联网），更新时也装（0.3.4 的 Electron 版不需要它）；已装但低于 89.0.774.44 时先请 WebView2 自己的更新程序（EdgeUpdate）升级，升级后再读一次版本（`SkWebView2Minimum`；只在以管理员运行时带 `needsadmin=true`，当前用户的安装不替 EdgeUpdate 要它用不着的权限）。引导程序下载运行时（约 150 MB）时自己没有窗口：静默运行时这期间显示一个小横幅。装不上或仍然太旧就中止：静默更新时重新启动 0.3.4，交互运行时可以重试。
+2. 剩余空间至少是估计大小加 64 MB。
+3. 新文件解到同盘的暂存文件夹 `<上级>\<目录名>.sk-staging`，逐个核对（`SkMakeStage`、`SkCheckStaged`）；建不了（权限，或那里有别的构建留下的文件）就解到插件目录，之后复制而不是改名。暂存文件夹只按这次暂存的名字清空，里面有别的文件就原样留着。然后问暂存里的新程序能不能在这台机器上启动：`<暂存>\SpaceKnife.exe --startup-check`（第 3 节，`nsExec`，最多等 20 秒，`SkStartupCheck`；和便携版的检查一样不让系统弹错误框：它继承 `SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX`，崩溃时直接以状态码结束，而不是在静默更新中弹出「已停止工作」再等满 20 秒），回 `{"ok":true}` 并以 0 退出才往下走；否则什么都不改就中止（原因是程序自己回的 `error`，或按安装程序的语言写的退出码、超时、无法运行），注册表里有 WebView2 的版本号而运行时缺失或损坏时就是在这里拦下的。
+4. 关掉从这个目录和旧安装的目录运行的 SpaceKnife，和 0.3.4 的安装程序一样按目录认进程（`SkCloseIn`）：程序在目录下面、文件名里有「spaceknife」（SpaceKnife.exe、SpaceKnife.com、spaceknife-cli.exe、0.3.4 的后端）或是 0.3.4 的 `resources\elevate.exe`；安装程序自己（也可能放在那个目录里，如 0.3.4 装在数据目录时的 `updates`）和它的另一份副本、用户放在目录里的别的程序都不算。先礼后兵：给它们可见的顶层窗口发 WM_CLOSE（和不带 /F 的 taskkill 一样），有窗口的等 5 秒、正在退出的等 2 秒，再 TerminateProcess（每次先在同一个句柄上核对程序路径），最多三轮，每轮等 3 秒让 Electron 的子进程跟着退出；交互运行时先问一句。只有真的结束不了（如安装程序没提权而它提了权）才中止，什么都没改；每一步写进日志。别的程序占着目录里的文件不归它关：0.3.4 的卸载程序有一个文件被占用就全部放回；fork 原地更新时 `SkCheckReplaceable` 先确认要替换的文件没有被不许删除的句柄占着（等 5 秒），否则中止，什么都没改。
+5. **移除 0.3.4**：用它自己的卸载程序（从一份副本运行 `/S /KEEP_APP_DATA <范围> --keep-shortcuts --updated _?=<目录>`：数据、快捷方式和固定都留着；失败时重试 3 次，它的 `--updated` 模式有一个文件被占用就全部放回，0.3.4 仍完好）。它的每次运行最后都 `RMDir /r` 整个目录，所以在这几种情况下不用它，只按 `files-0.3.4.nsh` 删 0.3.4 自己的文件、删空了的文件夹（`SkOldUninstallerUse`、`SkRemove034Files`）：目录不安全（数据目录、系统文件夹）、路径里没有「SpaceKnife」（静默 `/D=` 装进 `D:\Tools` 这样和别的程序共用的文件夹）、卸载程序不在了。之后删掉 0.3.4 的卸载项，但 `Software\{GUID}` 的 `InstallLocation` 重新写回它的目录（0.3.4 的卸载程序自己会删两个键），直到这一版放好之后由新的键值覆盖：放置失败时再运行安装程序仍能找到原来的目录、装回那里，保留下来的快捷方式也能改指新程序。从这里起 0.3.4 回不来了，剩下的都是同盘改名。
+6. 旧的 fork 安装（以后的版本更新 0.3.5 时）：按它的清单删它装的文件和空了的文件夹（`SkRemoveListed`，见下）；目录改了的（旧目录不安全）运行它自己的卸载程序（`--updated`）。原版 Tauri 的测试构建用它自己的卸载程序移除。
+7. 暂存的文件放到位（`SkPlaceAll`）：目录不在或空着时整个暂存文件夹改名成它，否则逐个文件改名（失败几次后复制）。整个改名成功以后再不退回逐个放置，缺了哪个文件（如被杀毒软件拿走）就报告、已在的留着；逐个放置时只在暂存里确有替换文件时才删已装的那个。
+8. 写卸载程序 `uninstall.exe` 和**文件清单** `installed-files.txt`（`SkWriteManifest`：这次装进去的每个文件，再是它们所在的、`$INSTDIR` 下面的文件夹，最深的在前；UTF-16 LE），写键，处理快捷方式。
 
-- 总是删除：界面配置 `%APPDATA%\SpaceKnife\electron`（以及 0.3.0 以前的 `%APPDATA%\spaceknife-electron`）、后端缓存 `%LOCALAPPDATA%\SpaceKnife\Cache`、下载的更新 `%LOCALAPPDATA%\SpaceKnife\updates`；`%APPDATA%\SpaceKnife` 空了就一起删掉。
-- 快照、设置和日志（`%LOCALAPPDATA%\SpaceKnife` 的其余部分）只在勾选「同时删除快照、设置和日志」时删除，默认不勾；静默卸载加 `--delete-app-data` 也会删除。`SPACEKNIFE_HOME` 指定的目录从不碰。
-- 升级时（新安装程序带 `--updated` 运行旧版本的卸载程序）什么都不删，第二页也不显示。
-- installer.nsh 要带 UTF-8 BOM，否则 NSIS 读错其中的中文。它被包含在 MUI2.nsh 之前，所以卸载页面的函数定义写在 `customUnWelcomePage` 宏里。
+任何一步中止时（`.onInstFailed` → `SkFailed`）：删掉暂存，静默更新时重新启动旧版本（`SkRestartPrevious`；旧版本已经删了的不启动，退出码 3）；静默更新（带 `--updated` / `/UPDATE`）还弹一个置顶的消息框，说没装上、为什么（中止时的那句话，`SK_ABORT`）、日志在哪里，旧版本已删时再写上安装程序的位置，因为启动它的应用已经退出，别的地方都不会告诉用户。弹框前先放开互斥锁，用户马上重试不必等。管理员脚本的 `/S` 全新安装不弹。提权副本里的失败由副本弹框，外层按它的退出码决定启动不启动旧版本：这时互斥锁在外层手里，旧版本要等用户答完副本的框、副本退出后才由外层重新启动。
 
-**Linux**：
+**删除只按名字**：安装程序和卸载程序都不整个删除任何文件夹（`tools/tests/nsis_installer.test.mjs` 核对）。fork 的安装按 `installed-files.txt` 删（`SkRemoveListed`：清单上的文件，再是清单上空了的文件夹；带盘符、以 `\` 开头、有 `.` 或 `..` 段、通配符、`/` 的行一律跳过），0.3.4 的按 `files-0.3.4.nsh`，暂存文件夹按这次暂存的名字；目录里别的东西（用户放的文件、和别的程序共用的文件夹里的东西）都留着。唯一的例外是卸载程序删 SpaceKnife 自己的缓存和数据文件夹（`un.SkRemoveData`，见下）。
 
-- deb / rpm：程序在 `/opt/SpaceKnife/`，`/usr/bin/spaceknife` 指向它；`spaceknife.desktop`（中英文名称与说明、关键字）和 hicolor 图标 16–512 px；依赖是 Electron 的常规依赖（GTK 3、NSS、libXss、libXtst、xdg-utils、at-spi2 等）。
-- AppImage：需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）；没有时用 `--appimage-extract-and-run` 运行。
-- AppImage 的更新信息：electron-builder 用的运行时留了空的 `.upd_info` 段，构建时写进 `gh-releases-zsync|DuskXi|SpaceKnife|latest-all|SpaceKnife-*-x86_64.AppImage.zsync`（`latest-all`：最新的正式版或预发布版；`latest` 不算预发布），并用 `zsyncmake` 在旁边生成 `.zsync`（`tools/build_package.py` 的 `embed_update_info` / `make_zsync`；本机没装 `zsync` 包时只写更新信息、不生成 .zsync）。这样 AppImageUpdate、AppImageLauncher 之类的工具能增量更新。`./SpaceKnife-*.AppImage --appimage-updateinformation` 打印写进去的信息。
-- 窗口的 app_id / WM_CLASS 与 desktop 文件名一致（`desktopName: spaceknife.desktop`），任务栏能把窗口和启动器图标对上。
+**卸载程序** `uninstall.exe`：先关掉运行中的 SpaceKnife，按自己的文件列表和 `installed-files.txt` 删文件、删空了的文件夹和 `$INSTDIR`（空时）。第二页是 0.3.4 的「你的数据」（文案照搬）：默认不勾，只删程序、界面缓存（`%LOCALAPPDATA%\io.github.duskxi.spaceknife`、`%APPDATA%\io.github.duskxi.spaceknife`、0.3.4 的 `%APPDATA%\SpaceKnife\electron` 和 `%APPDATA%\spaceknife-electron`、`%LOCALAPPDATA%\spaceknife-electron-updater`）、后端的 `Cache` 和下载的更新，`%APPDATA%\SpaceKnife` 只在空时删（外壳的文件夹见下）；勾上（或静默卸载带 `--delete-app-data`）才删快照、设置和日志（`%LOCALAPPDATA%\SpaceKnife`），`%APPDATA%\SpaceKnife` 整个只在带 `--delete-app-data` 时删（不管勾没勾），和 0.3.4 的卸载程序一样；程序装在里面的文件夹绝不删。带 `--updated` / `/UPDATE` 时（更新、降级）只删 `%LOCALAPPDATA%\spaceknife-electron-updater`（0.3.4 也是），别的数据都不删，快捷方式、跳转列表和固定都留着；只带 `--keep-shortcuts` 时只留快捷方式、跳转列表和固定。
+
+**外壳的文件夹和 WebView2**：窗口的 WebView2 配置在外壳的文件夹里（`window.rs` 的 `data_directory`：`%LOCALAPPDATA%\io.github.duskxi.spaceknife\webview`，WebView2 在里面建 `EBWebView`）。WebView2 的进程（`msedgewebview2.exe`）在窗口关掉以后还要活一会儿，应用刚启动就被结束时它们还在启动，这期间照样写配置（`Local State`、`lockfile`、`Variations` 等），哪怕文件夹刚被删掉。所以 `un.SkRemoveData` 先让它们走，再删文件夹，不管文件夹这时在不在：先删、删掉了就不等的做法在 Windows Server 2022 的运行器上（WebView2 131，卸载紧跟在结束应用之后）留下过整个 `webview\EBWebView`。
+
+- 认进程只按命令行（`un.SkWebView2Ours`）：文件名是 `msedgewebview2.exe`，`--user-data-dir` 是外壳的文件夹或在它里面（`un.SkUserDataDir`：开关要在参数开头；值带引号的 `--user-data-dir="…"`、整个参数带引号的 `"--user-data-dir=…"`（有的子进程这样拿到带空格的路径）、不带引号的到下一个空格为止，只看第一个；比较前都换成完整的长路径，不分大小写）。别的程序的 WebView2 有自己的配置文件夹，名字只是开头一样的文件夹（`io.github.duskxi.spaceknife-beta`）和装着外壳文件夹的上级都不算，不是 WebView2 的程序命令行里有这个文件夹也不算。命令行从进程句柄读（`NtQueryInformationProcess` 的 `ProcessCommandLineInformation`），结束也用同一个句柄，不会结束后来拿到同一个进程号的别的进程。
+- 每 250 毫秒看一次，最多等 10 秒（`SK_WEBVIEW2_POLLS`）让它们自己退出；还在的才结束（TerminateProcess，每个最多再等 2 秒）。结束不了的（没提权的卸载程序对提了权的 SpaceKnife 的 WebView2）写进日志，只写一次，卸载照常往下走。
+- 然后删文件夹，最多 10 次、间隔 0.5 秒（`SK_REMOVE_TRIES`）；每删一次都再看一眼有没有又冒出来的这类进程，有就不再等、直接结束，文件夹还在就再删。
+- 找到了哪些进程、等了多久、是自己走的还是被结束的、删了几次，以及该删而还在的文件夹，都写进 `%TEMP%\SpaceKnife-install.log`。
+- 更新（`--updated` / `/UPDATE`）不删外壳的文件夹，也不碰它的 WebView2 进程（可能是新版本的窗口）。
+- 只有卸载程序删外壳的文件夹：应用自己没有删数据的路径（后端清缓存只清它自己的缓存目录 `paths::cache_dir()`，从不碰外壳的文件夹），便携版没有卸载程序，它 `data\desktop\webview` 里的配置不归任何程序删，便携版的「无缝更新」也从不动 `data`（第 8 节）；Electron 外壳（只发 Linux 包）没有 WebView2。
+- 测试：`packaging/nsis-logic.mjs`（第 11 节）先拿一组命令行核对认法；再用一张替身进程清单（不运行、也不看系统里的任何进程）演示还在启动、自己退出、一直不走、结束不了的 WebView2 和别的程序的 WebView2，替身在卸载程序运行期间按时写自己的配置，卸载结束、替身都走完以后看外壳的文件夹还在不在（换回先删后等的写法，这个用例就会失败）；还有两个用例用改名的 cmd.exe 当真进程，占着不许共享的 `lockfile`。`installer-experiments.ps1` 的 S1U 在结束应用后马上卸载，再在应用运行、WebView2 已起来时带 `--delete-app-data` 卸载，两次都核对外壳的文件夹没了、没有它的 WebView2 进程、5 秒后也没有被写回来。
+
+- fork 照着锁定的 tauri-cli 2.12.4 / tauri-bundler 2.10.4 的原版模板写：`windows/upstream.json` 记着原版 6 个文件的 SHA-256，`node tools/nsis_fork.mjs check`（CI 的 Rust 作业、界面作业和安装包工作流里跑）核对 package.json / pnpm-lock 锁的 CLI 版本、crates.io 上 tauri-cli 对 tauri-bundler 的精确依赖、crate 里那 6 个文件和装好的 CLI 内嵌的文件；升级 tauri-cli 时先把原版的改动合进 fork，再更新 `upstream.json`。
+- 安装程序和卸载程序把每一步写进 `%TEMP%\SpaceKnife-install.log`（UTF-16，静默运行时也写，`SkLogLine`）。每一行都是打开、写、关闭：外层实例等提权副本时不占着它，副本、它运行的卸载程序也都写得进去（被别的实例正好打开着时重试几次）。
+- `node tools/release.mjs windows-installer <版本> <bundle 目录> <输出目录>` 把 Tauri 的 `SpaceKnife_<版本>_x64-setup.exe` 改成 0.3.4 的名字 `SpaceKnife-<版本>-Setup-x64.exe`，并写 `SHA256SUMS-installers-win-x64.txt`。
+- 没有代码签名证书：第一次运行时 SmartScreen 会提示「未知发布者」。
+
+## 6. Linux 的包
+
+- **deb**（Tauri 外壳）：`spaceknife` 和 `spaceknife-cli` 在 `/usr/bin`，其余在 `/usr/lib/SpaceKnife`；desktop 文件沿用 0.3.4 的 `spaceknife.desktop`（收藏的启动器不失效），hicolor 图标由 Tauri 生成；依赖 WebKitGTK 4.1、GTK 3 等。包名 `spaceknife`，是对 0.3.4 那个包的普通升级（dpkg 删掉 0.3.4 的 `/opt/SpaceKnife`）。0.3.4 的 postinst 把 `/usr/bin/spaceknife` 做成 `/opt/SpaceKnife/spaceknife` 的 alternatives 链接；它的 postrm 在升级时（新文件解包之后）`update-alternatives --remove`，update-alternatives 不删新包放在那里的普通文件；新包的 postinst 若还看到那条登记就再去掉一次（`tools/deb.mjs`）。`install.rs` 用 `/var/lib/dpkg/info/` 的文件列表区分 deb 与 rpm。
+- **rpm**（Electron 外壳，RHEL 9 没有 WebKitGTK 4.1）：包名 `spaceknife`，布局同 0.3.4：程序在 `/opt/SpaceKnife`，`/usr/bin/spaceknife`（alternatives）和 `/usr/bin/spaceknife-cli` 两个链接；界面在 `/opt/SpaceKnife/resources/ui`。安装、卸载脚本在 `apps/electron-shell/build/linux/`：卸载脚本只在真正卸载时（`$1` 为 0）删链接；0.3.4 的 `%postun` 不看 `$1`，而 rpm 先跑新包的 `%post` 再跑旧包的 `%postun`，从 0.3.4 升级时会删掉刚登记的 `/usr/bin/spaceknife`，所以新包带 `rpm-posttrans.sh` 作 `%posttrans`（整个事务之后）把缺的链接补回来，以后每个 rpm 都要带。rpm 只删包自己列着的东西：fpm 默认只列文件，0.3.4 的 rpm 一个文件夹也不拥有，卸载后 `/opt/SpaceKnife` 和里面的文件夹空着留下，从 0.3.4 升级后它 Python 后端的文件夹（`resources/backend` 下）也空着留下；所以 `electron-builder.yml` 给 fpm 加 `--directories /opt/SpaceKnife`，包拥有 `/opt/SpaceKnife` 和其中每个文件夹（`%dir`），`%posttrans` 删掉 0.3.4 留下的那些空文件夹（只删空的）。
+- **AppImage**（Electron 外壳）：需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）；没有时用 `--appimage-extract-and-run` 运行。和 0.3.4 一样，运行时的 `.upd_info` 段里写着更新信息（`gh-releases-zsync|DuskXi|SpaceKnife|latest-all|SpaceKnife-*-x86_64.AppImage.zsync`），发布里有 `.AppImage.zsync`，给 AppImageUpdate 之类的工具用（`node tools/appimage.mjs finish <AppImage>`，`electron.yml` 在算校验和之前运行）；SpaceKnife 自己的更新检查不用它们。
+
+## 7. 便携版与 macOS
 
 **便携版**（Windows zip、Linux tar.gz、macOS zip）：
 
-- 就是免安装目录（macOS 上是 `SpaceKnife.app`），外加一个空的 `data` 文件夹（里面一份中英文说明）。打包后的应用启动时，如果可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`（[src/main/portable.ts](../apps/electron/src/main/portable.ts)）：快照、设置、日志、缓存和 Chromium 配置都存在里面，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。
-- 解压到用户可写的位置（解压到 Program Files 之类的位置会写不进去）。
-- Linux 的 tar.gz 不需要 FUSE。和 AppImage 一样，`chrome-sandbox` 没有 setuid：在限制非特权用户命名空间的发行版上（Ubuntu 23.10 起的 AppArmor 规则）可能启动不了，需要加 `--no-sandbox`；目标系统 Ubuntu 22.04 和 RHEL 9 不受影响。
-- 有 x64 和 arm64 两份（`win-arm64`、`linux-arm64`）。便携版更新时按处理器的架构挑包（`spaceknife.update.asset_templates`；Windows 上 Python 读的是处理器的架构，模拟运行的 x64 进程也一样）：Windows on ARM 上的 x64 便携版下一次更新就换成 arm64 版，发布里没有 arm64 包时仍给 x64（Windows 能模拟运行）；ARM Linux 只取 arm64 包。主进程两种架构的包都接受（`portableVersion`、`installRefusal`）。arm64 版目前只在 GitHub 的 ARM 运行器上测过，还没在真机上用过。
-- 没有 32 位 Windows 版：Electron 44 已不再提供 win32-ia32。
-- macOS 的 zip 由 `ditto -c -k --sequesterRsrc --keepParent` 打包（苹果自己的格式：包里的符号链接、扩展属性和签名都在；Python 的 zipfile 会丢），应用更新时也用 `ditto -x -k` 解开（`main/index.ts` 的 `unpack`）。ad-hoc 签名、未公证，第一次打开和 dmg 一样要在「隐私与安全性」里放行；更新由应用自己下载，不带隔离属性，换上的新版本不再问。
-- macOS 的 App 转移（Gatekeeper 路径随机化）：带隔离属性、在解压出来的位置直接打开的应用，会被系统从 `/private/var/folders/…/AppTranslocation/…` 下的只读副本运行，旁边没有 `data`。`portable.ts` 认出这种路径后，用 `/sbin/mount` 的挂载表（只读 nullfs 挂载，`<原路径> on <挂载点> (nullfs, …)`）找回原来的位置，`data` 照样用原位置旁边那个；「无缝更新」替换的也是原位置的文件夹，换好后启动原位置的 `SpaceKnife.app`（替换计划里的可执行文件可以在文件夹的子目录里，`update_swap.Plan.check`）。真机上的 App 转移还没验证过（CI 下载的文件不带隔离属性）。
-- 「完全磁盘访问权限」按应用的签名记：ad-hoc 签名每个版本都不同，每次更新后要重新打开一次开关（dmg 也一样，等 Developer ID 签名之后才会记住）。
+- 一个文件夹：程序（`SpaceKnife.exe`；Linux 上 `spaceknife`）、`spaceknife-cli[.exe]`（Windows 上还有 `SpaceKnife.com`）、`resources/backend/spaceknife-backend[.exe]`、`ui/`（Electron 外壳是 `resources/ui`）、`licenses/` 和一个空的 `data` 文件夹；macOS 上是 `SpaceKnife.app` 加旁边的 `data`。快照、设置、日志、缓存和 WebView 配置都存在 `data` 里，不写进用户目录；macOS 的 WebView 数据例外：WKWebView 不接受指定的配置目录（Tauri 的 `data_directory` 在 macOS 上不起作用），页面存储等 WebKit 数据由系统按 bundle id 放在 `~/Library/WebKit/io.github.duskxi.spaceknife`，便携版也一样（第 10 节）。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。无头模式（`spaceknife-cli headless` 和 0.3.4 的 `--headless`）也这样找 `data`（`cli/headless.rs` 的 `portable_home`）；`spaceknife-cli` 的其他命令仍用用户目录，除非设了 `SPACEKNIFE_HOME`。
+- 解压到用户可写的位置（解压到 Program Files 之类的位置会写不进去），文件夹只放这一份副本：「无缝更新」只换 SpaceKnife 自己的文件，文件夹里还有别的东西（别的应用、文档）时它不更新、说明原因（第 8 节）。Windows 的便携版要 WebView2 Runtime 89.0.774.44 或更新。
+- Linux 的 tar.gz 不需要 FUSE。Linux 有两种：沿用 0.3.4 名字的 `-portable.tar.gz` 是 Electron 外壳（第 4 节），glibc 2.34+ 就能用，0.3.4 的 Linux 便携版都更新到它；`-tauri.tar.gz` 是 Tauri 版，下载小得多，要系统的 WebKitGTK 4.1。两种都带替换助手、都回答 `--startup-check`，各自只更新到同一种。
+- 有 x64 和 arm64 两份（`win-arm64`、`linux-arm64`）。更新时按处理器的架构挑包（`asset_templates`），架构在运行时读（`machine`：Windows 用 `IsWow64Process2`，macOS 看 `hw.optional.arm64`，Linux 用 `uname`），所以在 ARM 上模拟运行的 x64 副本会换成 arm64 版：Windows on ARM 上先找 arm64 包，发布里没有时仍给 x64；ARM Linux 只取 arm64 包。arm64 版目前只在 GitHub 的 ARM 运行器上测过。没有 32 位 Windows 版。
+- macOS 的 zip 保留包里的符号链接、扩展属性和签名（ditto 格式）。App 转移（Gatekeeper 路径随机化）：带隔离属性、在解压出来的位置直接打开的应用，会被系统从 `/private/var/folders/…/AppTranslocation/…` 下的只读副本运行，旁边没有 `data`；`portable.rs` 认出这种路径后，用 `/sbin/mount` 的挂载表（只读 nullfs 挂载）找回原来的位置，`data` 照样用原位置旁边那个，「无缝更新」替换的也是原位置的文件夹（真机上还没验证过：CI 下载的文件不带隔离属性）。
 
 **macOS（dmg）**：
 
-- 打开 dmg，把 SpaceKnife 拖进「应用程序」。最低 macOS 14（`LSMinimumSystemVersion`；numpy 用的是需要 macOS 14 的 Accelerate 版本）。
-- ad-hoc 签名、未公证：第一次打开会被 Gatekeeper 拦下，用户要去「系统设置 › 隐私与安全性」点「仍要打开」并输入密码，之后正常打开；每次更新后再来一次。macOS 14 上也可以在「应用程序」里右键 › 打开。终端里 `xattr -dr com.apple.quarantine /Applications/SpaceKnife.app` 也行。README 里有给用户的步骤。
-- 关闭了 Hardened Runtime：它会强制库校验，ad-hoc 签名的应用会拒绝加载 Electron 框架原有的签名。等有 Developer ID 再开（公证需要它）。
-- 「完全磁盘访问权限」：不给的话，扫描到「桌面」「文稿」「下载」、云盘、照片图库、其他应用的数据、外接盘和网络盘时会逐个弹出授权提示（提示文案是 `electron-builder.yml` 里的 `NS*UsageDescription`），邮件、信息等受保护目录读不到，计入未知空间。给了就都能扫到。应用在扫描前检查（`spaceknife.privacy`：读用户的 TCC 数据库，不弹窗），没有时弹出说明框：打开系统设置的对应页面 / 跳过这些位置（不弹窗，显示为无法访问）/ 照常逐个询问；设置「扫描范围 › 受保护的位置」记住选择。ad-hoc 签名的授权绑定在具体的构建上，更新后要在设置里关掉再打开一次。
-- 扫描 `/` 时不进入 `/System/Volumes/Data`：同一 APFS 卷组的数据卷与系统卷报告同一个设备号，它的文件已经通过 firmlink 在树里（`scan.volume.volume_group_twins`）。云盘里「仅在云端」的文件（`SF_DATALESS`）按占用 0 计，这样的文件夹不进入，进程也设为不物化 dataless 文件，扫描不会触发下载。
-- 磁盘负载在进程内读 IOKit 的块设备统计（与 `iostat` 同源，`ioreg` 为后备）。
-- 文件条目的属性用 `getattrlistbulk` 批量取（文件夹、挂载点、firmlink 仍逐个 `fstatat`）。每个进程读到的第一批文件与 `fstatat` 对照，有差异就整条退回 readdir + `fstatat`；`SPACEKNIFE_NO_BULK=1` 关掉，用来对比速度。文件夹也能从它取（`SPACEKNIFE_BULK_DIRS=1`，同样单独对照），但并不更快：请求文件夹属性让每次调用都变慢，抵掉了省下的 `fstatat`。`spaceknife-backend scan --profile` 打印耗时分解和它的状态。
-- 列目录的起步宽度是可用 CPU 数的两倍（4–16），读盘时加宽到冷宽度，由 Rust 的控制器决定（[native.md](native.md) 2.2「列目录线程」）；`SPACEKNIFE_SCAN_THREADS` 可以固定。
-- 2026-10-20 在 GitHub 的 macOS 运行器上对比过各设置（当时的「Scan benchmark」工作流，后来删掉了，云端不再跑基准）：各设置轮流跑，每轮换一个开头；热缓存 6 轮，`sudo purge` 后 3 轮（purge 清不掉 APFS 元数据的缓存，两组差不多）。扫 /System/Library /usr（3 核 arm64 45 万项，4 核 Intel 70 万项），单位是项/秒：
+- 打开 dmg，把 SpaceKnife 拖进「应用程序」。ad-hoc 签名、未公证：第一次打开会被 Gatekeeper 拦下，用户要去「系统设置 › 隐私与安全性」点「仍要打开」并输入密码，之后正常打开；每次更新后再来一次。终端里 `xattr -dr com.apple.quarantine /Applications/SpaceKnife.app` 也行。README 里有给用户的步骤。
+- 「完全磁盘访问权限」按应用的签名记：ad-hoc 签名每个版本都不同，每次更新后开关仍显示打开、却不再起作用，要在设置里选中 SpaceKnife 用 − 删掉再用 + 加回（或把开关关掉再打开），再重新打开 SpaceKnife（便携版也一样，等 Developer ID 签名之后才会记住）；说明框里也这样写（`FullDiskAccessDialog.vue`）。不给的话，扫描到「桌面」「文稿」「下载」、云盘、照片图库、其他应用的数据、外接盘和网络盘时会逐个弹出授权提示，邮件、信息等受保护目录读不到，计入未知空间。应用在扫描前检查（`crates/sk-core/src/privacy.rs`：读用户的 TCC 数据库，不弹窗），没有时弹出说明框：打开系统设置的对应页面 / 跳过这些位置 / 照常逐个询问；设置「扫描范围 › 受保护的位置」记住选择。扫描在应用进程里做，授权和提示都记在 SpaceKnife 这个应用名下。
+- 扫描 `/` 时不进入 `/System/Volumes/Data`：同一 APFS 卷组的数据卷与系统卷报告同一个设备号，它的文件已经通过 firmlink 在树里（`crates/sk-core/src/volume.rs` 的 `volume_group_twins`）。云盘里「仅在云端」的文件（`SF_DATALESS`）按占用 0 计，这样的文件夹不进入，进程也设为不物化 dataless 文件，扫描不会触发下载。磁盘负载在进程内读 IOKit 的块设备统计（与 `iostat` 同源）。
+- 文件条目的属性用 `getattrlistbulk` 批量取（文件夹、挂载点、firmlink 仍逐个 `fstatat`）。读到的第一批文件与 `fstatat` 对照，有差异就整条退回 readdir + `fstatat`；`SPACEKNIFE_NO_BULK=1` 关掉。文件夹也能从它取（`SPACEKNIFE_BULK_DIRS=1`），但并不更快。`spaceknife-cli scan --profile` 打印耗时分解和它的状态。列目录的起步宽度是可用 CPU 数的两倍（4–16），读盘时加宽到冷宽度（[native.md](native.md) 2.2「列目录线程」）；`SPACEKNIFE_SCAN_THREADS` 可以固定。2026-10-20 在 GitHub 的 macOS 运行器上对比过（扫 /System/Library /usr，单位是项/秒；热缓存 6 轮，`sudo purge` 后 3 轮）：
 
   | | 3 核 arm64 | 4 核 Intel |
   |---|---|---|
@@ -124,93 +159,138 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
   | 线程数两倍 | +8%（热）/ +15%（purge 后） | +12% / +5% |
   | 文件夹也用 getattrlistbulk | −19% / −2% | 0% / −4% |
 
-  修好线程池之前，所有单线程切片排在同一个单线程池上，列目录实际只有一个线程；耗时分解里的「列目录线程忙碌」把排队也算了进去，看起来像内核侧的瓶颈。现在忙碌度只算列目录本身。
-- 修好之后，Intel 运行器上主线程把结果合并进树占 48–62%。同一次等待里落下的切片合并成一次写入（`worker.merge_slices`），祖先的合计一次加完。Windows 上用录下的 470 个切片（C:\Program Files，35.9 万项）重放合并：140 ms → 99 ms（逐片）→ 61–77 ms（合并后）；实际扫描中，主线程合并占比 45–58% → 39–43%，这时列目录线程成了瓶颈。
-- 扫描是后端子进程做的，授权和提示都记在 SpaceKnife 这个应用名下（macOS 按负责的应用归属）。
+## 8. 更新
 
-**更新检查**（`spaceknife.update`，协议 `update.*`，界面在 `shell/UpdateBadge.tsx` / `UpdateCard.tsx`）：
+**更新检查**（`crates/sk-core/src/update/`，服务端 `crates/sk-server/src/updates.rs`，协议 `update.*`，界面在 `app/components/shell/UpdateBadge.vue` / `UpdateCard.vue`）：
 
-- 后端每天最多一次读取 `https://api.github.com/repos/DuskXi/SpaceKnife/releases`（启动约 1 分钟后第一次；带 ETag，没变化时 GitHub 回 304；失败 6 小时后再试），不带令牌，只发 `User-Agent: SpaceKnife/<版本>`。设置「关于与更新 › 更新」可以关掉，或改成「只要正式版」（默认包括 GitHub 上标为预发布的版本）。命令面板「检查更新」随时检查；「关于与更新」页（`pages/AboutPage.tsx`）显示版本、组件版本和最近 30 个发布的时间线（`update.releases`）。
-- 和正在运行的版本比较：只差修订号时只在标题栏右侧显示徽章；次版本号不同时左上角挂一张卡片（发布说明的概要、前往发布页、一键下载）；主版本号不同时在窗口内弹对话框。关掉卡片或对话框后这个版本不再自动弹出，徽章保留。次版本和主版本的卡片里还有「跳过 0.4.x」/「跳过 1.x」（`update.mute`）：整个系列（次版本是 major.minor，主版本是 major）的版本都不弹卡片、不弹对话框、不显示徽章，也不自动下载；记在 `update.json` 的 `muted` 里（最多 20 个，运行的版本已经到了的系列在下一次改动时去掉），「关于与更新」页仍显示这个版本并能「恢复提示」。
-- Electron 主进程把运行版本和安装方式告诉后端：`SPACEKNIFE_APP_VERSION`、`SPACEKNIFE_INSTALL_KIND`（nsis / portable / appimage / deb / rpm / dmg / dev）。后端在就绪行里报回 `updates_dir`（数据目录的 `updates`），主进程只认这个文件夹里的更新文件。演示和测试可以用 `SPACEKNIFE_UPDATE_FEED` 指向本机（只接受回环地址）的一份发布列表。
-- 下载（「自动下载更新」开启时检查之后自动开始，否则点「一键下载」）按安装方式挑发布文件，存进 `updates` 文件夹，并用同一个发布里的 `SHA256SUMS*.txt` 校验，不符就删掉。之后更新卡片给出两个大按钮（`shared/install.ts` 的 `installStep` 决定每种安装方式各是什么）：「无缝更新」由 SpaceKnife 自己换上新版本再启动；经典方式交给安装程序、磁盘映像或安装包，或者在文件夹中显示下载的文件让用户自己替换。两者都只在用户点击后由主进程执行（`main/index.ts` 的 `installUpdate`），从不自己开始，以后也不会加自动安装的选项：
-  - **NSIS**：
-    - 「无缝更新」：主进程先停掉后端，再以 `--updated /S --force-run` 加 `/allusers` 或 `/currentuser`（按安装目录在 Program Files 还是 `%LOCALAPPDATA%` 下）运行新安装程序，然后退出。安装程序从注册表读出原来的安装目录，所有用户安装时自己请求提权，杀掉残留的 SpaceKnife 进程，以 `/S /KEEP_APP_DATA --updated` 运行旧版本的卸载程序，装好后（`--force-run`）启动新版本。
-    - 「运行安装程序」：不带参数运行新安装程序（显示安装向导），SpaceKnife 随即退出。它照样就地升级：electron-builder 以 `--updated` 运行旧版本的卸载程序，数据保留。
-  - **便携版**（Windows zip、Linux tar.gz、macOS zip）：
-    - 「无缝更新」：换文件的是**新版本自己的后端可执行文件**，不再是 PowerShell / sh 脚本（脚本已经去掉）。
-      - 主进程把压缩包解到 `updates/staging-<版本>`（Windows 用 tar.exe，没有时用 Expand-Archive；Linux 用 tar；macOS 用 ditto），确认里面唯一的顶层文件夹带着可执行文件（macOS 上是 `SpaceKnife.app`）和后端（`resources/backend/spaceknife-backend[.exe]`，macOS 上在 `SpaceKnife.app/Contents/Resources/backend/` 里）。
-      - 写出计划 `updates/update-<版本>.json`（版本 1：`v`、`pid`、`app`、`new`、`old`、`exe`、`log`、`keep: ["data"]`）。计划是和每个旧版本的约定：旧应用把它交给更新版本的后端，所以以后的后端要一直能读 `v: 1`。
-      - 以 detached 方式启动 `<staging>/resources/backend/spaceknife-backend[.exe] --apply-update <计划>`，等它在 stdout 回一行 `{"ok": true}` 后退出。30 秒没回、回了别的或者它先退出了，应用就照旧运行并提示原因。
-      - 助手（`spaceknife.update_swap`，只用标准库；`packaging/backend_entry.py` 在加载别的东西之前就分派过去）先检查计划：路径都是绝对路径、`exe` 在 `app` 里（macOS 上在 `app/SpaceKnife.app/Contents/MacOS/` 里）、新版本的同一位置有可执行文件、`old` 是空的。不能用的计划（比如新版本不完整）什么都不动：日志写一行 `not started: …`，回 `{"ok": false, "error": …}`，应用保持打开并提示原因。
-      - 等应用主进程退出（最多 60 秒，日志「waiting for SpaceKnife (<pid>) to quit」；超时写「SpaceKnife did not quit: kept the old version」）。
-      - 把程序目录里除 `data` 以外的条目移到 `updates/previous-<旧版本>`。文件还被占用时（正在关闭的应用自己的子进程、杀毒软件）在 30 秒内反复重试，日志写「busy: …」。
-      - 再把新条目移进来。助手自己就在新条目里运行，而 Windows 不让改名一个里面有程序在运行的文件夹，所以整体改不了名的逐个移动，连这也不行的就复制。
-      - 带 `--updated` 启动程序，日志末行写「updated」。任何一步失败就把旧条目移回原处、启动旧版本，日志写「kept the old version」。
-      - 每一步都写进 `updates/update-<版本>.log`，每行带 UTC 时间。
-    - 「自己替换」：在文件夹中显示下载的压缩包，SpaceKnife 继续运行；用户退出后自己解压覆盖，保留 `data`。
-  - **AppImage**：
-    - 「无缝更新」：复制成 `$APPIMAGE.new`、设为 755，再改名覆盖 `$APPIMAGE`（同一文件系统内的原子替换），然后启动它。
-    - 「自己替换」：在文件夹中显示新的 AppImage，由用户退出后替换旧文件。
-  - **dmg / deb / rpm**：没有无缝的办法，只有经典方式「打开磁盘映像」/「打开安装包」：交给系统打开（用户把新版拖进「应用程序」，或由软件安装器安装），SpaceKnife 随即退出。
-  - 有扫描在进行时，会关闭 SpaceKnife 的按钮第一次点只提示「还有扫描在进行，更新会中断它（已扫描的部分不会保存）」，按钮改写「再点一次继续」，第二次点才执行；「自己替换」不关闭应用，不问。
-  - 新版本带 `--updated` 启动时，预加载脚本拿到 `justUpdated`，界面提示一次「已更新到 SpaceKnife <版本>」。下一次启动后端清理 `updates`，旧安装包、`staging`、`previous`、`update-<版本>.json` 和日志都会删掉。
-  - 主进程只启动 `updates` 文件夹里、按本次安装方式的发布文件命名的文件（`installRefusal`）。
-- **发布时的约定**：更新检查靠文件名找文件。发布文件必须沿用下面的名字，并附上对应的校验和文件：
-  - `SpaceKnife-<版本>-Setup-x64.exe`、`SpaceKnife-<版本>-win-x64-portable.zip`、`SpaceKnife-<版本>-win-arm64-portable.zip`、`SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-linux-arm64-portable.tar.gz`、`SpaceKnife-<版本>-x86_64.AppImage`、`spaceknife_<版本>_amd64.deb`、`spaceknife-<版本>.x86_64.rpm`、`SpaceKnife-<版本>-mac-arm64.dmg`、`SpaceKnife-<版本>-mac-x64.dmg`、`SpaceKnife-<版本>-mac-arm64-portable.zip`、`SpaceKnife-<版本>-mac-x64-portable.zip`；
-  - `SHA256SUMS.txt`（安装包）、`SHA256SUMS-portable-<目标>.txt`（目标是 `win-x64`、`win-arm64`、`linux-x64`、`linux-arm64`）、`SHA256SUMS-mac-<架构>.txt`（dmg 和 macOS 便携 zip）；
-  - `SpaceKnife-<版本>-x86_64.AppImage.zsync`（AppImage 里的更新信息指向它）。
-  - tag 是 `v<版本>`（语义化版本，可带预发布段）。改名之前先改 `spaceknife.update.pick_asset` 和主进程的 `installRefusal`。
-- **累积更新**：还没发布的更改随做随记在仓库根目录的 [UNRELEASED.md](../UNRELEASED.md)（中英双语，「新功能」「修复」两节，和发布说明同一个结构）。两份 README 的顶部导航里固定链接到它。
-  - 发布时，它就是发布说明的正文：再补上下载表和已知限制。
-  - 发布之后，在 dev 上把它清空：只留标题、语言切换、开头那句说明（版本号改成下一版），以及每节下面的「（暂无）」/「(nothing yet)」。
-- **发布**（从 0.3.4 起由 CI 发布，文件不经过任何人的电脑）：
-  1. dev 上改版本号（`apps/electron/package.json`、预加载的后备版本、`shim.ts` 的网页版版本、问题模板的占位符），把 `UNRELEASED.md` 压成 `release-notes/<版本>.md`：先英文后中文，下载表的大小写成 `{{size:文件名}}`，构建运行写成 `{{build_runs}}`，也可以用 `{{version}}`；工作流填进去，写错的占位符或不属于这个发布的文件名会让发布失败。
-  2. PR dev → main，等「CI passed」再合并。
-  3. 在 main 的合并提交上本地签名打 tag（`git tag -s v<版本> <提交> -m "SpaceKnife <版本>"`）并推送。CI 不持有签名的私钥。
-  4. tag 推上去就触发 **Release** 工作流（`.github/workflows/release.yml`）：
-     - 检查 tag 是带签名的附注 tag 且 GitHub 认可签名、文件和 main 完全相同、应用的版本号就是 tag 的版本、`release-notes/<版本>.md` 存在、同名的发布还没有；
-     - 用 `Portable build`（带安装包）和 `macOS build` 从 tag 构建全部文件，两者都给每个文件生成构建来源证明（`actions/attest-build-provenance`，可以用 `gh attestation verify <文件> --repo DuskXi/SpaceKnife` 核对）；
-     - `tools/release.py assemble` 核对每份校验和文件、确认正好是这个发布该有的文件（上面的名单），把两份安装包的校验和合并成 `SHA256SUMS.txt`，填好发布说明；汇总结果也作为运行的产物 `release-<版本>` 留 14 天；
-     - 建成预发布的草稿（0.x 和带预发布段的版本都是预发布）。
-  5. 在 GitHub 上看一眼草稿，点发布。**Release check** 工作流（`release-check.yml`）在发布时用 `tools/release.py check` 按已安装的 SpaceKnife 的方式读这个发布：它是自己渠道里最新的，每种安装方式都按确切的名字找到文件，每个文件下载下来和应用会读到的校验和相同。
-  - 手动运行 Release（Actions › Release › Run workflow）给已经在 GitHub 上的 tag 发布。可以填同一份文件树的 `Portable build`（带安装包）和 `macOS build` 运行号，直接用它们的文件，不再构建（工作流核对两个运行成功、构建的提交和 tag 的文件完全相同；这时没有构建来源证明，发布说明链接到那两个运行）。`dry_run` 只核对和汇总，不建发布；`publish` 不留草稿，直接发布并立刻读回检查。
-  - `tools/release.py` 在本机也能跑（`assemble` 接 `gh run download` 下载的产物，`check` 读真实的发布列表），测试在 `tools/tests/test_release.py`。
+- 后端每天最多一次读取 `https://api.github.com/repos/DuskXi/SpaceKnife/releases`（启动约 1 分钟后第一次；带 ETag，没变化时 GitHub 回 304；失败 6 小时后再试），不带令牌，只发 `User-Agent: SpaceKnife/<版本>`。代理和 0.3.4 的 urllib 一样（`crates/sk-core/src/update/proxy.rs`）：环境变量（`ALL_PROXY`、`HTTPS_PROXY`、`HTTP_PROXY`，大小写都认，配 `NO_PROXY`）设了就只听它的；没设时用系统的设置——从开始菜单、Finder、程序坞启动的应用没有这些变量。Windows 读当前用户的 Internet 设置（`WinHttpGetIEProxyConfigForCurrentUser`）：「自动检测设置」（WPAD）和「使用设置脚本」（PAC）先经 `WinHttpGetProxyForUrl` 按这次请求的 URL 问（下载脚本最多等 5 秒），问不出来再用「使用代理服务器」和它的例外列表（`<local>`、`*.example.com`）；列表里取 `https=` 那一项，没有就取对所有协议的那一项，只有 SOCKS 时直连（ureq 没带 SOCKS）。macOS 读网络设置里的代理（`SCDynamicStoreCopyProxies`，经 `scutil --proxy` 读出同一份字典）：开着「安全网页代理（HTTPS）」且主机不在例外里（`ExceptionsList` 的通配、「排除简单主机名」）就走它；自动代理配置（PAC）不执行，和 0.3.4 一样。Linux 只认环境变量（0.3.4 也是）。环境里的 `NO_PROXY` 对系统代理照样有效；同一主机的结果记 1 分钟；回环地址的发布列表（测试、演示）从不走代理。设置「关于与更新 › 更新」可以关掉，或改成「只要正式版」（默认包括 GitHub 上标为预发布的版本）。0.x 期间每个发布在 GitHub 上都标为预发布（`release.yml`），所以「只要正式版」接受其中版本号没有预发布段（`-beta.1` 之类）的；1.0 起 GitHub 的预发布标记才算数（`mod.rs` 的 `Release::preview`）。命令面板「检查更新」随时检查；「关于与更新」页显示版本、组件版本和最近 30 个发布的时间线（`update.releases`）。
+- 和正在运行的版本比较：只差修订号时只在标题栏右侧显示徽章；次版本号不同时左上角挂一张卡片；主版本号不同时在窗口内弹对话框。关掉卡片或对话框后这个版本不再自动弹出，徽章保留。「跳过 0.4.x」/「跳过 1.x」（`update.mute`）记在 `update.json` 的 `muted` 里（最多 20 个）。
+- 外壳把运行版本和安装方式交给后端（`ServeOptions` 的 `app_version`、`install_kind`：nsis / portable / appimage / deb / rpm / dmg / dev，由 `src-tauri/src/install.rs` 的 `install_kind` 判断，`SPACEKNIFE_INSTALL_KIND` 可以覆盖；`spaceknife-cli serve` 对应 `--app-version`、`--install-kind`）。下载的更新放在数据目录的 `updates` 里，外壳只启动这个文件夹里、按本次安装方式的发布文件命名的文件（`install.rs` 的 `install_refusal`）。演示和测试可以用 `SPACEKNIFE_UPDATE_FEED` 指向本机（只接受回环地址）的一份发布列表。
+- 下载（「自动下载更新」开启时检查之后自动开始，否则点「一键下载」）按安装方式和外壳挑发布文件（`SPACEKNIFE_SHELL`），用同一个发布里的 `SHA256SUMS*.txt` 校验，不符就删掉；发布里没有列出这个文件的 SHA-256 时不下载。每次读网络都有 15 秒的超时，取消在一个超时之内生效。之后更新卡片给出两个大按钮（`app/shared/install.ts` 的 `installStep`）：「无缝更新」由 SpaceKnife 自己换上新版本再启动；经典方式交给安装程序、磁盘映像或安装包，或者在文件夹中显示下载的文件让用户自己替换。两者都只在用户点击后由外壳执行，从不自己开始，以后也不会加自动安装的选项。有扫描在进行时，会关闭 SpaceKnife 的按钮第一次点只提示，第二次点才执行。
+- 新版本带 `--updated` 启动时，界面提示一次「已更新到 SpaceKnife <版本>」。启动时后端清理 `updates`：正在运行的版本及更早版本的旧安装包、`staging`、`previous`、`update-<版本>.json`、日志和撤回说明 `rollback-<版本>.json` 都会删掉；`previous-<版本>` 只在里面全是 SpaceKnife 自己的名字（下面「便携版的「无缝更新」」第 4 步的名单）和系统的文件时才删，有别的东西就原样留着、日志写一行。删不掉的（刚更新完时旧版本最后几个进程可能还占着）过 5 秒、15 秒……再试，最多到 5 分钟后，仍不行就留到下次启动。
 
-**数据位置**（`SPACEKNIFE_HOME` 会把这些全部放进同一个目录）：
+**各种安装方式怎样换上新版本**：
+
+- **NSIS**：「无缝更新」先停掉后端，再以 0.3.4 的参数 `--updated /S --force-run` 加范围（程序在 Program Files 下时 `/allusers`，在 `%LOCALAPPDATA%` 下时 `/currentuser`，别的目录不加；`install.rs` 的 `nsis_update_args`）运行新安装程序（静默、就地更新、装好后带 `--updated` 启动新版本），然后退出；安装程序做的事见第 5 节。「运行安装程序」不带参数运行新安装程序（显示向导），SpaceKnife 随即退出。
+- **AppImage**（Electron 外壳，`src/main/appimage.ts`）：「无缝更新」把新文件复制成 `$APPIMAGE.new`、设为可执行，先问它能不能在这台电脑上启动：`<新文件> --startup-check`，带着启动它时的同一套环境和开关——当前进程的环境去掉旧 AppImage 给自己设的 `APPDIR`、`APPIMAGE`、`ARGV0`、`OWD` 和各个路径列表（`PATH`、`LD_LIBRARY_PATH`、`XDG_DATA_DIRS` 等）里旧挂载点下的项（应用退出后那个挂载点就没了），当前进程带着 `--no-sandbox` 时也带上它——再加 `LD_BIND_NOW=1`，最多等 20 秒，判断与替换助手相同（第 3 步）。不能启动就删掉 `.new`，旧版本不动，更新卡片显示「新版本不能在这台电脑上启动，旧版本保持不变：…」。能启动时旧文件先硬链接成 `$APPIMAGE.previous`（文件系统不支持硬链接时改名过去），新文件再改名成 `$APPIMAGE`（有硬链接时 `$APPIMAGE` 一刻也不缺；运行中的旧版本照旧读它打开着的旧文件），然后以同样的环境带 `--updated` 启动新版本（进程都起不来时把 `.previous` 改回原名，应用照常运行）。`.previous` 只留一份，下一次更新时换成那时的旧版本；新版本通过了检查却仍起不来时，把它改回 `$APPIMAGE` 的名字就回到旧版本。「自己替换」在文件夹中显示新的 AppImage。
+- **dmg / deb / rpm**：只有经典方式「打开磁盘映像」/「打开安装包」，交给系统打开，SpaceKnife 随即退出。deb 先复制到用户的下载文件夹再打开（`install.rs` 的 `deb_open_dir`、`visible_copy`）：`user-dirs.dirs` 的 `XDG_DOWNLOAD_DIR`（`xdg-user-dir DOWNLOAD` 读的也是它），没有时 `~/Downloads`；updates 在隐藏的 `~/.local/share` 下，Ubuntu 23.10 起默认打开 deb 的 App Center 是 snap，读不到隐藏的文件夹。那里已有同名、内容相同的文件就直接用；同名的别的文件不覆盖，副本改叫 `<名字> (1).deb`、`(2)`…；先写成隐藏的临时文件再改名，安装程序看不到写了一半的文件。复制失败时照旧打开 updates 里的那个。副本像浏览器下载的文件一样留在下载文件夹里。
+- **便携版**：「自己替换」在文件夹中显示下载的压缩包，用户退出后自己解压覆盖，保留 `data`。「无缝更新」换文件的是**新版本自己的程序**（`<程序> --apply-update <计划>`，`sk_core::update::swap`），见下。
+
+**便携版的「无缝更新」**：
+
+1. 外壳把压缩包解到 `updates/staging-<版本>`，确认里面唯一的顶层文件夹带着程序（macOS 上是 `SpaceKnife.app`），写出计划 `updates/update-<版本>.json`（版本 1：`v`、`pid`、`app`、`new`、`old`、`exe`、`log`、`keep: ["data"]`）。计划是和每个旧版本的约定：旧应用把它交给更新的版本，所以以后的版本要一直能读 `v: 1`。0.3.x 的计划交给的是新版本的 `resources/backend/spaceknife-backend`（macOS 上在 `SpaceKnife.app/Contents/Resources/backend/`），所以每个便携包都带着它（`spaceknife-cli` 的副本，同样把 `--apply-update` 当第一个参数）。
+2. 以 detached 方式启动新版本的助手（Tauri 版是 `<staging>/<程序名>`，Electron 外壳是新版本里的 `spaceknife-cli`），等它在 stdout 回一行 `{"ok": true}` 后退出。30 秒没回、回了别的或者它先退出了，应用就照旧运行并提示原因（`updateStartFailed`）。
+3. 助手先检查计划：路径都是绝对路径、`exe` 在 `app` 里、新版本的同一位置有程序、`old` 是空的。再看程序目录里有什么（`swap.rs` 的 `sort_names`）：**只有 SpaceKnife 自己的条目会被移动**——每个发布过的便携版布局的顶层名字（下面的名单）、新版本的顶层名字和装着 `exe` 的那个条目；`data` 一律不动（计划的 `keep` 怎么写都一样）；系统自己放的文件（`.DS_Store`、`._*`、`Icon\r`、`desktop.ini`、`Thumbs.db`、`.directory`、盘根上的 `System Volume Information`、`$RECYCLE.BIN`、`.Trash-<uid>`、`.Spotlight-V100`、`.fseventsd` 等）原样留着、不挡更新；除此之外的任何东西都算用户的（把 `SpaceKnife.exe` 和 `data` 复制进放工具的文件夹、把 `SpaceKnife.app` 和 `data` 放进「应用程序」或桌面），这时**不更新**：日志写 `not started: <目录> holds what is not SpaceKnife's: …`，回答里用用户的语言列出前三个名字，请用户把 SpaceKnife 和它的 `data` 单独放进一个文件夹（或用「自己替换」）。宁可不更新，不猜。再问新版本的程序能不能在这里启动：以应用启动时的同一套环境运行 `<新程序> --startup-check`（第 3 节），不开窗口、不开控制台，最多等 20 秒。Linux 上加 `LD_BIND_NOW=1`，系统里的库太旧时在这里失败；Windows 上新程序继承 `SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX`，缺 DLL 或崩溃时系统不弹框。回 `{"ok": true}` 并以 0 退出才算能启动。不能启动时，Windows 上助手先以 detached 方式运行 `<新程序> --startup-problem`（Tauri 应用自己再查一遍，用用户的语言弹窗说明缺什么、去哪里下载），**然后**才回答：0.3.4 读到回答就结束助手，它的提示两秒内就消失。不能用的计划、不归 SpaceKnife 独占的目录、不能启动的新版本都什么都不动：日志写一行 `not started: …`（完整的原因，英文），回 `{"ok": false, "error": …}`——`error` 是给用户看的一句短话，用这份副本的语言（`<home>/config/settings.json` 的 `general.language`，home 是日志所在 `data/updates` 的上两级；没有就用系统的语言）：没有或太旧的 WebView2 直接说缺 WebView2，别的原因最多带 160 个字符。应用重新启动自己的后端、照常运行，提示「无法启动更新：<这句话>」（0.3.5 起更新卡片上也留着这一行，直到下一次点按钮或关掉卡片）。没有 WebView2 或低于 89.0.774.44 的 Windows、没有 libwebkit2gtk-4.1 的 Linux（如 RHEL 9）、缺运行库的程序都是这样被拦下的。
+
+   只有一样例外：解压出来的新版本里的 `.asar` 文件，在回答**之前**删掉（`swap.rs` 的 `leave_removable`，最多 3 秒，`ASAR_BUDGET`；0.3.4 读到回答就结束助手）。Electron 的 `fs` 把 `.asar` 文件当成文件夹（里面的归档），`rm(文件夹, {recursive: true})` 删不掉装着它的文件夹（Linux 上 ENOTEMPTY，Windows 上 EBUSY）；0.3.4 每次重新解压之前就这样删 `staging-<版本>`，而 Electron 外壳的 Linux 便携版带着 `resources/app.asar`，不删的话第一次被拒绝之后再点就永远「无法解压更新」。只删名字以 `.asar` 结尾（不分大小写）的普通文件，任意深度，不跟链接；叫 `….asar` 的文件夹、`app.asar.unpacked` 都留着。只在 `new` 是 `<updates>/staging-…/<文件夹>`、`updates` 就是计划和日志所在的文件夹、`new` 是不带 `.`/`..` 的绝对路径、它和 `staging-…` 都是真的文件夹（不是链接或联接点）时才删（`unpacked_by_the_app`）；不能用的计划也一样，只要它是版本 1、写着 `new`。删了就在 `not started` 那行之前写一行 `took <相对路径> out of <new> (an Electron app can't remove a folder that holds one)`，日志最后一行照旧说明怎么结束的。下一次点按钮时，两种外壳和 0.3.4 都先删掉 `staging-<版本>` 再重新解压。0.3.5 的 Electron 外壳自己删 `staging-<版本>` 和 `previous-<版本>` 时用 `original-fs`（`src/main/plainfs.ts`），不会掉进同一个坑。
+4. 等应用主进程退出（最多 60 秒）；再看一遍程序目录，只把 SpaceKnife 自己的条目移到 `updates/previous-<旧版本>`（文件还被占用时在 30 秒内反复重试，日志写「busy: …」）；系统的文件和检查之后才出现的别的东西原样留着（日志写「left where they are: …」），其中有和新版本的顶层名字同名的就什么都不移、启动旧版本（日志写 `in the way of the new version: …`，撤回说明的 `why` 是 `place`），移进来时目标已经存在的也一样停下，失败时只清掉真正移进来的新条目；再把新版本的顶层条目移进来（助手自己就在新条目里运行，Windows 不让改名一个里面有程序在运行的文件夹，所以整体改不了名的逐个移动，连这也不行的就复制）。移文件时任何一步失败就只清掉放进来的新条目、把旧条目移回原处、启动旧版本，日志写「kept the old version」。
+
+   **SpaceKnife 自己的名字**（`swap.rs` 的 `WINDOWS_OWN`、`LINUX_OWN`、`MACOS_OWN`，按发布过的压缩包本身列出，只增不减：以后的版本加上自己的名字、保留这些，也就能换掉任何更早的布局，包括手动解压覆盖过的）：
+
+   | 系统 | 0.3.1–0.3.4（Electron 44 + Python 后端；0.3.0 没有便携版） | 0.3.5 加上 |
+   |---|---|---|
+   | Windows | `SpaceKnife.exe`、`SpaceKnife.com`（0.3.3 起）、`resources`、`locales`、`chrome_100_percent.pak`、`chrome_200_percent.pak`、`resources.pak`、`icudtl.dat`、`snapshot_blob.bin`、`v8_context_snapshot.bin`、`d3dcompiler_47.dll`、`dxcompiler.dll`、`dxil.dll`、`ffmpeg.dll`、`vk_swiftshader.dll`、`vk_swiftshader_icd.json`、`vulkan-1.dll`、`LICENSE.electron.txt`、`LICENSES.chromium.html` | `spaceknife-cli.exe`、`ui`、`licenses` |
+   | Linux | `spaceknife`、`resources`、`locales`、`chrome-sandbox`、`chrome_crashpad_handler`、`chrome_100_percent.pak`、`chrome_200_percent.pak`、`resources.pak`、`icudtl.dat`、`snapshot_blob.bin`、`v8_context_snapshot.bin`、`libffmpeg.so`、`libvk_swiftshader.so`、`libvulkan.so.1`、`vk_swiftshader_icd.json`、`LICENSE.electron.txt`、`LICENSES.chromium.html` | `spaceknife-cli`、`ui`、`licenses`（两种外壳） |
+   | macOS | `SpaceKnife.app`（0.3.4） | — |
+
+   Windows 上名字不分大小写。`resources`、`locales`、`licenses`、`ui` 这四个名字别的程序和用户自己也常用（桌面上自己的 `resources`、`ui` 文件夹），所以光看名字不算数（`GENERIC_NAMES`、`holds_what_spaceknifes_does`）：必须是文件夹（不是链接），除了系统的文件只装着 SpaceKnife 的那些——`resources` 只有 `app.asar`、`backend`、`licenses`、`elevate.exe`、`ui`（从各版本发布包读出）或新版本 `resources` 里也有的名字，`locales` 只有 `.pak` 文件，`licenses` 只有 `LICENSE.txt`、`THIRD-PARTY-rust.txt`、`THIRD-PARTY-ui.txt` 或新版本 `licenses` 里也有的名字，`ui` 有 `index.html` 和 `_nuxt`（或另一个新版本 `ui` 里也有的名字）；空文件夹也算。否则就是用户的（自己的同名文件夹，或者用户的文件合并进了 SpaceKnife 的文件夹），照样不更新。只看这一层，不往里查。0.3.4 的计划（v1，不变）交给的是新版本的助手，所以从 0.3.4 更新上来时这些检查已经生效。
+5. 日志写「updated」，记下 `previous-<旧版本>` 里每个条目的相对路径和大小，带 `--updated` 启动新版本，并等它说它已经在运行：助手把 `SPACEKNIFE_READY_FILE` 只交给新版本（`launch_env` 从别的启动里去掉它），指向一个助手新建的、名字是 128 位随机数、只有当前用户能打开的临时文件夹（Unix 上 0700）里的文件（助手自己的环境里已经有这个变量时就用那一个，比如测试）；新版本的后端开始监听时写进去（两个外壳都这样做，只写一次，第 2 节），助手看到之后删掉那个文件夹，不再写日志（新版本启动时会清理 `updates`，日志也在其中）。最多等 90 秒（`READY_TIMEOUT`）。
+6. 新版本在那之前以非 0 退出（崩溃），或者到时还没写（这时把它结束掉），就撤回这次更新：日志写 `the new version did not start: …`；`previous-<旧版本>` 里的条目必须和第 5 步记下的完全一样——同样的相对路径、同样的大小（不比较内容；新版本一运行就会清理它们，少了任何一个、大小变了就不撤回，日志写明，新版本留在原处）；再把新版本的顶层条目（只有这些，`data`、系统的文件和新版本运行时在旁边写的东西都留着）整个移回解压的地方（移不动的文件夹逐个移，不复制；有一个移不动就全部放回，什么都不变），旧条目移回程序目录，启动旧版本，日志写 `took the new version out again` 和 `kept the old version`。新版本自己以 0 退出不算失败。
+7. **撤回的说明**：应用退出之后只要旧版本留下或回来了（应用 60 秒没退出、旧文件一直被占用、新文件放不进去、新版本没能启动），助手先像第 3 步那样删掉新版本解压处（还有撤回时放到旁边的 `<new>.not-started`）里的 `.asar` 文件（写在 `kept the old version` 之前），在启动旧版本之前写下 `updates/rollback-<新版本>.json`（`crates/sk-core/src/update/rollback.rs`：`v: 1`、`version`、`why`——`quit`、`read`、`busy`、`place`、`start` 之一、`detail`（日志里的英文原因）、`at`、`log`）。0.3.5 起后端启动时读它，比正在运行的版本新的那些放进 `update.status` 的 `rollback`（用会话的语言说明原因），界面把更新卡片挂出来（补丁版本也挂），卡片顶上一行红字「更新没有完成：…」和「在文件夹中显示日志」；关掉卡片（`update.dismiss`）就删掉这些说明，以后真的运行了那个版本或更新的版本时，清理 `updates` 也会删掉它。这份说明是和以后每个版本的约定：以后的助手写、0.3.5 读，所以只加字段，不认识的 `why` 用笼统的说法。新版本留在原处的情况（旧文件已经不全）不写说明。
+8. 每一步都写进 `updates/update-<版本>.log`，每行带 UTC 时间。助手启动应用时去掉指向这份副本自己 `data` 的 `SPACEKNIFE_HOME`（旧应用给自己的进程设了它），新版本自己找到 `data`、仍认得自己是便携版。助手在系统临时文件夹里为就绪文件建的 `spaceknife-ready-<32 位十六进制>` 用完就删（助手异常结束时也删）；助手被强行结束时留下的，由下一个助手和应用启动时的清理删掉：只删这样命名、不是链接、一小时以上没动过、里面只有 `ready.json`（和 `ready.json.tmp`）的文件夹，逐个文件删，不整个删。
+
+## 9. 发布
+
+**发布时的约定**：更新检查靠文件名找文件。已安装的 0.3.4 先按版本号挑出最新的发布，挑中之后才按 0.3.4 的名字找文件，找不到就什么也不下载，所以**以后的每一个版本**都必须沿用这套名字、便携包里都带着替换助手，否则还没升级的 0.3.4 会被永远卡住。替换助手拒绝更新或留下旧版本时，还必须删掉解压处的 `.asar` 文件（第 8 节第 3 步）：0.3.4 删不掉装着 `.asar` 的 `staging-<版本>`，再也解压不了这个版本。发布文件和校验和文件（与 v0.3.4 的发布逐个相同）：
+
+- `SpaceKnife-<版本>-Setup-x64.exe`、`SpaceKnife-<版本>-x86_64.AppImage`、`spaceknife_<版本>_amd64.deb`、`spaceknife-<版本>.x86_64.rpm`（这四个列在 `SHA256SUMS.txt`）；`SpaceKnife-<版本>-x86_64.AppImage.zsync`（不在任何校验清单里）；`SpaceKnife-<版本>-win-x64-portable.zip`、`SpaceKnife-<版本>-win-arm64-portable.zip`、`SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-linux-arm64-portable.tar.gz`（各自的 `SHA256SUMS-portable-<目标>.txt`；Linux 的两个是 Electron 外壳的）；0.3.5 起还有 Tauri 版的 `SpaceKnife-<版本>-linux-x64-tauri.tar.gz`、`SpaceKnife-<版本>-linux-arm64-tauri.tar.gz`（`SHA256SUMS-tauri-linux-<架构>.txt`，0.3.4 不会拿到）；`SpaceKnife-<版本>-mac-<架构>.dmg`、`SpaceKnife-<版本>-mac-<架构>-portable.zip`（`SHA256SUMS-mac-<架构>.txt`）。deb 和 rpm 名字里预发布段的 `-` 写成 `~`。
+- `tools/release.mjs assemble` 检查并合并：各构建作业的 `SHA256SUMS-installers-*.txt`（Tauri 的 Windows 安装包和 deb、Electron 外壳的 rpm 和 AppImage）合成 `SHA256SUMS.txt`，只写那四个安装包。
+- tag 是 `v<版本>`（语义化版本，可带预发布段）。不要改名：`crates/sk-core/src/update/mod.rs` 的 `asset_templates`、`tools/release.mjs` 的 `expected` 和 `tools/compat034.mjs` 的 `CONTRACT` 都按 0.3.4 写死，测试逐个比对。
+
+**0.3.5 的约定**：0.3.5 发布以后，它的更新代码就冻结了，已安装的 0.3.5 用自己的代码更新到以后的每一个版本，所以以后的每个版本除了守上面 0.3.4 的约定，还要守这些（Release check 的 `compat035` 作业用 v0.3.5 自己的 `release_check` 读每个更新的发布，第 5 步）：
+
+- **文件名与校验清单**：上面那套，加上 Tauri 版 Linux 便携包 `SpaceKnife-<版本>-linux-<架构>-tauri.tar.gz` 和它的 `SHA256SUMS-tauri-linux-<架构>.txt`；按外壳给名字（`SPACEKNIFE_SHELL`），0.3.5 的 `asset_templates` 就是这样找文件的。
+- **便携包**：顶层正好一个文件夹，里面的程序名不变：Windows 上 `SpaceKnife.exe`，Linux 上 `spaceknife`（两种外壳都是），macOS 上 `SpaceKnife.app`（可执行文件 `Contents/MacOS/SpaceKnife`）。0.3.5 的 Tauri 版把计划交给新版本的这个主程序（`<程序> --apply-update <计划>`），Electron 外壳交给新版本里的 `spaceknife-cli`，没有时 `resources/backend/spaceknife-backend`（给 0.3.4 留着的那个）。
+- **主程序在加载任何东西之前处理 `--apply-update <计划>`**（第一个参数：先在 stdout 回一行 `{"ok": true}` 或 `{"ok": false, "error": …}`，再自己换文件，第 8 节），**并回答 `--startup-check`**（stdout 第一行是一行 JSON，`{"ok": true, …}` 并以 0 退出才算能启动；不开窗口，不读写设置和文件；后面可能跟着 `--no-sandbox`）。回答要如实：AppImage 的「无缝更新」是 0.3.5 自己在问（20 秒内回答），只问这一句；新版本启动时还要别的（如运行时才加载的库），就在自己的回答里查。
+- **AppImage**：0.3.5 把新文件放在 `$APPIMAGE.new` 问 `--startup-check`，旧文件留成 `$APPIMAGE.previous`，再以 `--updated`（当前进程带着 `--no-sandbox` 时在它后面）启动新的 `$APPIMAGE`（第 8 节）。
+- **计划 v1**（`v`、`pid`、`app`、`new`、`old`、`exe`、`log`、`keep: ["data"]`，第 8 节）和数据目录里的 **`update.json` v1**（`version: 1`；`feed`、`checked_at`、`failed_at`、`etag`、`releases`、`kept`、`dismissed`、`muted`，`crates/sk-core/src/update/mod.rs` 的 `UpdateState`）照旧读。
+- **NSIS**：0.3.5 以 0.3.4 那套参数 `--updated /S --force-run` 加 `/currentuser` 或 `/allusers`（或都不加）运行新安装包，不带参数时是向导（第 5 节、`install.rs` 的 `nsis_update_args`）；新安装包认这套参数，按 0.3.5 写的 **`installed-files.txt`** 删 0.3.5 的文件：UTF-16 LE（带 BOM）、CRLF，每行一个相对 `$INSTDIR` 的路径，先是文件，再是它们所在的文件夹（以 `\` 结尾）、最深的在前（`spaceknife.nsh` 的 `SkWriteManifest`；第 5 节第 8 步和「删除只按名字」）。同一个卸载项 GUID、目录和快捷方式。
+- **deb / rpm / dmg**：0.3.5 按名字找到文件交给系统（deb 先复制到下载文件夹）；包名 `spaceknife`、bundle id `io.github.duskxi.spaceknife`（可执行文件 `SpaceKnife`）不变，新包才能直接装在旧包上面。
+
+**累积更新**：还没发布的更改随做随记在仓库根目录的 [UNRELEASED.md](../UNRELEASED.md)（中英双语，「新功能」「修复」两节，和发布说明同一个结构）。两份 README 的顶部导航里固定链接到它。发布时，它就是发布说明的正文，再补上下载表和已知限制；发布之后，在 dev 上把它清空：只留标题、语言切换、开头那句说明（版本号改成下一版），以及每节下面的「（暂无）」/「(nothing yet)」。
+
+**发布**（从 0.3.4 起由 CI 发布，文件不经过任何人的电脑）：
+
+1. dev 上改版本号（根目录 `Cargo.toml` 的工作区版本、`apps/desktop/package.json`、`apps/electron-shell/package.json`、`apps/desktop/src-tauri/tauri.conf.json`、`app/shim.ts` 的网页版版本、问题模板的占位符），把 `UNRELEASED.md` 压成 `release-notes/<版本>.md`：先英文后中文，下载表的大小写成 `{{size:文件名}}`，构建运行写成 `{{build_runs}}`，也可以用 `{{version}}`；工作流填进去，写错的占位符或不属于这个发布的文件名会让发布失败（`tools/tests/release.test.mjs` 也按 `expected` 核对仓库里的发布说明，并核对问题模板的占位符和 `app/shim.ts` 的网页版版本号）。
+2. PR dev → main，等「CI passed」再合并。合并到 main 会触发网站部署（`pages.yml`，`site/**` 变了时）：网站从这时起就写新版本的用法，下载按钮却仍指向最新的已发布版本，所以合并后尽快打 tag、发布草稿（发布会再触发一次网站构建）。
+3. 在 main 的合并提交上本地签名打 tag（`git tag -s v<版本> <提交> -m "SpaceKnife <版本>"`）并推送。CI 不持有签名的私钥。
+4. tag 推上去就触发 **Release** 工作流（`.github/workflows/release.yml`）：检查 tag 是带签名的附注 tag 且 GitHub 认可签名、文件和 main 完全相同、应用的版本号就是 tag 的版本、`release-notes/<版本>.md` 存在、同名的发布还没有；用 `Portable build`（带 deb）、`macOS build`、`Windows installer build` 和 `Electron shell build` 从 tag 构建全部文件，四者都给每个文件生成构建来源证明（`actions/attest-build-provenance`，可以用 `gh attestation verify <文件> --repo DuskXi/SpaceKnife` 核对），并各自测从真实的 0.3.4 文件更新上来（第 11 节）；`node tools/release.mjs assemble` 核对每份校验和文件、确认正好是这个发布该有的文件、合并 `SHA256SUMS.txt`、填好发布说明（汇总结果也作为运行的产物 `release-<版本>` 留 14 天）；`node tools/compat034.mjs --dir release` 用 0.3.4 自己的更新代码读汇总好的文件；建成预发布的草稿（0.x 和带预发布段的版本都是预发布）。
+5. 在 GitHub 上看一眼草稿，点发布。**Release check** 工作流（`release-check.yml`）在发布时用 `cargo run -p sk-core --example release_check -- <版本>` 按已安装的 SpaceKnife 的方式读这个发布（每种安装方式都按确切的名字找到文件，`--download` 时下载并核对校验和），再用 `tools/compat034.mjs --github` 按已安装的 0.3.4 的方式读一遍；v0.3.5 有了 tag 以后，`compat035` 作业还把 v0.3.5 检出到单独的 worktree，用它自己的 `cargo run -p sk-core --example release_check -- <版本> --download` 按已安装的 0.3.5 的方式读一遍（还没有这个 tag、或发布的就是 0.3.5 及更早的版本时，只留一条 notice，不算失败）。
+
+手动运行 Release（Actions › Release › Run workflow）给已经在 GitHub 上的 tag 发布：可以填同一份文件树的四个构建运行号，直接用它们的文件，不再构建（工作流核对四个运行成功、构建的提交和 tag 的文件完全相同；这时没有构建来源证明）。`dry_run` 只核对和汇总，不建发布；`publish` 不留草稿，直接发布并立刻读回检查（由 Release 自己的 read-back 作业：`release_check` 和 `compat034`，没有 `compat035`；用工作流的令牌建的发布不会触发 Release check，要按 0.3.5 的方式读，手动运行一次 Release check）。两者在本机也能跑：`node tools/release.mjs assemble` 接 `gh run download` 下载的产物；`cargo run -p sk-core --example release_check -- <版本> [--sums DIR] [--download]` 读真实的发布列表。
+
+## 10. 数据位置
+
+`SPACEKNIFE_HOME` 会把这些全部放进同一个目录；后端的位置和 0.3.x 相同（`crates/sk-core/src/paths.rs`）：
 
 | | Windows | Linux | macOS |
 |---|---|---|---|
 | 快照、标签、日志（数据） | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | 设置、文件类别、洞察规则 | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | 缓存 | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
-| Chromium 配置 | `%APPDATA%\SpaceKnife\electron` | `~/.config/SpaceKnife/electron` | `~/Library/Application Support/SpaceKnife/electron` |
+| 窗口外壳（主题、WebView 配置） | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife` | 主题：`~/Library/Application Support/io.github.duskxi.spaceknife`；WebView：`~/Library/WebKit/io.github.duskxi.spaceknife` |
 
-## 5. 测试
+最后一行是 Tauri 外壳的；设了 `SPACEKNIFE_HOME` 或是便携版时，Tauri 外壳的文件在 `<SPACEKNIFE_HOME 或便携版的 data>/desktop`。macOS 的 WebView 数据不跟着走：WKWebView 不接受指定的配置目录（`window.rs` 给的 `data_directory` 在 macOS 上不起作用），页面存储等 WebKit 数据总在系统按 bundle id 给的 `~/Library/WebKit/io.github.duskxi.spaceknife`，设了 `SPACEKNIFE_HOME` 和便携版也一样。Electron 外壳（rpm、AppImage、沿用 0.3.4 名字的 Linux 便携版）照旧用 0.3.x 的 Electron 配置目录（`~/.config/SpaceKnife/electron`，设了 `SPACEKNIFE_HOME` 或是便携版时是 `<那个目录>/electron`）；Tauri 外壳只在第一次启动时从那里读一次主题。
 
-```bash
-uv run python packaging/smoke_app.py dist/electron/win-unpacked/SpaceKnife.exe
-```
-
-[packaging/smoke_app.py](../packaging/smoke_app.py) 用临时目录作为 `SPACEKNIFE_HOME`、最小化启动应用（不抢焦点），打开 DevTools 端口：等打包的后端就绪、启动页列出卷，再像用户一样关窗口，确认应用和后端都退出。参数也可以是 `linux-unpacked/spaceknife` 或 AppImage。
+## 11. 测试
 
 ```bash
-uv run python packaging/smoke_headless.py dist/electron/win-unpacked/SpaceKnife.com
+node packaging/smoke-app.mjs <打包好的应用>
 ```
 
-[packaging/smoke_headless.py](../packaging/smoke_headless.py) 测无头模式：`--headless --listen 127.0.0.1:0` 启动，读打印出的地址，检查页面、`/sk/info` 只认 token、WebSocket 拒绝别的 Origin、用页面自己的 Origin 能和后端握手，再像终端一样停止（SIGINT；Windows 上对 `SpaceKnife.com` 发 Ctrl+Break）。Linux 上不开 xvfb，验证没有显示器也能启动。`Portable build` 工作流在便携版冒烟测试之后跑它。
+[packaging/smoke-app.mjs](../packaging/smoke-app.mjs) 最小化启动打包好的应用（`--portable`：便携版，用它旁边的 `data`；否则用临时目录作 `SPACEKNIFE_HOME`），从就绪文件读后端的地址和 token，`session.hello`、`volume.list` 列出卷、`update.status` 的安装方式（`--kind`），再像系统那样关掉应用，确认后端的地址随之关闭；便携版还要在 `data` 里看到应用写的东西。两个外壳都能用。窗口本身不检查：Linux 和 macOS 上的系统 WebView 没有 DevTools 端口。Linux 上用 `xvfb-run -a`。
 
-[packaging/update_e2e.py](../packaging/update_e2e.py) 是「无缝更新」和卸载清理的端到端测试，只在 GitHub Actions 上跑（`Portable build` 工作流；它会在当前用户的目录里安装、更新、卸载，所以在别处拒绝运行）。它在 127.0.0.1 上提供一份发布列表（`SPACEKNIFE_UPDATE_FEED`），把这次构建当作下一个修订版，通过 DevTools 端口等徽章变成「可以更新」，再像用户一样点徽章和「无缝更新」（`.uc-choice.seamless`）：
+```bash
+node packaging/smoke-headless.mjs <spaceknife-cli> [--ui <界面文件夹>]
+```
 
-- 便携版（Windows、Linux）：换文件的是新版本后端的 `--apply-update`（没有脚本）。测试等 `updates/update-<新版本>.log` 的最后一行说出结局（赶在新后端清掉 `updates` 之前读），它必须以「updated」结尾；然后等应用带 `--updated` 回来，检查程序文件换成了新的（新包里多一个标记文件）、`data` 原样保留，新后端清掉了 `previous-<旧版本>`。
-- Windows 安装版：先装最新发布的安装包，用应用的那组参数（`--updated /S --force-run /currentuser`）升级到这次构建；再从应用里点「无缝更新」（静默运行下一版的安装程序）；然后检查静默卸载（保留快照、设置和日志，删掉界面配置、缓存、下载的更新和 electron-updater 的缓存）、勾选「同时删除快照、设置和日志」的卸载（通过 Win32 消息操作卸载程序的页面，确认默认不勾、页面写出数据位置），以及 `--delete-app-data`。
+[packaging/smoke-headless.mjs](../packaging/smoke-headless.mjs) 测无头模式：`spaceknife-cli headless --listen 127.0.0.1:0` 启动，读打印出的地址，检查页面、`/sk/info` 只认 token、WebSocket 拒绝别的 Origin（403）、用页面自己的 Origin 能和后端握手，再停止，确认地址已关闭。
 
-已验证（2026-10-18）：Windows 11 上安装包本身（静默「仅当前用户」安装 → 安装后的应用与后端冒烟 → 静默卸载；卸载后注册表卸载项、`HKCU\Software` 下的键、开始菜单与桌面快捷方式、安装目录都和安装前一致，用户数据不变）和 `win-unpacked`；WSL（Ubuntu 22.04，WSLg）上 `linux-unpacked` 与 AppImage；deb / rpm 的元数据、依赖、desktop 文件与图标。还没做：在干净的 Windows 10、RHEL 9、Ubuntu 22.04 上安装测试（见 TODO）；deb / rpm 只检查了内容，没有实际安装。
+```bash
+node packaging/update-e2e.mjs target/portable/SpaceKnife-<v>-<目标>-portable.zip           # Windows、macOS
+xvfb-run -a node packaging/update-e2e.mjs target/portable/SpaceKnife-<v>-linux-<架构>-tauri.tar.gz
+xvfb-run -a node packaging/update-e2e.mjs target/electron-shell/portable/SpaceKnife-<v>-linux-<架构>-portable.tar.gz
+```
 
-## 6. 已知限制
+[packaging/update-e2e.mjs](../packaging/update-e2e.mjs) 是便携版「无缝更新」的端到端测试（`Portable build`、`macOS build` 和 `Electron shell build` 里跑）：在 127.0.0.1 上提供一份发布列表，把这次构建改名、加一个标记文件当作下一个修订版，附上校验清单（Linux 上还有另一个外壳的便携包，这份副本不能拿它）；经应用后端的 WebSocket 确认找到了这个版本和它的文件、下载并校验通过，然后做「无缝更新」按钮做的事（解包、写计划、启动新版本的 `--apply-update`）：先在程序旁边放一个用户的文件和另一个应用（`Other.app` / `OtherTool`），助手必须回 `{"ok": false}`、点出这两个名字、日志写明，程序目录一点不动、应用照常运行，解压处不剩 `.asar` 文件（Electron 外壳的写明拿掉了它们），别的都在；像外壳一样删掉 `staging-<版本>`、重新解压，拿掉那两样、放一个系统的文件（`desktop.ini` / `.DS_Store` / `.directory`）再来，关掉应用；新版本换好文件后带 `--updated` 重新启动：程序文件换成了新的、`data` 和系统的文件原样保留、旧文件从 updates 文件夹清掉。按钮本身和解包、写计划的代码由 `install.rs` 的单元测试覆盖。
+
+[packaging/nsis-e2e.mjs](../packaging/nsis-e2e.mjs)（只在 GitHub Actions 上跑，`Windows installer build`）：先像 0.3.4 那样（`windowsHide`、不带参数）启动向导，它得有一个可见的顶层窗口，随即关掉；再静默安装 Windows 安装包（`--previous` 时先装旧版再按 0.3.x 的参数升级），以 `--kind nsis` 跑一遍 smoke-app，再按 `install.rs` 的参数原地更新一轮（清单里列着的旧界面文件删掉、用户放进目录和 `ui` 里的文件留着、没有暂存目录、应用带 `--updated` 并拿到安装程序的环境重新启动），最后静默卸载，确认程序、清单和卸载项已删除、数据目录还在；失败时打印安装日志。
+
+[packaging/nsis-logic.mjs](../packaging/nsis-logic.mjs) 不安装任何东西：用 Tauri 打包器的 NSIS 编译并运行 `packaging/nsis-logic/logic-test.nsi`，逐个检查 `spaceknife.nsh` 的逻辑：0.3.4 和 Tauri 的参数、提权副本的参数、目录保护、目录名补 `\SpaceKnife`、`/D=` 与默认目录的选择、暂存（整目录改名、整个改名后缺文件不退回、逐个文件改名、暂存不全时什么都不改、文件被占用、上级目录建不了暂存目录、残留的暂存目录只按名字清空、不是暂存目录的绝不删）、文件清单的写和按清单删（清单外的、`..`、盘符、通配符一律不删）、0.3.4 的文件清单、什么时候不用 0.3.4 的卸载程序、WebView2 的最低版本（读版本和升级换成测试替身）、沙箱里的 `.lnk` 改目标和 AUMID、按路径关闭正在运行的 SpaceKnife（`SkCloseIn`：测试程序的副本扮作 SpaceKnife 的程序和别的程序，只关 SpaceKnife 的，结束不了的让安装停下）、原地更新前核对要换的文件没被占着（`SkCheckReplaceable`）、卸载程序删 SpaceKnife 自己的文件夹（`un.SkRemoveData`：测试程序自己的卸载程序，沙箱里的 Local 和 Roaming，按 0.3.4 的规则处理更新、「你的数据」和 `--delete-app-data`；外壳文件夹的 WebView2 进程先等、再结束，别的程序的不碰：一组命令行核对按命令行认进程（`un.SkUserDataDir`、`un.SkWebView2Ours`，只是字符串），一张替身进程清单（`SK_WEBVIEW2_SCAN` 指向测试自己的 `un.TestWebView2In`，不运行也不看系统里的任何进程）在卸载期间按时写配置，演示还在启动、自己退出、一直不走、结束不了的情况，还有两个用例用改名的 cmd.exe 当真进程、占着外壳文件夹里的 `lockfile`），键没了的 0.3.4 按文件认出（`SkFindByFiles`，沙箱里的文件夹；`flags` 用例的 `SkDetectScope` / `SkFindPrevious` 也只在沙箱里找）、卸载程序删哪些键和它的范围（`un.SkKeysOurs`、`un.SkScopeFor`，只用给它的值，不读注册表）、新程序的 `--startup-check`（测试程序的副本照真程序的样子回答、不回答、超时被结束）、失败时的退出码 3 和外层是否重新启动旧版本、换目录后的固定（`SkMigrateShortcutsIn`，沙箱里的文件夹，`SkMigratePins` 从不调用）、以 SW_HIDE 启动（`SkShowIfStartedHidden`）、日志逐行打开（另一个实例在两行之间写得进去），以及启动应用时的环境。运行前先从源码核对这些用例调用的函数自己不提用户的文件夹、注册表和固定，WebView2 的用例经测试的替身清单而不是系统的进程（只有两个 cmd.exe 的用例看系统的进程；替身清单和认进程的函数自己不打开、不结束任何进程），不对就不跑。只在 Windows 上跑，只写临时文件夹，不写注册表；在自己的桌面上要经 [packaging/hidden-desktop.ps1](../packaging/hidden-desktop.ps1) 运行（启动的用例会开 cmd.exe）。`tools/tests/nsis_installer.test.mjs` 从源码核对它够不着的模板部分（各段的顺序、没有 `RMDir /r`）。
+
+[packaging/installer-experiments.ps1](../packaging/installer-experiments.ps1)（`Installer experiments` 工作流：`exp/**` 分支或手动，Windows Server 2022 和 2025）只在一次性的机器上运行：装好真实的 0.3.4 安装程序后，像 0.3.4 的「无缝更新」那样启动候选安装程序，覆盖当前用户、所有用户、0.3.4 在运行、文件被别的程序占着、没有 WebView2、降级和重装（0.3.5 开着时重装）、两种范围并存、fork 更新 fork（没有 `-NextVersion` 时候选版本更新自己：上一版清单里的旧界面文件删掉、用户放的不在清单上的文件留着）、自定义目录、0.3.4 装在数据目录、键没了的 0.3.4（S13）、控制台启动器、Defender 扫描等场景，每条断言写进一份 JSON，失败的断言写明看到了什么。更新像 0.3.4 那样启动（CreateProcess，当前目录是安装目录）；静默更新失败时安装程序弹的消息框由脚本读下文字再关掉，失败的场景断言弹了框、成功的断言没弹。一个场景出错时记为一条失败的断言（错误信息和行号），重置 SpaceKnife 后接着跑下一个，JSON 每个场景之后和最后都写。GitHub 的运行器上脚本本身就是提权运行的（UAC 开着，但它启动的每个进程都已提权），S2 和 S7 在那里照跑（更新一开始就是提权的），只有要未提权管理员的断言和场景记为 skip，要在脚本里说明的 Hyper-V 虚拟机上跑。
+
+```bash
+node packaging/update-from-034.mjs portable|nsis|appimage|deb|rpm|dmg <0.3.4 的文件> <候选文件>
+```
+
+[packaging/update-from-034.mjs](../packaging/update-from-034.mjs) 是从真实的 0.3.4 更新上来的端到端测试（工作流先 `gh release download v0.3.4`，用 0.3.4 发布自己的校验和与 `gh attestation verify` 核对）：便携版、安装包和 AppImage 三条腿在 127.0.0.1 上提供 v0.3.4 和候选版本两个预发布，打开 0.3.4（带 DevTools 端口，最小化），经 0.3.4 自己的后端改一个设置，等它自动检查、下载并校验，像用户一样点徽章和「无缝更新」，之后检查：0.3.4 退出、新版本以新进程起来（它的就绪文件），版本和安装方式对，0.3.4 里改的设置和 data / config / cache 里的标记文件逐字节都在，updates 里没有残留。deb、rpm 和 dmg 不运行 0.3.4（它只把文件交给系统），测试代做系统那一步，查的也少：deb / rpm 装上 0.3.4 的包、放好标记文件，再把新包装在上面，查标记文件还在、新版本起来后版本和安装方式对（设置没经 0.3.4 改过，不查）；dmg 把 0.3.4 和候选版本的应用先后从各自的磁盘映像拷进一个临时的「应用程序」文件夹，只查下面列的 bundle 信息和签名，再启动新版本看版本和安装方式，不查设置、标记文件和 updates。便携版先在 0.3.4 旁边放一个用户的文件和另一个应用再点「无缝更新」：新版本的助手拒绝这个文件夹（日志写明），`data` 以外什么都没动、0.3.4 照常运行，`staging-<版本>` 里不剩 `.asar` 文件（0.3.4 才删得掉它再试）；拿掉它们、放一个系统的文件再点一次（0.3.4 说解压或启动更新失败就立刻算失败），然后查交换日志以「updated」结束、文件夹里除了 `data` 和那个系统的文件正好是候选版本的文件、逐字节相同、程序的架构（`--expect-machine`）；安装包查只有一个卸载项、目录和快捷方式不变、卸载后数据还在；deb / rpm 查只有一个包、`/usr/bin/spaceknife`、一个 desktop 文件、alternatives，像用户那样先退出应用再卸载、卸载干净（rpm 还查每次事务之后和应用运行时 `/opt/SpaceKnife` 里的一切都是包自己的，文件夹也算；卸载后留下什么就列出什么）；dmg 查 bundle id、版本、可执行文件名和签名。便携版之外的几种只在 GitHub Actions 上跑。失败或超时时先打印能看的东西，再结束它启动的进程和还在它的文件夹里运行的进程；每条腿都有总期限（`SK_E2E_DEADLINE_S`，默认 1200 秒）。本机在 Windows 上跑便携版那一种时，用 [packaging/hidden-desktop.ps1](../packaging/hidden-desktop.ps1) 把它放到一个不显示的桌面上。
+
+```bash
+node packaging/update-next.mjs portable|nsis|appimage|deb|rpm|dmg <旧版本的文件> <新版本的文件>
+```
+
+[packaging/update-next.mjs](../packaging/update-next.mjs) 测已安装的这一版能不能用它自己的代码把每种安装方式更新到下一版（`Next version` 工作流，`.github/workflows/next-version.yml`）：一个版本发布以后它的更新代码就冻结了，以后的每个版本都要靠它找文件、校验、下载、交给系统或新版本的替换助手（第 9 节「0.3.5 的约定」）。两边都是真实的构建，版本号从文件名读出：127.0.0.1 上的发布列表提供旧版本和新版本两个预发布，各带一个发布该有的全部文件和校验清单（`tools/release.mjs` 的 `expected`），只有这种安装方式的新文件是真的，其余都是几个字节的替身，拿错名字的副本拿不到更新。旧版本最小化启动，经它自己的后端改一个设置，等它自己检查（启动约 1 分钟后）、挑中这种安装方式的文件、下载并校验通过。然后，便携版、安装包和 AppImage 在旧版本的窗口有 DevTools 端口的地方（Electron 外壳；Windows 上的 WebView2 从 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 拿端口，但运行器上一切都以管理员身份运行，较新的 WebView2 对提权的程序不理这个变量和当前用户的设置，所以测试也在 HKLM 的 WebView2 策略 `AdditionalBrowserArguments` 里给 `SpaceKnife.exe` 写上这个端口，结束时删掉；旧版本的窗口还是连不上时退回测试代点，日志里单独写一行 `!!`）像用户一样点徽章和「无缝更新」（有扫描在进行时点两次），之后全是旧版本外壳自己的代码；Linux 和 macOS 上 Tauri 版的系统网页视图没有 DevTools 端口，由测试照按钮的做法解包、写计划、启动新版本的 `--apply-update`（测试代点）；deb、rpm、dmg 由旧版本找到、下载、校验，系统那一步由测试做（`apt-get install`、`dnf install`、`hdiutil` 加 `ditto`）。便携版先在程序旁边放一个用户的文件和另一个应用，替换助手拒绝、什么都不动、旧版本照常运行，拿走以后再成功；安装包先在旧版本的文件清单上加一个新版本没有的文件，在目录和 `ui` 里放用户的文件。之后检查：新版本以 `--updated` 起来（便携版、安装包、AppImage），`update.status` 是新版本、安装方式不变，旧版本里改的设置和 data / config / cache 里的标记文件逐字节都在，更新文件夹里 `previous-<旧>`、`staging-<新>`、`update-<新>.*` 和下载的文件都被新版本清掉；便携版的目录正好是新版本的文件（加数据文件夹和系统放的文件），安装包只有一个卸载项、同一目录、清单是新版本的、旧版本独有的文件删了、用户的文件还在、快捷方式对，AppImage 是新文件、没有 `.new`、`.previous` 是旧文件，包只有一个、旧包的文件一个不剩，dmg 的应用就是磁盘映像里的、签名完整。最后是第二跳：发布列表再加下一版（新版本的文件改名，配好校验清单），新版本自己的检查找到它，文件名和校验值都对（下载，不安装）。两个外壳都不把 `SPACEKNIFE_READY_FILE` 交给它启动的程序，所以更新启动的新版本由命令行（`--updated`）认出，等替换助手结束、新版本清完更新文件夹，再经它的窗口连上它的后端（WebView2 继承了端口）；Electron 外壳启动新版本时不带开关，没有 DevTools 端口，就像用户那样关掉它，从同一位置带测试的就绪文件再启动一次，日志里写明是哪一种。工作流还跑 `nsis-e2e.mjs <新> --previous <旧>` 和 `installer-experiments.ps1` 的 S8（fork 更新到更新的 fork）。
+
+每次发布前手动运行一次（Actions › Next version › Run workflow）：旧的四个运行号填要发布的版本的构建（带 deb 的 `Portable build`、`macOS build`、产出 `SpaceKnife-installers-win-x64` 的运行、`Electron shell build`），新的四个填同一棵树只改大版本号的构建。测不到的：真实的 UAC 提示（运行器是关了 UAC 的管理员）和 `/allusers` 的提权；没有 WebView2 的 Windows 10；系统代理（Windows 的 Internet 设置、macOS 的网络设置，Intel Mac 也是：发布列表在回环地址上，从不走代理）；Ubuntu 24.04 的 App Center 打开下载文件夹里的 deb（测试直接装更新文件夹里的文件），macOS 的 Gatekeeper、公证和 Finder 的拖放；Linux 和 macOS 上 Tauri 版的按钮本身（`install.rs` 的单元测试）；Electron 外壳启动的那个新版本进程的后端（连上的是关掉后重新启动的那一个）。
+
+[tools/compat034.mjs](../tools/compat034.mjs)（Release 和 Release check 里跑）不开窗口、不安装，只用 0.3.4 的代码读发布：每种安装方式选中的文件名、读到的校验值、0.3.4 窗口的 `installRefusal` 是否接受、便携包的布局。
+
+其余测试：`cargo test --workspace`、`apps/desktop` 和 `apps/electron-shell` 里的 `pnpm test`、`node --test "tools/tests/*.test.mjs"`。
+
+## 12. 已知限制
 
 - 未签名（Windows 代码签名证书待定）；macOS 只有 ad-hoc 签名、没有公证（等 Apple 开发者账号），也还没进 Homebrew（官方 cask 要求通过 Gatekeeper）。
-- 项目主页：`https://github.com/DuskXi/SpaceKnife`。
-- 没有 strip：PyInstaller 的 strip 会破坏 auditwheel 改过的库（numpy 自带的 openblas 报「not page-aligned」，冒烟测试会发现）。只 strip 没被改过的库（libpython、zstandard、原生扩展）大约能省 40 MB 解压后体积。
-- 「仅当前用户」安装在用户可写的目录里；需要管理员权限的 MFT 快扫会从这里启动提权助手。介意的话选「所有用户」安装（Program Files）。
-- 不会自动安装（有意如此）：有新版本时提示并在后台下载（见第 4 节「更新检查」），安装总要用户在更新卡片里点「无缝更新」或经典方式，以后也不会加自动安装的选项。
+- 「仅当前用户」安装在用户可写的目录里；需要管理员权限的 MFT 快扫会从这里启动提权助手。想让它待在只有管理员能改的地方，就为所有用户安装（Program Files）。
+- 不会自动安装（有意如此）：有新版本时提示并在后台下载，安装总要用户在更新卡片里点「无缝更新」或经典方式。
+- 安装包的运行时行为（提权与等待、按路径关进程、0.3.4 卸载程序的实际退出码、快捷方式迁移、WebView2 的升级）只在 CI 的一次性运行器和安装实验里跑过；本机只跑不安装任何东西的逻辑测试。

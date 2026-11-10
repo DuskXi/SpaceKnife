@@ -3,15 +3,17 @@
 **定稿：D 斜切 Chamfer**（用户 2026-10-18 选定）。母版是 [`spaceknife.svg`](spaceknife.svg)（与 `candidates/chamfer.svg` 同一个图形），打包用的文件由它生成：
 
 ```bash
-uv run python tools/render_app_icons.py --app
+cd apps/desktop
+pnpm tauri icon ../../design/app-icon/spaceknife.svg
 ```
+
+Tauri 的图标工具把母版渲染成 `apps/desktop/src-tauri/icons/` 下的文件（只保留 `tauri.conf.json` 用到的几个，其余可删）：
 
 | 生成的文件 | 用途 |
 |---|---|
-| `apps/electron/build/icon.ico` | Windows：exe、NSIS 安装 / 卸载程序（16、20、24、32、40、48、64、96、128、256 px，每个尺寸都从母版渲染，BMP 条目带透明通道） |
-| `apps/electron/build/icons/<n>x<n>.png` | Linux hicolor 图标（16–512 px），deb / rpm / AppImage |
-| `apps/electron/build/icon.png` | 1024 px |
-| `apps/electron/resources/icon.png` | Linux 的窗口图标（256 px，打进应用） |
+| `icon.ico` | Windows：exe、NSIS 安装 / 卸载程序 |
+| `32x32.png`、`128x128.png`、`128x128@2x.png`、`icon.png` | Linux：deb / rpm / AppImage 的图标、窗口图标 |
+| `icon.icns` | macOS：app 与 dmg |
 
 标题栏里的 16 px 标识（`design/icons/icons.json` 的 `logo`，生成 `design/build/icons/logo.svg`）是同一个图形按 1/64 缩小、把裁切路径展开成普通路径的版本，只省掉了 0.25 px 的描边。
 
@@ -73,10 +75,6 @@ uv run python tools/render_app_icons.py --app
 | C 刀片 | 一般（彩条） | 刀 + 占用条 | 标识需要重画 | 靠内部色块 |
 | D 斜切 | 好（靠轮廓） | 树图 + 切角 | 标识需要重画 | 靠强调色块和青柠角 |
 
-## 重新渲染
+## 候选图的渲染
 
-```bash
-uv run python tools/render_app_icons.py
-```
-
-不带参数时读 `candidates/*.svg`，写出各尺寸 PNG 和 `overview.png`。依赖 `resvg-py`（resvg 的 Python 绑定，渲染 SVG；各平台都有预编译 wheel，不需要系统的 Cairo）和 `pillow`（拼对比图），都只加在 uv 的 `dev` 组里。对比图的标签字体按 微软雅黑 → Noto Sans CJK → 苹方 的顺序找，都没有时退回 Pillow 自带字体（中文会显示不出来，图标本身不受影响）。
+上面的候选 PNG 和 `overview.png` 是当初用 Python 工具 `tools/render_app_icons.py`（resvg + Pillow）渲染的；图标已经定稿，这个工具随 Python 一起删掉了，候选图留作记录，不再重新生成。

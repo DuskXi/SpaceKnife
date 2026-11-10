@@ -1,27 +1,171 @@
 //! SpaceKnife.com, the console entry of the Windows app (as devenv.com is to devenv.exe).
 //!
-//! SpaceKnife.exe is a windowed program: a terminal doesn't wait for it and keeps the keyboard, so
-//! headless mode (`--headless`, `--listen`) couldn't ask its Y/N question there. This console program
-//! sits next to it, starts it with the same arguments and waits. The command processor and PowerShell
-//! try `.com` before `.exe`, so `SpaceKnife --headless` in a terminal lands here. It ends with the
-//! app's exit code.
+//! The command processor and PowerShell try `.com` before `.exe`, so `SpaceKnife …` typed in a
+//! terminal, in the app's folder or with it on the PATH, lands here, as it did with 0.3.4.
 //!
-//! In a terminal (standard input, output and error all the console) the app gets no standard
-//! handles: Electron then attaches it to this console, so its output appears here and Ctrl+C reaches
-//! it, and SPACEKNIFE_CONSOLE=1 tells it that the console's keyboard is free for its question
-//! (apps/electron/src/main/console.ts). This program ignores Ctrl+C itself.
-//!
-//! Redirected (`> headless.log`, a pipe): the app gets this program's handles as they are and is not
-//! attached to the console, so Ctrl+C here ends it (its backend then stops by itself).
+//! - Headless mode, as 0.3.4's app took it (`--headless`, `--listen <address>`, `--yes`,
+//!   `--tls-cert`, `--tls-key`, `--help`, anywhere among the arguments): it runs
+//!   `spaceknife-cli.exe` next to it with the arguments as typed (their quoting unchanged) and the
+//!   same standard handles, and waits. The terminal waits too, the Y/N question is asked there,
+//!   Ctrl+C reaches spaceknife-cli (this program ignores it) and the exit code is spaceknife-cli's.
+//!   spaceknife-cli reads 0.3.4's form wherever the options are (crates/sk-server/src/cli/
+//!   headless.rs); `--help` / `-h` alone, which 0.3.4 answered with headless mode's options, goes
+//!   on as `--headless --help`. spaceknife-cli's first argument is the name this program was
+//!   started by, so its texts say `SpaceKnife --help`.
+//! - Anything else starts the windowed app (`SpaceKnife.exe`, this program's name with `.exe`)
+//!   with the same arguments and waits for it, as 0.3.4's launcher did: the terminal is back when
+//!   the window closes, and the exit code is the app's. In a terminal (standard input, output and
+//!   error all the console) the app gets no standard handles and SPACEKNIFE_CONSOLE=1: it then
+//!   writes to this console and ends at its Ctrl+C (the Electron shell attaches itself, as 0.3.4's
+//!   app did; the Tauri app does when SPACEKNIFE_CONSOLE says so, src-tauri/src/console.rs), and
+//!   this program ignores Ctrl+C. Redirected (`> log.txt`, a pipe): the app gets this program's
+//!   handles as they are, and Ctrl+C here ends it (exit code 130). See [`start`].
 
 #![cfg_attr(not(windows), allow(dead_code))]
+
+/// The options of 0.3.4's app that start (or belong to) headless mode, `--name` and `--name=…`
+/// (spaceknife-cli's `APP_OPTIONS`).
+const HEADLESS_OPTIONS: [&str; 5] = ["--headless", "--listen", "--yes", "--tls-cert", "--tls-key"];
+const HELP_OPTIONS: [&str; 2] = ["--help", "-h"];
+
+/// Where a command line goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Route {
+    /// spaceknife-cli.exe; `help_only`: only `--help` / `-h` of headless mode's options, so
+    /// `--headless` goes in front
+    Cli { help_only: bool },
+    /// the windowed app
+    App,
+}
+
+/// `--name=value` → `--name`; anything else unchanged.
+fn option_name(arg: &str) -> &str {
+    match arg.strip_prefix("--").and_then(|rest| rest.split_once('=')) {
+        Some((name, _)) => &arg[..2 + name.len()],
+        None => arg,
+    }
+}
+
+/// Where the arguments (after the program) go: what 0.3.4's app did with them.
+pub fn route<S: AsRef<str>>(args: &[S]) -> Route {
+    let names: Vec<&str> = args.iter().map(|a| option_name(a.as_ref())).collect();
+    if names.iter().any(|n| HEADLESS_OPTIONS.contains(n)) {
+        Route::Cli { help_only: false }
+    } else if names.iter().any(|n| HELP_OPTIONS.contains(n)) {
+        Route::Cli { help_only: true }
+    } else {
+        Route::App
+    }
+}
+
+/// A command line split as Windows splits its program from its arguments (argv[0]: up to the
+/// closing quote when it starts with one, else up to the first blank): (the program as typed, the
+/// arguments as typed).
+pub fn split_command_line(line: &[u16]) -> (&[u16], &[u16]) {
+    const QUOTE: u16 = b'"' as u16;
+    let blank = |c: u16| c == b' ' as u16 || c == b'\t' as u16;
+    let mut i = 0;
+    if line.first() == Some(&QUOTE) {
+        i = 1;
+        while i < line.len() && line[i] != QUOTE {
+            i += 1;
+        }
+        i = (i + 1).min(line.len());
+    } else {
+        while i < line.len() && !blank(line[i]) {
+            i += 1;
+        }
+    }
+    let program = &line[..i];
+    while i < line.len() && blank(line[i]) {
+        i += 1;
+    }
+    (program, &line[i..])
+}
+
+/// What Ctrl+C in the terminal does while the program runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CtrlC {
+    /// ignored here: the program shares the console and gets it itself
+    Ignore,
+    /// the program is ended (exit code 130, as after SIGINT): it is not on the console
+    EndProgram,
+}
+
+/// How the program is started from this terminal (both routes wait for it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Start {
+    /// it gets this program's standard handles (else none: it takes the console itself)
+    pub handles: bool,
+    /// SPACEKNIFE_CONSOLE=1 in its environment: the console is the terminal, take it
+    pub console_var: bool,
+    pub ctrl_c: CtrlC,
+}
+
+/// How the program a route goes to is started, `terminal` when standard input, output and error
+/// are all the console. spaceknife-cli is a console program: it shares the console and gets the
+/// handles. The window's program, a windowed one, as 0.3.4's launcher started it: in a terminal
+/// without handles and with SPACEKNIFE_CONSOLE=1 (it attaches itself to the console and gets
+/// Ctrl+C there); redirected with the handles as they are, and ended here at Ctrl+C.
+pub fn start(route: Route, terminal: bool) -> Start {
+    match route {
+        Route::Cli { .. } => Start {
+            handles: true,
+            console_var: false,
+            ctrl_c: CtrlC::Ignore,
+        },
+        Route::App if terminal => Start {
+            handles: false,
+            console_var: true,
+            ctrl_c: CtrlC::Ignore,
+        },
+        Route::App => Start {
+            handles: true,
+            console_var: false,
+            ctrl_c: CtrlC::EndProgram,
+        },
+    }
+}
+
+/// The window's command line, as 0.3.4's launcher wrote it: the program's full path in quotes,
+/// then the arguments as typed.
+pub fn app_command_line(target: &[u16], tail: &[u16]) -> Vec<u16> {
+    let mut out = vec![b'"' as u16];
+    out.extend_from_slice(target);
+    out.push(b'"' as u16);
+    if !tail.is_empty() {
+        out.push(b' ' as u16);
+        out.extend_from_slice(tail);
+    }
+    out
+}
+
+/// The command line for spaceknife-cli: `program` (as this one was typed), `--headless` when only
+/// the help was asked for, then the arguments as typed.
+pub fn command_line(program: &[u16], route: Route, tail: &[u16]) -> Vec<u16> {
+    let mut out: Vec<u16> = program.to_vec();
+    if out.is_empty() {
+        out.extend("SpaceKnife".encode_utf16());
+    }
+    if route == (Route::Cli { help_only: true }) {
+        out.extend(" --headless".encode_utf16());
+    }
+    if !tail.is_empty() {
+        out.push(b' ' as u16);
+        out.extend_from_slice(tail);
+    }
+    out
+}
 
 #[cfg(windows)]
 mod win {
     use std::ffi::c_void;
     use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicPtr, Ordering};
+
+    use super::{CtrlC, Route, app_command_line, command_line, route, split_command_line, start};
 
     type Handle = *mut c_void;
 
@@ -85,52 +229,50 @@ mod win {
         fn GetExitCodeProcess(process: Handle, exit_code: *mut u32) -> i32;
         fn TerminateProcess(process: Handle, exit_code: u32) -> i32;
         fn CloseHandle(handle: Handle) -> i32;
-        fn SetConsoleCtrlHandler(handler: Option<unsafe extern "system" fn(u32) -> i32>, add: i32) -> i32;
+        fn SetConsoleCtrlHandler(
+            handler: Option<unsafe extern "system" fn(u32) -> i32>,
+            add: i32,
+        ) -> i32;
     }
 
-    /// The app, for the Ctrl+C handler of the redirected case.
-    static CHILD: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+    /// The program, for [`end_program`] (the redirected window).
+    static PROGRAM: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
 
-    /// Ctrl+C, Ctrl+Break, the console closing: end the app (exit code 130, as after SIGINT).
-    unsafe extern "system" fn stop_child(_event: u32) -> i32 {
-        let child = CHILD.load(Ordering::SeqCst);
-        if !child.is_null() {
-            unsafe { TerminateProcess(child, 130) };
+    /// Ctrl+C, Ctrl+Break, the console closing: end the program (exit code 130, as after SIGINT),
+    /// as 0.3.4's launcher did with a redirected window.
+    unsafe extern "system" fn end_program(_event: u32) -> i32 {
+        let program = PROGRAM.load(Ordering::SeqCst);
+        if !program.is_null() {
+            // SAFETY: the process handle stays open while this program waits for it
+            unsafe { TerminateProcess(program, 130) };
         }
         1
     }
 
-    /// The arguments as typed, after the program name (Windows' rule for argv[0]: up to the closing
-    /// quote when it starts with one, else up to the first blank), so their quoting reaches the app
-    /// unchanged.
-    pub fn arguments_tail(line: &[u16]) -> &[u16] {
-        const QUOTE: u16 = b'"' as u16;
-        let blank = |c: u16| c == b' ' as u16 || c == b'\t' as u16;
-        let mut i = 0;
-        if line.first() == Some(&QUOTE) {
-            i = 1;
-            while i < line.len() && line[i] != QUOTE {
-                i += 1;
-            }
-            i = (i + 1).min(line.len());
-        } else {
-            while i < line.len() && !blank(line[i]) {
-                i += 1;
-            }
-        }
-        while i < line.len() && blank(line[i]) {
-            i += 1;
-        }
-        &line[i..]
-    }
-
     fn is_console(handle: Handle) -> bool {
         let mut mode = 0u32;
-        !handle.is_null() && handle != INVALID_HANDLE && unsafe { GetFileType(handle) == FILE_TYPE_CHAR && GetConsoleMode(handle, &mut mode) != 0 }
+        // SAFETY: plain kernel32 queries of a handle value
+        !handle.is_null()
+            && handle != INVALID_HANDLE
+            && unsafe {
+                GetFileType(handle) == FILE_TYPE_CHAR && GetConsoleMode(handle, &mut mode) != 0
+            }
     }
 
-    fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
-        s.encode_wide().collect()
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain([0]).collect()
+    }
+
+    fn missing(target: &Path) -> i32 {
+        eprintln!(
+            "SpaceKnife: {} is missing (SpaceKnife.com must sit next to it)",
+            target.display()
+        );
+        eprintln!(
+            "SpaceKnife：找不到 {}（SpaceKnife.com 要和它放在同一个文件夹里）",
+            target.display()
+        );
+        1
     }
 
     pub fn run() -> i32 {
@@ -141,11 +283,19 @@ mod win {
                 return 1;
             }
         };
-        let target = me.with_extension("exe");
+        let args: Vec<String> = std::env::args_os()
+            .skip(1)
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let way = route(&args);
+        let target = match way {
+            Route::Cli { .. } => me.with_file_name("spaceknife-cli.exe"),
+            Route::App => me.with_extension("exe"),
+        };
         if target == me || !target.is_file() {
-            eprintln!("SpaceKnife: {} is missing (this launcher must sit next to it, named like it with .com)", target.display());
-            return 1;
+            return missing(&target);
         }
+        // SAFETY: the process's command line, NUL-terminated, alive for the whole process.
         let line = unsafe {
             let p = GetCommandLineW();
             let mut n = 0;
@@ -154,62 +304,68 @@ mod win {
             }
             std::slice::from_raw_parts(p, n)
         };
-        let mut command: Vec<u16> = Vec::new();
-        command.push(b'"' as u16);
-        command.extend(wide(target.as_os_str()));
-        command.push(b'"' as u16);
-        let tail = arguments_tail(line);
-        if !tail.is_empty() {
-            command.push(b' ' as u16);
-            command.extend_from_slice(tail);
-        }
+        let (program, tail) = split_command_line(line);
+        let application = wide(&target);
+        let mut command = match way {
+            // as 0.3.4's launcher started the window: its full path, the arguments as typed
+            Route::App => app_command_line(&application[..application.len() - 1], tail),
+            Route::Cli { .. } => command_line(program, way, tail),
+        };
         command.push(0);
-        let mut application = wide(target.as_os_str());
-        application.push(0);
-
-        let handles = STD_HANDLES.map(|which| unsafe { GetStdHandle(which) });
-        let terminal = handles.iter().all(|&h| is_console(h));
-        let mut startup: StartupInfoW = unsafe { std::mem::zeroed() };
-        startup.cb = size_of::<StartupInfoW>() as u32;
-        if terminal {
-            // no standard handles: Electron attaches the app to this console, which it may read from
-            unsafe { std::env::set_var("SPACEKNIFE_CONSOLE", "1") };
-        } else {
-            for &h in &handles {
-                if !h.is_null() && h != INVALID_HANDLE {
-                    unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) };
+        // SAFETY: plain kernel32 calls; zeroed plain-data structures with their sizes set, buffers
+        // NUL-terminated.
+        unsafe {
+            let handles = STD_HANDLES.map(|which| GetStdHandle(which));
+            let how = start(way, handles.iter().all(|&h| is_console(h)));
+            let mut startup: StartupInfoW = std::mem::zeroed();
+            startup.cb = size_of::<StartupInfoW>() as u32;
+            if how.handles {
+                // this program's standard handles (the console or what they are redirected to);
+                // spaceknife-cli shares the console, so Ctrl+C reaches it there
+                for &h in &handles {
+                    if !h.is_null() && h != INVALID_HANDLE {
+                        SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+                    }
                 }
+                startup.flags = STARTF_USESTDHANDLES;
+                [startup.std_input, startup.std_output, startup.std_error] = handles;
             }
-            startup.flags = STARTF_USESTDHANDLES;
-            [startup.std_input, startup.std_output, startup.std_error] = handles;
-        }
-        let mut info: ProcessInformation = unsafe { std::mem::zeroed() };
-        let ok = unsafe {
-            CreateProcessW(
+            if how.console_var {
+                // SAFETY: this program has one thread
+                std::env::set_var("SPACEKNIFE_CONSOLE", "1");
+            }
+            let mut info: ProcessInformation = std::mem::zeroed();
+            let ok = CreateProcessW(
                 application.as_ptr(),
                 command.as_mut_ptr(),
                 null_mut(),
                 null_mut(),
-                (!terminal) as i32,
+                how.handles as i32,
                 0,
                 null_mut(),
                 null(),
                 &mut startup,
                 &mut info,
-            )
-        };
-        if ok == 0 {
-            eprintln!("SpaceKnife: can't start {}: {}", target.display(), std::io::Error::last_os_error());
-            return 1;
-        }
-        unsafe {
+            );
+            if ok == 0 {
+                eprintln!(
+                    "SpaceKnife: can't start {}: {}",
+                    target.display(),
+                    std::io::Error::last_os_error()
+                );
+                return 1;
+            }
             CloseHandle(info.thread);
-            // after the app started, so that it doesn't inherit "ignore Ctrl+C"
-            if terminal {
-                SetConsoleCtrlHandler(None, 1); // Ctrl+C is the app's (attached to this console)
-            } else {
-                CHILD.store(info.process, Ordering::SeqCst);
-                SetConsoleCtrlHandler(Some(stop_child), 1);
+            // only after the start, so that the program doesn't inherit "ignore Ctrl+C"
+            match how.ctrl_c {
+                // the program's (spaceknife-cli stops cleanly; the window's program on the console)
+                CtrlC::Ignore => {
+                    SetConsoleCtrlHandler(None, 1);
+                }
+                CtrlC::EndProgram => {
+                    PROGRAM.store(info.process, Ordering::SeqCst);
+                    SetConsoleCtrlHandler(Some(end_program), 1);
+                }
             }
             WaitForSingleObject(info.process, INFINITE);
             let mut code: u32 = 1;
@@ -230,21 +386,140 @@ fn main() {
     std::process::exit(1);
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod tests {
-    use super::win::arguments_tail;
+    use super::*;
 
-    fn tail(s: &str) -> String {
-        let w: Vec<u16> = s.encode_utf16().collect();
-        String::from_utf16(arguments_tail(&w)).unwrap()
+    fn w(s: &str) -> Vec<u16> {
+        s.encode_utf16().collect()
+    }
+
+    fn split(s: &str) -> (String, String) {
+        let line = w(s);
+        let (program, tail) = split_command_line(&line);
+        (
+            String::from_utf16(program).unwrap(),
+            String::from_utf16(tail).unwrap(),
+        )
     }
 
     #[test]
     fn keeps_the_arguments_as_typed() {
-        assert_eq!(tail(r#""C:\Program Files\SpaceKnife\SpaceKnife.com" --listen "0.0.0.0:8375" --yes"#), r#"--listen "0.0.0.0:8375" --yes"#);
-        assert_eq!(tail("SpaceKnife  --headless"), "--headless");
-        assert_eq!(tail("SpaceKnife.com"), "");
-        assert_eq!(tail(r#""SpaceKnife""#), "");
-        assert_eq!(tail("SpaceKnife\t--listen\t::"), "--listen\t::");
+        assert_eq!(
+            split(r#""C:\Program Files\SpaceKnife\SpaceKnife.com" --listen "0.0.0.0:8375" --yes"#),
+            (
+                r#""C:\Program Files\SpaceKnife\SpaceKnife.com""#.into(),
+                r#"--listen "0.0.0.0:8375" --yes"#.into()
+            )
+        );
+        assert_eq!(
+            split("SpaceKnife  --headless"),
+            ("SpaceKnife".into(), "--headless".into())
+        );
+        assert_eq!(
+            split("SpaceKnife.com"),
+            ("SpaceKnife.com".into(), "".into())
+        );
+        assert_eq!(
+            split(r#""SpaceKnife""#),
+            (r#""SpaceKnife""#.into(), "".into())
+        );
+        assert_eq!(
+            split("SpaceKnife\t--listen\t::"),
+            ("SpaceKnife".into(), "--listen\t::".into())
+        );
+        assert_eq!(split(""), ("".into(), "".into()));
+    }
+
+    #[test]
+    fn routes_as_0_3_4_did() {
+        let cli = Route::Cli { help_only: false };
+        assert_eq!(route(&["--headless"]), cli);
+        assert_eq!(route(&["--listen", "0.0.0.0"]), cli);
+        assert_eq!(route(&["--listen=[::]:9000"]), cli);
+        assert_eq!(route(&["--no-sandbox", "--yes"]), cli);
+        assert_eq!(route(&["--tls-cert=c.pem"]), cli);
+        assert_eq!(route(&["--tls-key", "k.pem", "--help"]), cli);
+        assert_eq!(route(&["--help"]), Route::Cli { help_only: true });
+        assert_eq!(route(&["-h"]), Route::Cli { help_only: true });
+        // the window
+        assert_eq!(route::<&str>(&[]), Route::App);
+        assert_eq!(route(&["--updated"]), Route::App);
+        assert_eq!(route(&["--listening"]), Route::App);
+        assert_eq!(route(&["C:\\--headless"]), Route::App);
+    }
+
+    #[test]
+    fn command_lines() {
+        let line = |program: &str, route: Route, tail: &str| {
+            String::from_utf16(&command_line(&w(program), route, &w(tail))).unwrap()
+        };
+        assert_eq!(
+            line(
+                "SpaceKnife",
+                Route::Cli { help_only: false },
+                r#"--listen "a b""#
+            ),
+            r#"SpaceKnife --listen "a b""#
+        );
+        assert_eq!(
+            line(
+                r#""C:\SK\SpaceKnife.com""#,
+                Route::Cli { help_only: true },
+                "-h"
+            ),
+            r#""C:\SK\SpaceKnife.com" --headless -h"#
+        );
+        assert_eq!(line("SpaceKnife", Route::App, ""), "SpaceKnife");
+        assert_eq!(line("", Route::App, "--x"), "SpaceKnife --x");
+    }
+
+    #[test]
+    fn the_window_is_started_as_0_3_4_started_it() {
+        let line = |target: &str, tail: &str| {
+            String::from_utf16(&app_command_line(&w(target), &w(tail))).unwrap()
+        };
+        assert_eq!(
+            line(
+                r"C:\Program Files\SpaceKnife\SpaceKnife.exe",
+                r#"--updated "a b""#
+            ),
+            r#""C:\Program Files\SpaceKnife\SpaceKnife.exe" --updated "a b""#
+        );
+        assert_eq!(
+            line(r"C:\SK\SpaceKnife.exe", ""),
+            r#""C:\SK\SpaceKnife.exe""#
+        );
+    }
+
+    #[test]
+    fn every_route_waits_and_the_window_takes_the_terminal_as_0_3_4s_did() {
+        let cli = Start {
+            handles: true,
+            console_var: false,
+            ctrl_c: CtrlC::Ignore,
+        };
+        for terminal in [true, false] {
+            assert_eq!(start(Route::Cli { help_only: false }, terminal), cli);
+            assert_eq!(start(Route::Cli { help_only: true }, terminal), cli);
+        }
+        // in a terminal: no handles, SPACEKNIFE_CONSOLE=1, Ctrl+C is the window's program's
+        assert_eq!(
+            start(Route::App, true),
+            Start {
+                handles: false,
+                console_var: true,
+                ctrl_c: CtrlC::Ignore
+            }
+        );
+        // redirected: the handles as they are, Ctrl+C here ends it
+        assert_eq!(
+            start(Route::App, false),
+            Start {
+                handles: true,
+                console_var: false,
+                ctrl_c: CtrlC::EndProgram
+            }
+        );
     }
 }

@@ -19,7 +19,7 @@ Start with the section that matches what you see. If nothing here helps, [report
   **Settings › Advanced › Files & diagnostics › Log folder › Open** opens the folder, wherever it is (a portable copy or `SPACEKNIFE_HOME` moves it; see [Data locations and portable mode](../data-locations/)).
 - **More detail**: set **Settings › Advanced › Log › Log file level** to **Debug**, reproduce the problem, then set it back to **Info**.
 - **Copy diagnostics** (**Settings › Advanced › Files & diagnostics**): copies the version of the interface and the backend, the platform, the backend's capabilities, and the paths of the settings file and the log folder.
-- **The command line**: `spaceknife-backend version` prints the versions; `native none` there means the native extension didn't load (see [Command line](../command-line/#version)).
+- **The command line**: `spaceknife-cli version` prints the versions (see [Command line](../command-line/#version)).
 
 ## First launch
 
@@ -31,6 +31,10 @@ The installer and the app aren't code-signed yet, so SmartScreen shows a warning
 
 - The first start after unzipping takes a few seconds longer while Windows checks the new files.
 - Unzip to a folder you can write to. In a place such as `C:\Program Files`, the portable copy can't write its `data` folder.
+
+### Windows: the window doesn't open
+
+SpaceKnife's window is drawn by the Microsoft Edge WebView2 Runtime, version 89.0.774.44 or later. Windows 11 includes it and most Windows 10 computers have it; the installer installs or updates it, a portable copy can't. When it is missing or too old, SpaceKnife says so before it opens its window (**SpaceKnife needs the Microsoft Edge WebView2 Runtime, which this computer doesn't have**, or **… needs a newer Microsoft Edge WebView2 Runtime**) and changes nothing: click **Download the WebView2 Runtime**, install it (it is free) and start SpaceKnife again, or use the installer.
 
 ### macOS: "SpaceKnife can't be verified"
 
@@ -45,17 +49,17 @@ From then on it opens normally. After you install a new version, allow it once m
 xattr -dr com.apple.quarantine /Applications/SpaceKnife.app
 ```
 
-### Linux: the AppImage doesn't start
+### Linux: the AppImage or a portable copy doesn't start
 
-- The AppImage needs FUSE 2 (`libfuse2` on Ubuntu 22.04). Without it, run it as `./SpaceKnife-<version>-x86_64.AppImage --appimage-extract-and-run`, or use the deb, rpm or portable tar.gz, which don't need FUSE.
-- On distributions that restrict unprivileged user namespaces (the AppArmor rules of Ubuntu 23.10 and later), the AppImage and the portable tar.gz may not start because their Chromium sandbox helper isn't setuid. Start them with `--no-sandbox`. Ubuntu 22.04 and RHEL 9 aren't affected.
+- The AppImage needs FUSE 2 (`libfuse2` on Ubuntu 22.04). Without it, run it as `./SpaceKnife-<version>-x86_64.AppImage --appimage-extract-and-run`, or use the deb, rpm or a portable tar.gz, which don't need FUSE.
+- On distributions that restrict unprivileged user namespaces (the AppArmor rules of Ubuntu 23.10 and later), the AppImage and the portable `…-linux-<arch>-portable.tar.gz` may not start because their Chromium sandbox helper isn't setuid. Start them with `--no-sandbox`, or use the deb or the small portable. Ubuntu 22.04 and RHEL 9 aren't affected.
+- The small portable `…-linux-<arch>-tauri.tar.gz` needs WebKitGTK 4.1. Without it, `./spaceknife` stops with `error while loading shared libraries: libwebkit2gtk-4.1.so.0`. Install it (`sudo apt install libwebkit2gtk-4.1-0` on Ubuntu and Debian), or, on RHEL 9, which doesn't have it, use the rpm or the portable `…-linux-<arch>-portable.tar.gz`. Its `spaceknife-cli` and headless mode don't need it.
 
 ### "The backend didn't start"
 
-The window is there, but a message covers it, and the status bar says `Backend unavailable`. The message under the title says why: `The backend wasn't ready within 30 seconds.`, `The backend failed to start (exit code N).` or `The backend exited (exit code N).`
+The window is there, but a message covers it, and the status bar says `Backend unavailable`. The message under the title says why: `The backend wasn't ready within 30 seconds.`, `The backend failed to start (exit code N).` or `The backend exited (exit code N).` In the Electron builds the backend is the program `spaceknife-cli` next to the app; elsewhere it runs inside the app.
 
-- Restart SpaceKnife. If it happens again, run the backend by itself in a terminal: `spaceknife-backend version` (where it is: [Command line](../command-line/#where-the-program-is)). An error there is what to report.
-- On Linux and macOS, starting SpaceKnife from a terminal shows the backend's own messages, prefixed with `[backend]`.
+- Restart SpaceKnife. If it happens again, run the command line in a terminal: `spaceknife-cli version` (where it is: [Command line](../command-line/#where-the-program-is)). An error there is what to report, together with the message under the title.
 
 ## Permissions
 
@@ -117,6 +121,21 @@ Every 15 seconds the backend compares its memory with what the open scans need. 
 - Close the scans and tabs you don't need.
 - If the warning comes back with few or no scans open, report it. The log file then contains a block after `memory above what the scans account for:` that lists every scan's data, the views and the queues; attach it.
 - To add the code lines that hold the most memory, start SpaceKnife with the environment variable `SPACEKNIFE_MEMTRACE=1`, reproduce, and attach the new block. It makes SpaceKnife slower, so remove it afterwards.
+
+## Updates
+
+### "Can't start the update"
+
+**Seamless update** of a portable copy checks two things before it replaces anything. When either says no, nothing is changed: the copy goes on as it was, and SpaceKnife says **Can't start the update:** and why (from 0.3.5 on it stays on the update card; 0.3.4 shows it only for a moment).
+
+- **The folder holds more than SpaceKnife.** The update only ever replaces SpaceKnife's own files, so when the program's folder also holds other things of yours (another app, documents), it doesn't start and names them: *The folder also holds things that are not SpaceKnife's (…)*. Put SpaceKnife and its `data` folder in a folder of their own and try again, or use **Replace it yourself**. Files your system puts in folders (`desktop.ini`, `.DS_Store`) don't count and stay where they are.
+- **The new version can't start on this computer.** The usual reason is a missing web view: the WebView2 Runtime on Windows (then a window of the new version says what is missing and where to get it), or WebKitGTK 4.1 for the small Linux portable (RHEL 9 has none). Install it and try again, or take the other download ([Which file to download](../install/#which-file-to-download)).
+
+If an update was put in place but had to be undone (the new version didn't start), the old version, from 0.3.5 on, says so on its update card when it opens again: **The update didn't complete: …**. The steps are in `updates/update-<version>.log` in the data folder.
+
+### The installer update didn't finish
+
+When **Seamless update** of the Windows installer can't go through (for example, the WebView2 Runtime couldn't be downloaded, or you declined the administrator prompt of an all-users install), the installer leaves the old version as it was and opens it again. Try again later, or click **Run the installer** in the update card to go through the installer's pages.
 
 ## Resetting settings
 

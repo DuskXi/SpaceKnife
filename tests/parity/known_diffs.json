@@ -1,0 +1,17 @@
+{
+  "comment": "Differences between 0.3.4 and the Rust backend that are known and accepted for every scenario; each names why. Patterns: `*` within one path segment, `**` any segments (README.md, 'Known differences'). Keep this list short: a scenario's own `known_diffs` is the better place.",
+  "known": [
+    {
+      "path": "**/error/loc/**",
+      "why": "Rust reports a parameter error as one item with the serde message and an empty `loc`; 0.3.4 (pydantic) named the field. The interface never reads `loc` (apps/desktop/app); the error code is still compared."
+    },
+    {
+      "path": "**/generation",
+      "why": "0.3.5 by design (node-generation.v1): FrameInfo, ViewResults and TreeSummaryResult carry the numbering their node ids belong to, so basket.add can refuse ids of a tree renumbered since (0.3.4 added whatever such an id named now). A new field: a value per backend run, not comparable."
+    },
+    {
+      "path": "**/rev",
+      "why": "0.3.5 by design (basket-confirm.v1): basket items carry `rev`, so basket.execute runs exactly what the user confirmed (0.3.4 ran what the basket held at that moment). A new field: a counter of the backend's basket, not comparable."
+    }
+  ]
+}

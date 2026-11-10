@@ -1,0 +1,1531 @@
+{
+ "format": 1,
+ "scenario": "invalid_params",
+ "platform": "win32",
+ "steps": [
+  {
+   "i": 1,
+   "call": "$/subscribe",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "topic"
+    ]
+   }
+  },
+  {
+   "i": 2,
+   "call": "$/subscribe",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "topic"
+    ]
+   }
+  },
+  {
+   "i": 3,
+   "call": "$/unsubscribe",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "sub"
+    ]
+   }
+  },
+  {
+   "i": 4,
+   "call": "$/unsubscribe",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "sub"
+    ]
+   }
+  },
+  {
+   "i": 5,
+   "call": "basket.add",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 6,
+   "call": "basket.add",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 7,
+   "call": "basket.clear",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 8,
+   "call": "basket.execute",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "mode"
+    ]
+   }
+  },
+  {
+   "i": 9,
+   "call": "basket.execute",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "mode"
+    ]
+   }
+  },
+  {
+   "i": 10,
+   "call": "basket.list",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 11,
+   "call": "basket.remove",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "ids"
+    ]
+   }
+  },
+  {
+   "i": 12,
+   "call": "basket.remove",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "ids"
+    ]
+   }
+  },
+  {
+   "i": 13,
+   "call": "classes.folder",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "path"
+    ]
+   }
+  },
+  {
+   "i": 14,
+   "call": "classes.folder",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "path"
+    ]
+   }
+  },
+  {
+   "i": 15,
+   "call": "classes.get",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 16,
+   "call": "classes.reset",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 17,
+   "call": "classes.update",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "classes"
+    ]
+   }
+  },
+  {
+   "i": 18,
+   "call": "classes.update",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "classes"
+    ]
+   }
+  },
+  {
+   "i": 19,
+   "call": "compare.close",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "compare_id"
+    ]
+   }
+  },
+  {
+   "i": 20,
+   "call": "compare.close",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "compare_id"
+    ]
+   }
+  },
+  {
+   "i": 21,
+   "call": "compare.info",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "compare_id"
+    ]
+   }
+  },
+  {
+   "i": 22,
+   "call": "compare.info",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "compare_id"
+    ]
+   }
+  },
+  {
+   "i": 23,
+   "call": "compare.node",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 24,
+   "call": "compare.node",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 25,
+   "call": "compare.open",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 26,
+   "call": "compare.open",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 27,
+   "call": "compare.sources",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 28,
+   "call": "compare.sources",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 29,
+   "call": "compare.summary",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 30,
+   "call": "compare.summary",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 31,
+   "call": "export.check",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "source"
+    ]
+   }
+  },
+  {
+   "i": 32,
+   "call": "export.check",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "source"
+    ]
+   }
+  },
+  {
+   "i": 33,
+   "call": "export.run",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 34,
+   "call": "export.run",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 35,
+   "call": "export.targets",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 36,
+   "call": "filter.parse",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "text"
+    ]
+   }
+  },
+  {
+   "i": 37,
+   "call": "filter.parse",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "text"
+    ]
+   }
+  },
+  {
+   "i": 38,
+   "call": "filter.vocab",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 39,
+   "call": "io.status",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 40,
+   "call": "machine.disks",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 41,
+   "call": "ops.cancel",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "task_id"
+    ]
+   }
+  },
+  {
+   "i": 42,
+   "call": "ops.cancel",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "task_id"
+    ]
+   }
+  },
+  {
+   "i": 43,
+   "call": "ops.undo",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "task_id"
+    ]
+   }
+  },
+  {
+   "i": 44,
+   "call": "ops.undo",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "task_id"
+    ]
+   }
+  },
+  {
+   "i": 45,
+   "call": "palette.check",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "id"
+    ]
+   }
+  },
+  {
+   "i": 46,
+   "call": "palette.check",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "id"
+    ]
+   }
+  },
+  {
+   "i": 47,
+   "call": "palette.clear",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 48,
+   "call": "palette.commands",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 49,
+   "call": "palette.paths",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 50,
+   "call": "palette.paths",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 51,
+   "call": "palette.preview",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 52,
+   "call": "palette.preview",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 53,
+   "call": "palette.query",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "context"
+    ]
+   }
+  },
+  {
+   "i": 54,
+   "call": "palette.query",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "context"
+    ]
+   }
+  },
+  {
+   "i": 55,
+   "call": "palette.remember",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "kind"
+    ]
+   }
+  },
+  {
+   "i": 56,
+   "call": "palette.remember",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "kind"
+    ]
+   }
+  },
+  {
+   "i": 57,
+   "call": "path.forms",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 58,
+   "call": "path.forms",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 59,
+   "call": "scan.cancel",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 60,
+   "call": "scan.cancel",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 61,
+   "call": "scan.check_paths",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "paths"
+    ]
+   }
+  },
+  {
+   "i": 62,
+   "call": "scan.check_paths",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "paths"
+    ]
+   }
+  },
+  {
+   "i": 63,
+   "call": "scan.close",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 64,
+   "call": "scan.close",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 65,
+   "call": "scan.continue",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 66,
+   "call": "scan.continue",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 67,
+   "call": "scan.list",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 68,
+   "call": "scan.pause",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 69,
+   "call": "scan.pause",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 70,
+   "call": "scan.rescan",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 71,
+   "call": "scan.rescan",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 72,
+   "call": "scan.resume",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 73,
+   "call": "scan.resume",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 74,
+   "call": "scan.set_load",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 75,
+   "call": "scan.set_load",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 76,
+   "call": "scan.start",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "roots"
+    ]
+   }
+  },
+  {
+   "i": 77,
+   "call": "scan.start",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "roots"
+    ]
+   }
+  },
+  {
+   "i": 78,
+   "call": "scan.status",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 79,
+   "call": "scan.status",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 80,
+   "call": "scan.use_mft",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 81,
+   "call": "scan.use_mft",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 82,
+   "call": "settings.export",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "path"
+    ]
+   }
+  },
+  {
+   "i": 83,
+   "call": "settings.export",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "path"
+    ]
+   }
+  },
+  {
+   "i": 84,
+   "call": "settings.get",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 85,
+   "call": "settings.import",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "path"
+    ]
+   }
+  },
+  {
+   "i": 86,
+   "call": "settings.import",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "path"
+    ]
+   }
+  },
+  {
+   "i": 87,
+   "call": "settings.reset",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 88,
+   "call": "settings.update",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "values"
+    ]
+   }
+  },
+  {
+   "i": 89,
+   "call": "settings.update",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "values"
+    ]
+   }
+  },
+  {
+   "i": 90,
+   "call": "snapshot.list",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 91,
+   "call": "snapshot.load",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "path"
+    ]
+   }
+  },
+  {
+   "i": 92,
+   "call": "snapshot.load",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "path"
+    ]
+   }
+  },
+  {
+   "i": 93,
+   "call": "snapshot.save",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 94,
+   "call": "snapshot.save",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 95,
+   "call": "system.cache_clear",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 96,
+   "call": "system.helper_stop",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 97,
+   "call": "system.info",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 98,
+   "call": "system.maintenance",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 99,
+   "call": "system.ping",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 100,
+   "call": "tags.clear_saved",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 101,
+   "call": "tree.children",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 102,
+   "call": "tree.children",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 103,
+   "call": "tree.find",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 104,
+   "call": "tree.find",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 105,
+   "call": "tree.node",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 106,
+   "call": "tree.node",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 107,
+   "call": "tree.summary",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 108,
+   "call": "tree.summary",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 109,
+   "call": "update.cancel",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 110,
+   "call": "update.check",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 111,
+   "call": "update.dismiss",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "version"
+    ]
+   }
+  },
+  {
+   "i": 112,
+   "call": "update.dismiss",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "version"
+    ]
+   }
+  },
+  {
+   "i": 113,
+   "call": "update.download",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "version"
+    ]
+   }
+  },
+  {
+   "i": 114,
+   "call": "update.download",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "version"
+    ]
+   }
+  },
+  {
+   "i": 115,
+   "call": "update.mute",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "series"
+    ]
+   }
+  },
+  {
+   "i": 116,
+   "call": "update.mute",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "series"
+    ]
+   }
+  },
+  {
+   "i": 117,
+   "call": "update.releases",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 118,
+   "call": "update.status",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 119,
+   "call": "view.back",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 120,
+   "call": "view.back",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 121,
+   "call": "view.close",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 122,
+   "call": "view.close",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 123,
+   "call": "view.filter",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 124,
+   "call": "view.filter",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 125,
+   "call": "view.forward",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 126,
+   "call": "view.forward",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 127,
+   "call": "view.home",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 128,
+   "call": "view.home",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 129,
+   "call": "view.list",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 130,
+   "call": "view.open",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 131,
+   "call": "view.open",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "scan_id"
+    ]
+   }
+  },
+  {
+   "i": 132,
+   "call": "view.render",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 133,
+   "call": "view.render",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 134,
+   "call": "view.results",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 135,
+   "call": "view.results",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 136,
+   "call": "view.reveal",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 137,
+   "call": "view.reveal",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 138,
+   "call": "view.select",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 139,
+   "call": "view.select",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 140,
+   "call": "view.set",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 141,
+   "call": "view.set",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 142,
+   "call": "view.tag",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 143,
+   "call": "view.tag",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 144,
+   "call": "view.up",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 145,
+   "call": "view.up",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 146,
+   "call": "view.zoom",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 147,
+   "call": "view.zoom",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "view_id"
+    ]
+   }
+  },
+  {
+   "i": 148,
+   "call": "visual.list",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 149,
+   "call": "volume.list",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 150,
+   "step_error": "TimeoutError"
+  },
+  {
+   "i": 151,
+   "step_error": "TimeoutError"
+  },
+  {
+   "i": 152,
+   "call": "app.shutdown",
+   "error": {
+    "code": -32602,
+    "loc": [
+     "__parity_unknown__"
+    ]
+   }
+  },
+  {
+   "i": 153,
+   "call": "$/subscribe",
+   "error": {
+    "code": -32004,
+    "loc": null
+   }
+  },
+  {
+   "i": 154,
+   "call": "no.such_method",
+   "error": {
+    "code": -32601,
+    "loc": null
+   }
+  }
+ ]
+}

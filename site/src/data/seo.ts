@@ -37,15 +37,15 @@ export function structuredData(c: Content, release: Release, pageUrl: string, sh
     author,
     publisher: author,
     sameAs: [REPO_URL],
-    keywords: c.lang === "zh" ? "硬盘占用分析, 磁盘空间, 树图, 开源, Windows, Linux" : "disk usage analyzer, disk space, treemap, open source, Windows, Linux",
+    keywords: c.lang === "zh" ? "硬盘占用分析, 磁盘空间, 树图, 开源, Windows, macOS, Linux" : "disk usage analyzer, disk space, treemap, open source, Windows, macOS, Linux",
   };
   const source = {
     "@context": "https://schema.org",
     "@type": "SoftwareSourceCode",
     name: "SpaceKnife",
     codeRepository: REPO_URL,
-    programmingLanguage: ["Python", "Rust", "TypeScript"],
-    runtimePlatform: ["Windows", "Linux"],
+    programmingLanguage: ["Rust", "TypeScript", "Vue"],
+    runtimePlatform: ["Windows", "macOS", "Linux"],
     license: "https://opensource.org/licenses/MIT",
     author,
     targetProduct: { "@id": `${pageUrl}#software` },

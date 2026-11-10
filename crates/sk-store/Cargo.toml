@@ -1,0 +1,33 @@
+[package]
+name = "sk-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SpaceKnife's columnar node store: the scanned tree as struct-of-arrays columns plus a name heap"
+
+[features]
+# `sk_store::testing`: fixture trees and random stores for the tests of other crates
+test-support = []
+
+[dependencies]
+# the performance layer: the fold of listings into new rows (sk_native::fold)
+sk-native = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+memmap2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+rayon = { workspace = true }
+zstd = { workspace = true }
+sha1 = { workspace = true }
+
+[target."cfg(unix)".dependencies]
+libc = { workspace = true }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Globalization", "Win32_System_SystemInformation"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+sk-store = { path = ".", features = ["test-support"] }

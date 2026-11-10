@@ -1,42 +1,43 @@
 ---
 title: 命令行
-description: 在终端里用后端的命令行扫描、批量执行与导出，以及改变 SpaceKnife 行为的环境变量。
+description: 在终端里用 spaceknife-cli 扫描、批量执行与导出，以及改变 SpaceKnife 行为的环境变量。
 ---
 
-替应用做扫描的后端有自己的命令行。可以不开窗口直接扫描，在脚本或计划任务里批量扫描和导出，也可以查看已保存的快照。命令行保存的快照和应用用的是同一个文件夹，所以它们会出现在启动页的「最近」里，也能拿来对比。
+SpaceKnife 附带一个命令行程序 `spaceknife-cli`，和替应用扫描的是同一份代码。可以不开窗口直接扫描，在脚本或计划任务里批量扫描和导出，也可以查看已保存的快照。命令行保存的快照和应用用的是同一个文件夹，所以它们会出现在启动页的「最近」里，也能拿来对比。
 
 ## 程序在哪里
 
-安装包不会把命令行加进 PATH。它是应用 `resources/backend` 文件夹里的 `spaceknife-backend`：
+`spaceknife-cli` 装在应用自己的程序旁边。只有 deb / rpm 包会把它放进 PATH：
 
 | 安装方式 | 命令行 |
 |---|---|
-| Windows 安装包，仅当前用户 | `%LOCALAPPDATA%\Programs\SpaceKnife\resources\backend\spaceknife-backend.exe`（默认安装目录） |
-| Windows 安装包，所有用户 | `C:\Program Files\SpaceKnife\resources\backend\spaceknife-backend.exe`（默认安装目录） |
-| Windows 便携版 | `SpaceKnife.exe` 旁边的 `resources\backend\spaceknife-backend.exe` |
-| deb / rpm | `/opt/SpaceKnife/resources/backend/spaceknife-backend` |
-| Linux 便携版 | `spaceknife` 旁边的 `resources/backend/spaceknife-backend` |
-| AppImage | 在镜像里面：`./SpaceKnife-<版本>-x86_64.AppImage --appimage-extract` 解到 `squashfs-root/`，再用 `squashfs-root/resources/backend/spaceknife-backend` |
-| macOS | `/Applications/SpaceKnife.app/Contents/Resources/backend/spaceknife-backend` |
-| 从源码运行 | 仓库里 `uv run spaceknife` |
+| Windows 安装包 | 安装目录里的 `spaceknife-cli.exe`：仅当前用户是 `%LOCALAPPDATA%\Programs\SpaceKnife`，所有用户是 `C:\Program Files\SpaceKnife` |
+| Windows 便携版 | `SpaceKnife.exe` 旁边的 `spaceknife-cli.exe` |
+| deb / rpm | `spaceknife-cli`（`/usr/bin/spaceknife-cli`） |
+| Linux 便携版 | `spaceknife` 旁边的 `spaceknife-cli` |
+| AppImage | 在镜像里面：`./SpaceKnife-<版本>-x86_64.AppImage --appimage-extract` 解到 `squashfs-root/`，再用 `squashfs-root/spaceknife-cli`。只用无头模式的话不必这样：`./SpaceKnife-<版本>-x86_64.AppImage --headless` 就能运行（[无头模式](../headless/)） |
+| macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli` |
+| 从源码运行 | 仓库里 `cargo run -p sk-server --bin spaceknife-cli -- <命令>` |
 
-本页的例子都写作 `spaceknife-backend`。可以把所在文件夹加进 PATH，或者设个别名：
+到 0.3.4 为止，命令行是应用里面的后端程序 `resources/backend/spaceknife-backend`（macOS 上是 `Contents/Resources/backend/spaceknife-backend`）。0.3.5 起是 `spaceknife-cli`：`scan`、`run`、`snapshot`、`version` 照旧，`scan` 的输出也和以前一样，脚本只要改路径。`schema` 去掉了（协议的 JSON Schema 在仓库里），`headless` 是新加的。
+
+本页的例子都写作 `spaceknife-cli`。可以把所在文件夹加进 PATH，或者设个别名：
 
 ```bash
-alias skb=/opt/SpaceKnife/resources/backend/spaceknife-backend
+alias skc=/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli
 ```
 
 :::note
-deb / rpm 安装后，`spaceknife`（`/usr/bin/spaceknife`）启动的是应用，不是命令行。
+deb / rpm 安装后，`spaceknife`（`/usr/bin/spaceknife`）启动的是应用，`spaceknife-cli` 才是命令行。Windows 的安装目录和便携版里还有 `SpaceKnife.com`：在终端里输入 `SpaceKnife --headless …`，经由它运行无头模式，和 0.3.x 一样。
 
-应用自己的可执行文件也有选项：`--headless` 和 `--listen` 让 SpaceKnife 不开窗口运行，把界面提供给浏览器，本机或别的设备都能用。见[无头模式](../headless/)。
+`spaceknife-cli headless` 让 SpaceKnife 不开窗口运行，把界面提供给浏览器，本机或别的设备都能用。见[无头模式](../headless/)。
 :::
 
 :::caution[便携版]
-便携版把数据存在旁边的 `data` 文件夹里，但只有应用知道这件事。要让命令行使用同一份快照和设置，把 `SPACEKNIFE_HOME` 设为这个 `data` 文件夹（见[环境变量](#环境变量)）。
+便携版把数据存在旁边的 `data` 文件夹里，但只有应用和无头模式会去找它；`scan`、`run`、`snapshot` 用的是你的用户目录。要让它们使用便携版的快照和设置，把 `SPACEKNIFE_HOME` 设为这个 `data` 文件夹（见[环境变量](#环境变量)）。
 :::
 
-输出的语言跟随「设置 › 常规 › 界面语言」（命令行会读取设置文件）；`--help` 的说明是英文。
+输出的语言跟随「设置 › 常规 › 界面语言」（命令行会读取设置文件）；`--help` 的说明是英文，无头模式的除外。
 
 ## 命令一览
 
@@ -46,17 +47,17 @@ deb / rpm 安装后，`spaceknife`（`/usr/bin/spaceknife`）启动的是应用�
 | `run <命令>…` | 不开窗口，按顺序执行 `scan`、`load`、`filter`、`save`、`export` |
 | `snapshot list` | 列出已保存的快照，最新的在前 |
 | `snapshot show <文件>` | 不重新扫描，查看快照里空间的分布 |
-| `version` | 显示后端、协议和原生扩展的版本 |
-| `serve` | 运行应用连接的后端服务 |
-| `schema` | 导出协议的 JSON Schema（开发用） |
+| `version` | 显示 SpaceKnife 和协议的版本 |
+| `serve` | 单独运行后端服务，接入自己的客户端或调试时用 |
+| `headless` | 不开窗口，把界面提供给浏览器（见[无头模式](../headless/)） |
 
-`spaceknife-backend <命令> --help` 列出该命令的全部选项。
+`spaceknife-cli <命令> --help` 列出该命令的全部选项。
 
 ## scan
 
 ```bash
-spaceknife-backend scan "D:\Photos"
-spaceknife-backend scan /home/lenny --top 20 --depth 3
+spaceknife-cli scan "D:\Photos"
+spaceknife-cli scan /home/lenny --top 20 --depth 3
 ```
 
 扫描和应用里一样并行进行，过程中显示一行实时进度。结束后输出：
@@ -70,7 +71,7 @@ spaceknife-backend scan /home/lenny --top 20 --depth 3
 | `--top N` | 15 | 摘要每层的行数，也是「最大的文件」的个数 |
 | `--depth N` | 2 | 摘要展开的层数 |
 | `--disk-limit 档位` | 不限制 | 和应用一样限制磁盘负载：`max`、`balanced`（70%）、`quiet`（35%）、`idle`，或 1–100 的百分比 |
-| `--workers N` | 与应用相同 | 列目录线程数（没有原生扩展时是工作进程数）。`0` 表示在本进程内用 Python 遍历器扫描：单线程，不限速 |
+| `--workers N` | 与应用相同 | 列目录线程数。`0` 表示一次只列一个文件夹 |
 | `--cross-mounts` / `--no-cross-mounts` | 关 | 进入挂载在扫描根下面的其他文件系统 |
 | `--save 文件` | — | 另外把快照保存到这个文件 |
 | `--no-snapshot` | — | 不自动保存快照 |
@@ -90,31 +91,31 @@ spaceknife-backend scan /home/lenny --top 20 --depth 3
 一边工作一边温和地扫描：
 
 ```bash
-spaceknife-backend scan "D:\" --disk-limit quiet
+spaceknife-cli scan "D:\" --disk-limit quiet
 ```
 
 为快照对比攒历史记录：用任务计划程序、cron 或 launchd 每晚扫描一次。应用会在「最近」里列出这些快照，任意两个都可以对比（见[快照与对比](../snapshots-compare/)）。
 
 ```bash
-spaceknife-backend scan /home/lenny --disk-limit idle
+spaceknife-cli scan /home/lenny --disk-limit idle
 ```
 
 读 $MFT 扫整个系统盘，比逐个文件夹快得多（Windows，需要管理员权限）：
 
 ```bash
-spaceknife-backend scan "C:\" --mft
+spaceknife-cli scan "C:\" --mft
 ```
 
 只测速度，不留下快照：
 
 ```bash
-spaceknife-backend scan "C:\Program Files" --no-snapshot --profile
+spaceknife-cli scan "C:\Program Files" --no-snapshot --profile
 ```
 
 在 Linux 上，你的账户读不了的文件夹会计入未知空间。要看进去，用 `sudo` 运行命令行，并加上 `--no-snapshot`，免得把快照存进 root 的目录：
 
 ```bash
-sudo /opt/SpaceKnife/resources/backend/spaceknife-backend scan / --no-snapshot
+sudo spaceknife-cli scan / --no-snapshot
 ```
 
 ### 耗时分解
@@ -123,11 +124,14 @@ sudo /opt/SpaceKnife/resources/backend/spaceknife-backend scan / --no-snapshot
 
 | 行 | 含义 |
 |---|---|
-| 「原生遍历器 · 列目录并发 16」 | 用哪种遍历器列目录（没有原生扩展时是「Python 遍历器」），允许多少个列目录线程 |
+| 「原生遍历器 · 列目录调用平均 15.8 个、最多 16 个」 | 用哪种遍历器列目录，平均、最多同时有几个列目录调用 |
 | 「列目录线程平均忙碌 …」 | 列目录线程花在系统调用上的时间占比。接近 100% 说明瓶颈在磁盘或文件系统 |
+| 「IO 道宽度 …（平均 …），CPU 道宽度 …（平均 …）；… 的文件夹在 IO 道列」 | 要等读盘的文件夹（IO 道）和已在文件缓存里的文件夹（CPU 道）各同时列几个，以及在 IO 道列的文件夹占多少 |
+| 「冷的比例（每 … 秒一个点）：…；设备提示 …」 | 扫描过程中要等读盘的文件夹所占的比例，以及扫描起步时按的盘的类型 |
 | 「主线程合并结果 …」 | 把结果并进目录树所花的时间占比。接近 100% 说明瓶颈在合并，加线程没用 |
 | 「共 … 批」 | 一共列了多少批目录 |
 | 「等磁盘负载上限放行 …」 | 只在用了 `--disk-limit` 时出现：等限速放行下一批的时间 |
+| 「磁盘负载上限的并发平均 …」 | 只在用了 `--disk-limit` 时出现：上限平均允许同时列几个文件夹 |
 | 「批量列目录（getattrlistbulk）：…」 | 只在 macOS 上出现：是否批量取文件属性（`on`、`off: 原因` 或 `untested`） |
 
 应用在每次硬扫描后把同样的数字写进日志文件，怎么解读见[扫描速度与磁盘负载](../performance/#日志里的耗时分解)。
@@ -135,7 +139,7 @@ sudo /opt/SpaceKnife/resources/backend/spaceknife-backend scan / --no-snapshot
 ## run：批量执行
 
 ```text
-spaceknife-backend run <命令> [<命令> …]
+spaceknife-cli run <命令> [<命令> …]
 ```
 
 `run` 按顺序执行一串命令，不打开窗口。`scan` 和 `load` 各打开一个**视图**；`filter`、`save`、`export` 作用于最后打开的那个视图。整串命令先检查一遍：有未知命令、缺参数，或者 `filter` / `save` / `export` 前面没有 `scan` / `load`，就一条也不执行。
@@ -172,15 +176,15 @@ spaceknife-backend run <命令> [<命令> …]
 下面的例子分别按 Windows 的命令提示符和 Linux / macOS 的 POSIX shell（bash、zsh）书写。
 
 ```bat
-spaceknife-backend run scan "D:\Photos" filter "*.jpg;>5mb" export "Simple file list" big.txt autoclose
-spaceknife-backend run scan "C:\" save "D:\snapshots\c.sks" autoclose
-spaceknife-backend run load "D:\snapshots\c.sks" filter "\node_modules" export html node_modules.html
-spaceknife-backend run scan "C:\;D:\" export Summary totals.txt autoclose
+spaceknife-cli run scan "D:\Photos" filter "*.jpg;>5mb" export "Simple file list" big.txt autoclose
+spaceknife-cli run scan "C:\" save "D:\snapshots\c.sks" autoclose
+spaceknife-cli run load "D:\snapshots\c.sks" filter "\node_modules" export html node_modules.html
+spaceknife-cli run scan "C:\;D:\" export Summary totals.txt autoclose
 ```
 
 ```bash
-spaceknife-backend run scan /home/lenny filter '>1gb' export csv big-files.csv autoclose
-spaceknife-backend run load ~/c.sks filter '\node_modules' export html node_modules.html
+spaceknife-cli run scan /home/lenny filter '>1gb' export csv big-files.csv autoclose
+spaceknife-cli run load ~/c.sks filter '\node_modules' export html node_modules.html
 ```
 
 Windows 的第一个例子找出 `D:\Photos` 里大于 5 MB 的 JPEG，把路径写进 `big.txt`；第二个把整个 C: 盘扫成一个快照，之后可以在应用里打开或对比；第三个不重新扫描，直接打开这个快照，把所有 `node_modules` 文件夹导出成 HTML 报告。
@@ -200,11 +204,11 @@ Windows 的第一个例子找出 `D:\Photos` 里大于 5 MB 的 JPEG，把路径
 参数本身含有 `"` 时就需要换分隔符，例如按字面匹配名为 `a;b.jpg` 的文件：
 
 ```bat
-spaceknife-backend run @delim={} scan {D:\Photos} filter {"a;b.jpg";>1mb} export {Grouped by folder} {D:\out\files.txt}
+spaceknife-cli run @delim={} scan {D:\Photos} filter {"a;b.jpg";>1mb} export {Grouped by folder} {D:\out\files.txt}
 ```
 
 ```bash
-spaceknife-backend run @delim={} scan /home/lenny/Photos filter '{"a;b.jpg";>1mb}' export 'Grouped by folder' files.txt
+spaceknife-cli run @delim={} scan /home/lenny/Photos filter '{"a;b.jpg";>1mb}' export 'Grouped by folder' files.txt
 ```
 
 在 POSIX shell 里给过滤表达式加单引号，shell 才不会处理其中的 `;`、`>` 和 `\`。不写 `@delim={}` 的话，参数 `"a;b.jpg";>1mb` 以默认分隔符开头，到第二个 `"` 就结束了，剩下的部分会被当成未知命令。
@@ -216,8 +220,8 @@ spaceknife-backend run @delim={} scan /home/lenny/Photos filter '{"a;b.jpg";>1mb
 ## snapshot
 
 ```bash
-spaceknife-backend snapshot list
-spaceknife-backend snapshot show "D:\snapshots\c.sks" --top 10 --depth 3
+spaceknife-cli snapshot list
+spaceknife-cli snapshot show "D:\snapshots\c.sks" --top 10 --depth 3
 ```
 
 `snapshot list` 列出快照文件夹里的所有快照：时间、扫描对象、占用、项目数和文件名，最后是快照文件夹本身的位置。`snapshot show` 显示快照的保存时间和其中最大的项目；`--top`、`--depth` 与 `scan` 相同。
@@ -225,14 +229,14 @@ spaceknife-backend snapshot show "D:\snapshots\c.sks" --top 10 --depth 3
 ## version
 
 ```bash
-spaceknife-backend version
+spaceknife-cli version
 ```
 
-输出后端版本、协议版本、协议 Schema 的哈希和原生扩展的版本。显示 `native none` 表示原生扩展没有加载：扫描会改用 Python 遍历器，慢好几倍。报告问题时请附上这一行。
+输出 SpaceKnife 的版本和协议版本。报告问题时请附上这一行。
 
 ## serve
 
-应用自己会用 `serve` 启动后端；只有接入自己的客户端或调试时才需要手动运行。开始监听后，它在标准输出打印一行 JSON（`{"event": "ready", "url": "ws://127.0.0.1:…/v1", …}`），日志输出到标准错误。
+应用在自己的进程里运行后端；Electron 版（rpm、AppImage 和自带引擎的 Linux 便携版）则像 0.3.x 启动后端那样，在旁边启动 `spaceknife-cli serve --token-stdin`。只有接入自己的客户端或调试时，才需要自己运行 `serve`。开始监听后，它在标准输出打印一行 JSON（`{"event": "ready", "url": "ws://127.0.0.1:…/v1", …}`），日志输出到标准错误。
 
 | 选项 | 默认 | 作用 |
 |---|---|---|
@@ -242,24 +246,18 @@ spaceknife-backend version
 | `--allow-origin` | — | 额外允许的 WebSocket Origin，例如开发服务器的地址；可以写多次 |
 | `--hello-timeout` | 5 | 客户端必须在这么多秒内完成握手 |
 | `--log-level` | `INFO` | `TRACE`、`DEBUG`、`INFO`、`WARNING` 或 `ERROR` |
-| `--log-format` | `rich` | 标准错误上的日志格式：`rich`、`plain` 或 `json` |
+| `--log-format` | `plain` | 标准错误上的日志格式：`plain` 或 `json` |
 | `--ready-file` | — | 另外把就绪信息（含令牌）写进这个文件（只有你能读；退出时删除） |
 
 消息格式见[协议文档](https://github.com/DuskXi/SpaceKnife/blob/main/docs/protocol.md)。
 
-## schema
-
-`schema --output 文件` 导出协议的 JSON Schema（不加 `--output` 时输出到标准输出）。`schema --check 文件` 在文件与当前 Schema 不一致时以 `1` 退出，项目的 CI 用它做检查。
-
 ## 环境变量
 
-在启动应用或命令行之前设置。应用会把自己的环境变量传给后端。
+在启动应用或命令行之前设置。后端在应用进程里运行，或者是应用自己启动的 `spaceknife-cli serve`，看到的是同一套环境变量。
 
 | 变量 | 作用 |
 |---|---|
-| `SPACEKNIFE_HOME` | 把 SpaceKnife 写的所有东西放进一个文件夹：`data`（快照、标签、日志）、`config`（设置、文件类别）、`cache`，应用还有 `electron`（界面的浏览器数据）。适合另开一套互不影响的环境、做测试，以及便携版。见[数据位置与便携模式](../data-locations/) |
+| `SPACEKNIFE_HOME` | 把 SpaceKnife 写的所有东西放进一个文件夹：`data`（快照、标签、日志）、`config`（设置、文件类别）、`cache`，应用还有窗口自己的文件（`desktop`；Electron 版是 `electron`）。适合另开一套互不影响的环境、做测试，以及便携版。见[数据位置与便携模式](../data-locations/) |
 | `SPACEKNIFE_SCAN_THREADS` | 列目录线程数，1–64。默认每个 CPU 一个，在 2–16 之间；macOS 上是 CPU 数的两倍，在 4–16 之间。手动并发数也不会超过它 |
 | `SPACEKNIFE_LANGUAGE` | `en` 或 `zh-CN`：命令行的输出固定用这种语言，不看设置。适合脚本和问题报告 |
-| `SPACEKNIFE_NO_NATIVE=1` | 不使用原生扩展：改用 Python 遍历器列目录，慢好几倍。用来对比速度，或排查问题时排除原生代码 |
 | `SPACEKNIFE_NO_BULK=1` | macOS：列文件改用 `readdir` 加 `fstatat`，不用 `getattrlistbulk`，用来对比速度 |
-| `SPACEKNIFE_MEMTRACE=1` | 内存看门狗报警时，日志文件里还会列出占用内存最多的代码行。会让后端变慢，只在排查内存警告时使用 |

@@ -1,0 +1,228 @@
+name: Windows installer build
+
+# The Windows installer (docs/packaging.md): the Tauri app's NSIS bundle with the forked template
+# (apps/desktop/src-tauri/windows: installer.nsi and spaceknife.nsh; upstream.json pins the stock
+# template it follows), which takes over 0.3.4's electron-builder installation — the same keys
+# (electron-builder's GUID for the appId), folder, shortcuts and flags — and installs WebView2 when
+# it is missing. `pnpm bundle` builds it (build paths remapped); tools/release.mjs windows-installer
+# renames Tauri's SpaceKnife_<v>_x64-setup.exe to 0.3.4's SpaceKnife-<v>-Setup-x64.exe (the
+# update contract: crates/sk-core update asset_templates) and writes its checksum list
+# SHA256SUMS-installers-win-x64.txt, which tools/release.mjs merges into SHA256SUMS.txt.
+# Tauri's tools (the pinned NSIS, cached; WebView2's bootstrapper) are put in its tools folder
+# target/.tauri beforehand, with retries (tools/nsis_fork.mjs tools): the bundler downloads nothing.
+# Checked here: the fork still follows the locked tauri-cli (tools/nsis_fork.mjs), no file names
+# the build machine's home folder, no program imports the Visual C++ runtime (+crt-static), the
+# installer's own logic (packaging/nsis-logic.mjs), installing, running, updating in place and
+# uninstalling it (packaging/nsis-e2e.mjs), and the update from the real 0.3.4 installer, its own
+# 「无缝更新」 clicked in its window, per user and for all users (packaging/update-from-034.mjs nsis).
+# The file and its checksum list go to the run's artifacts. Started by hand, on dev when the
+# installer changes, by the installer experiments (installer-experiments.yml), and by the Release
+# workflow (release.yml) for a release: the tag's commit and a build provenance attestation.
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build (default the caller's)
+        type: string
+        default: ""
+      attest:
+        description: Attest where the installer was built
+        type: boolean
+        default: false
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/windows-installer.yml
+      - .cargo/**
+      - rust-toolchain.toml
+      - packaging/nsis-e2e.mjs
+      - packaging/nsis-logic.mjs
+      - packaging/nsis-logic/**
+      - packaging/update-from-034.mjs
+      - packaging/smoke-app.mjs
+      - packaging/console-launcher/**
+      - apps/desktop/package.json
+      - apps/desktop/pnpm-lock.yaml
+      - apps/desktop/scripts/**
+      - apps/desktop/src-tauri/windows/**
+      - apps/desktop/src-tauri/tauri*.json
+      - apps/desktop/src-tauri/build.rs
+      - apps/desktop/src-tauri/src/main.rs
+      - apps/desktop/src-tauri/src/lib.rs
+      - apps/desktop/src-tauri/src/window.rs
+      - apps/desktop/src-tauri/src/install.rs
+      - apps/desktop/src-tauri/src/update.rs
+      - crates/sk-core/src/update/**
+      - tools/nsis_fork.mjs
+      - tools/package_checks.mjs
+      - tools/release.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  installer:
+    name: Windows installer · x64
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write # the attestation, only when the Release workflow asks for it
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }} # gh release download v0.3.4
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Set up Rust
+        run: rustup toolchain install --no-self-update # the one rust-toolchain.toml pins
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-installer
+
+      - name: Install the interface's dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      # the fork is written against the stock template of the locked tauri-cli: a CLI that brings
+      # another one (crates.io's tauri-bundler, the installed CLI's own program) stops the build
+      - name: The NSIS fork follows the locked tauri-cli
+        run: node tools/nsis_fork.mjs check
+
+      # Tauri's bundler downloads NSIS and its nsis_tauri_utils plugin from GitHub's release pages
+      # for each bundle on a fresh machine (a 504 there failed a run). Its tools folder is
+      # target/.tauri (tauri.bundle.windows.json useLocalToolsDir). The pinned downloads
+      # (windows/upstream.json, whose SHA-1s `check` held to the bundler's own above) are kept in
+      # the cache, saved as soon as they are fetched; `nsis_fork.mjs tools` checks their SHA-1s on
+      # every run, fetches (with retries) what the cache did not have, unpacks NSIS afresh where the
+      # bundler looks, and fetches WebView2's bootstrapper with retries. The bundler then finds all
+      # of it and downloads nothing.
+      - name: The cache key of the pinned NSIS
+        id: nsis
+        run: echo "key=tauri-nsis-$(jq -r '"\(.nsis)-\(.nsisTauriUtils)-\(.nsisSha1)-\(.nsisTauriUtilsSha1)"' apps/desktop/src-tauri/windows/upstream.json)" >> "$GITHUB_OUTPUT"
+
+      - name: The pinned NSIS from the cache
+        id: nsis-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: target/.tauri/downloads
+          key: ${{ steps.nsis.outputs.key }}
+
+      - name: NSIS and WebView2's bootstrapper where the bundler looks
+        run: node tools/nsis_fork.mjs tools target/.tauri
+
+      - name: The pinned NSIS into the cache
+        if: steps.nsis-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: target/.tauri/downloads
+          key: ${{ steps.nsis.outputs.key }}
+
+      # the interface, the programs (spaceknife, spaceknife-cli, SpaceKnife.com) and the installer
+      # (tauri.windows.conf.json: nsis; tauri.bundle.windows.json: the fork, WebView2's bootstrapper)
+      - name: Build the installer
+        working-directory: apps/desktop
+        run: pnpm bundle
+
+      - name: The installer under its release name
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
+          echo "version=$version" >> "$GITHUB_ENV"
+          node tools/release.mjs windows-installer "$version" target/release/bundle/nsis target/installers
+          ls -l target/installers
+
+      # what the installer carries, unpacked with 7-Zip (never run; the program's files are in a
+      # folder named after the staging variable, spaceknife.nsh SkMakeStage): SpaceKnife.exe,
+      # spaceknife-cli.exe and SpaceKnife.com, no file naming the build machine's home folder, and
+      # no program or library that imports the Visual C++ runtime, which it doesn't install
+      # (+crt-static)
+      - name: Check the installer
+        run: |
+          set -euo pipefail
+          u=target/installers-unpacked
+          rm -rf "$u" && mkdir -p "$u"
+          7z x -y -bd -o"$u" "target/installers/SpaceKnife-$version-Setup-x64.exe" > /dev/null
+          for p in SpaceKnife.exe spaceknife-cli.exe SpaceKnife.com; do
+            [ -n "$(find "$u" -type f -name "$p" -not -path '*PLUGINSDIR*' | head -n 1)" ] || { echo "::error::the installer holds no $p"; find "$u" -maxdepth 2; exit 1; }
+          done
+          node tools/package_checks.mjs paths target/installers "$u"
+          node tools/package_checks.mjs crt "$u"
+
+      # spaceknife.nsh run for real without installing anything: the flags of 0.3.4 and Tauri, the
+      # folder guard, the staging of the new files, the app started with the installer's environment,
+      # 0.3.4 found by its files, the keys the uninstaller may delete, the new program's
+      # --startup-check, a start with SW_HIDE, the log line by line (all in a sandbox folder)
+      - name: The installer's logic
+        run: node packaging/nsis-logic.mjs
+
+      # first the wizard as 0.3.4 starts it (windowsHide: SW_HIDE in STARTUPINFO), which must show
+      # a visible window (closed again), then a silent installation and the rest
+      - name: Install, run, update and uninstall
+        timeout-minutes: 20
+        run: node packaging/nsis-e2e.mjs "target/installers/SpaceKnife-$version-Setup-x64.exe"
+
+      # 0.3.4's real installer (checked against the v0.3.4 release's own checksums and its build
+      # provenance), its own 「无缝更新」 to this one: per user, then for all users (the runner is
+      # an administrator with UAC off: no prompt)
+      - name: Update from 0.3.4
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/v034"
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir "$RUNNER_TEMP/v034" --pattern SpaceKnife-0.3.4-Setup-x64.exe --pattern SHA256SUMS.txt
+          (cd "$RUNNER_TEMP/v034" && grep ' SpaceKnife-0.3.4-Setup-x64.exe$' SHA256SUMS.txt | sha256sum -c -)
+          gh attestation verify "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" --repo DuskXi/SpaceKnife
+          new="target/installers/SpaceKnife-$version-Setup-x64.exe"
+          node packaging/update-from-034.mjs nsis "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" "$new"
+          node packaging/update-from-034.mjs nsis "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" "$new" --allusers
+
+      # what the installer wrote of each run (spaceknife.nsh SkLogLine), when something failed
+      - name: The installer's log
+        if: failure()
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:TEMP 'SpaceKnife-install.log'
+          if (Test-Path $f) { Get-Content -Encoding Unicode $f } else { "no $f" }
+
+      - name: Attest the installer
+        if: inputs.attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: target/installers/*.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SpaceKnife-installers-win-x64
+          path: |
+            target/installers/*.exe
+            target/installers/SHA256SUMS-installers-win-x64.txt
+          if-no-files-found: error
+          retention-days: 14

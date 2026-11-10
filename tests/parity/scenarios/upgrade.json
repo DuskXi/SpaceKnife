@@ -1,0 +1,47 @@
+{
+  "name": "upgrade",
+  "description": "0.3.4 writes, 0.3.5 reads back (plan 5.5): the reference backend sets settings, file classes, a folder class, tags, palette jumps and filters, update choices and an auto-saved snapshot in one data folder; then each backend starts on a copy of that folder and reads everything back. The reference's own read-back is the expectation.",
+  "fixtures": {"tree": "standard"},
+  "template_roots": [["$ROOT/tree"]],
+  "setup": {
+    "steps": [
+      {"call": "settings.get", "params": {}, "as": "s0"},
+      {"call": "settings.update", "params": {"values": {"treemap.initial_detail": 7, "appearance.theme": "dark", "appearance.accent": "#FF8800", "tags.name_red": "Delete me", "scan.unit_base": "1000", "general.update_channel": "stable"}, "version": "$s0.version"}},
+      {"call": "classes.get", "params": {}, "as": "c0"},
+      {"call": "classes.update", "params": {"classes": [{"id": "image", "name": "Pictures", "color": "#ff0000", "color_light": "#aa0000", "extensions": ["jpg", "png"]}, {"name": "Logs", "color": "#00ff00", "extensions": ["log", "txt"]}, {"id": "video", "name": "Video", "color": "#0000ff", "extensions": ["mp4"]}, {"id": "other", "name": "Other"}]}},
+      {"call": "classes.folder", "params": {"path": "$ROOT/tree/a", "class_id": "image"}},
+      {"call": "scan.start", "params": {"roots": ["$ROOT/tree"], "workers": 0, "auto_snapshot": true}, "as": "s"},
+      {"wait_scan": "$s.scan_id", "snapshot": true},
+      {"call": "view.open", "params": {"scan_id": "$s.scan_id", "viewport": {"width": 800, "height": 600}}, "as": "v"},
+      {"call": "tree.find", "params": {"scan_id": "$s.scan_id", "path": "$ROOT/tree/a"}, "as": "a"},
+      {"call": "tree.find", "params": {"scan_id": "$s.scan_id", "path": "$ROOT/tree/many"}, "as": "many"},
+      {"call": "view.select", "params": {"view_id": "$v.state.view_id", "key": "$a.node.id"}},
+      {"call": "view.tag", "params": {"view_id": "$v.state.view_id", "color": "red"}},
+      {"call": "view.select", "params": {"view_id": "$v.state.view_id", "key": "$many.node.id"}},
+      {"call": "view.tag", "params": {"view_id": "$v.state.view_id", "color": "blue"}},
+      {"call": "palette.remember", "params": {"kind": "jump", "text": "$ROOT/tree/a/sub", "scan_id": "$s.scan_id"}},
+      {"call": "palette.remember", "params": {"kind": "filter", "text": "*.log"}},
+      {"call": "palette.remember", "params": {"kind": "filter", "text": ">1kb"}},
+      {"call": "update.check", "params": {}},
+      {"call": "update.dismiss", "params": {"version": "0.3.6"}},
+      {"call": "update.mute", "params": {"series": "0.4"}},
+      {"sleep": 1}
+    ]
+  },
+  "steps": [
+    {"call": "settings.get", "params": {}, "pick": ["values"]},
+    {"call": "classes.get", "params": {}},
+    {"call": "update.status", "params": {}, "pick": ["dismissed", "muted", "channel", "current"]},
+    {"call": "snapshot.list", "params": {}, "live_only": true},
+    {"call": "scan.start", "params": {"roots": ["$ROOT/tree"], "workers": 0, "auto_snapshot": false}, "as": "s", "pick": ["source"]},
+    {"wait_scan": "$s.scan_id", "pick": ["state", "items"]},
+    {"call": "scan.status", "params": {"scan_id": "$s.scan_id"}, "pick": ["expected_items"], "live_only": true},
+    {"call": "view.open", "params": {"scan_id": "$s.scan_id", "viewport": {"width": 800, "height": 600}}, "as": "v", "binary": true},
+    {"call": "tree.find", "params": {"scan_id": "$s.scan_id", "path": "$ROOT/tree/a"}, "as": "a", "record": false},
+    {"call": "tree.summary", "params": {"scan_id": "$s.scan_id", "node": "$a.node.id"}, "pick": ["tag", "class_id"]},
+    {"call": "palette.query", "params": {"context": {"tab": "scan", "scan_id": "$s.scan_id", "view_id": "$v.state.view_id"}}, "pick": ["recent"]},
+    {"call": "system.maintenance", "params": {}, "live_only": true},
+    {"call": "compare.sources", "params": {"scan_id": "$s.scan_id"}, "as": "src", "live_only": true},
+    {"call": "snapshot.load", "params": {"path": "$src.snapshots.0.path"}, "pick": ["state", "items", "files", "roots"], "live_only": true}
+  ]
+}

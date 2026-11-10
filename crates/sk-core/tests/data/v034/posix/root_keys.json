@@ -1,0 +1,191 @@
+[
+ {
+  "roots": [
+   "/"
+  ],
+  "key": "root-42099b4af021"
+ },
+ {
+  "roots": [
+   "//"
+  ],
+  "key": "root-ebbffb7d7ea5"
+ },
+ {
+  "roots": [
+   "///"
+  ],
+  "key": "root-42099b4af021"
+ },
+ {
+  "roots": [
+   "//a/b"
+  ],
+  "key": "b-e359c72192f7"
+ },
+ {
+  "roots": [
+   "///a/b"
+  ],
+  "key": "b-a51458f8d2c1"
+ },
+ {
+  "roots": [
+   "/home/lenny"
+  ],
+  "key": "lenny-29c92b975089"
+ },
+ {
+  "roots": [
+   "/home/lenny/"
+  ],
+  "key": "lenny-29c92b975089"
+ },
+ {
+  "roots": [
+   "/home//lenny/./x/../y"
+  ],
+  "key": "y-0d46fd8f6448"
+ },
+ {
+  "roots": [
+   "/home/lenny",
+   "/mnt/data"
+  ],
+  "key": "lenny-60bea6e7737d"
+ },
+ {
+  "roots": [
+   "/mnt/data",
+   "/home/lenny"
+  ],
+  "key": "data-60bea6e7737d"
+ },
+ {
+  "roots": [
+   "/Volumes/Macintosh HD"
+  ],
+  "key": "Macintosh_HD-68951d7fb16b"
+ },
+ {
+  "roots": [
+   "/HOME/Lenny"
+  ],
+  "key": "Lenny-f44d23ea87cd"
+ },
+ {
+  "roots": [
+   "/a/b\\c"
+  ],
+  "key": "b_c-4b7e8789cb6a"
+ },
+ {
+  "roots": [
+   "/\u00c4\u00d6\u00dc/Stra\u00dfe"
+  ],
+  "key": "Stra\u00dfe-f46123382b5a"
+ },
+ {
+  "roots": [
+   "/\u0130stanbul"
+  ],
+  "key": "\u0130stanbul-e300d66bff06"
+ },
+ {
+  "roots": [
+   "/\u039f\u0394\u03a5\u03a3\u03a3\u0395\u03a5\u03a3"
+  ],
+  "key": "\u039f\u0394\u03a5\u03a3\u03a3\u0395\u03a5\u03a3-4edeec7cd5b2"
+ },
+ {
+  "roots": [
+   "/\u0939\u093f\u0902\u0926\u0940"
+  ],
+  "key": "\u0939__\u0926-1516c296d16d"
+ },
+ {
+  "roots": [
+   "/cafe\u0301"
+  ],
+  "key": "cafe-ae90516dd883"
+ },
+ {
+  "roots": [
+   "/\u4e0b\u8f7d/\u89c6\u9891"
+  ],
+  "key": "\u89c6\u9891-e35cd7736f80"
+ },
+ {
+  "roots": [
+   "/emoji \ud83d\ude42 x"
+  ],
+  "key": "emoji___x-4d11b5157eac"
+ },
+ {
+  "roots": [
+   "/\u24b6 circled"
+  ],
+  "key": "circled-d7791e1aee1c"
+ },
+ {
+  "roots": [
+   "/\u216b roman"
+  ],
+  "key": "\u216b_roman-6cd189b7013d"
+ },
+ {
+  "roots": [
+   "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "key": "aaaaaaaaaaaaaaaaaaaaaaaa-73421e3cdb95"
+ },
+ {
+  "roots": [
+   "/___"
+  ],
+  "key": "root-b99fdb239ea6"
+ },
+ {
+  "roots": [
+   "/..."
+  ],
+  "key": "root-4d790d8f7319"
+ },
+ {
+  "roots": [
+   "/a b-c.d_e"
+  ],
+  "key": "a_b_c_d_e-73ab6a981360"
+ },
+ {
+  "roots": [
+   "/data",
+   "/DATA"
+  ],
+  "key": "data-e03d1f11aee5"
+ },
+ {
+  "roots": [
+   "/x/../.."
+  ],
+  "key": "root-42099b4af021"
+ },
+ {
+  "roots": [
+   "."
+  ],
+  "key": "root-3a52ce780950"
+ },
+ {
+  "roots": [
+   "relative/path"
+  ],
+  "key": "path-4b5291a83ada"
+ },
+ {
+  "roots": [
+   "/\ud835\udc00\ud835\udc01 math"
+  ],
+  "key": "\ud835\udc00\ud835\udc01_math-b33534939f1f"
+ }
+]

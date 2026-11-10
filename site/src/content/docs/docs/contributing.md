@@ -7,78 +7,79 @@ SpaceKnife is an MIT-licensed project on GitHub: [DuskXi/SpaceKnife](https://git
 
 ## What you need
 
-- [uv](https://docs.astral.sh/uv/). It installs and manages Python 3.12 for the workspace.
-- Node.js 22 with pnpm, for the Electron app. The website needs Node.js 22.12 or later.
-- A Rust toolchain, for the native extension (the fast folder walker and the MFT reader). It is optional for development: without it every native path falls back to Python, and scans are several times slower. The installers require it.
+- [rustup](https://rustup.rs/), for the backend, the command line and the app's native side: the first time cargo runs in the repository, it installs the Rust version that `rust-toolchain.toml` pins (edition 2024, with clippy and rustfmt), the same one CI uses.
+- Node.js 24 with pnpm 10, for the app's interface (Nuxt 4 + Vue 3) and its two shells, Tauri 2 and Electron. The website needs Node.js 22.12 or later.
+- On Linux, the libraries Tauri builds against: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libssl-dev` and `patchelf` (Ubuntu and Debian package names). On Windows, Microsoft Edge WebView2 (Windows 11 has it) and the MSVC build tools; on macOS, the Xcode command line tools.
 
 ## Run from source
 
 ```bash
 git clone https://github.com/DuskXi/SpaceKnife.git
 cd SpaceKnife
-uv sync --group native
-pnpm -C apps/electron install
-pnpm -C apps/electron dev
+cargo build
+cd apps/desktop
+pnpm install
+pnpm tauri dev
 ```
 
-- `uv sync --group native` sets up the Python workspace and compiles the native extension. Plain `uv sync` skips the extension.
-- `pnpm -C apps/electron dev` starts the Electron app. It launches the backend from the repository's environment (`.venv`); `SPACEKNIFE_PYTHON` points it at another interpreter.
-- The backend on its own: `uv run spaceknife serve` prints one `ready` line with the WebSocket address and a development token. Scans in a terminal: `uv run spaceknife scan <path>` (see [Command line](../command-line/)).
+- `pnpm tauri dev` builds and starts the app. The backend runs inside the app's process (`sk_server::start`), so there is no second program to start.
+- `pnpm dev` serves only the interface in a browser at `http://localhost:3000`, without a backend.
+- The backend on its own: `cargo run -p sk-server --bin spaceknife-cli -- serve` prints one `ready` line with the WebSocket address and a token. Scans in a terminal: `cargo run -p sk-server --bin spaceknife-cli -- scan <path>` (see [Command line](../command-line/)); add `--release` for realistic speed.
+- The same interface also runs in the Electron shell (`apps/electron-shell`), which the rpm, the AppImage and the Linux portable that brings its own engine use, because RHEL 9 has no WebKitGTK 4.1. To try it: `cargo build -p sk-server --bin spaceknife-cli`, `pnpm -C apps/desktop generate`, then `pnpm -C apps/electron-shell install` and `pnpm -C apps/electron-shell dev`. Its backend is the child process `spaceknife-cli serve`. The interface talks to either shell only through `window.sk` (`app/shared/api.ts`), and a change to it has to work in both.
 - Set `SPACEKNIFE_HOME` to an empty folder to keep your experiments away from your real snapshots and settings.
 
 ## Checks before a pull request
 
-These are the checks CI runs. Python:
+These are the checks CI runs. Rust:
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy packages/protocol/src packages/backend/src packages/client/src tools/gen_design.py
-uv run pytest
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
 Generated files must be up to date:
 
 ```bash
-uv run python tools/gen_design.py --check
-uv run spaceknife schema --check packages/protocol/schema/protocol.schema.json
-uv run python tools/gen_ts_protocol.py --check
-uv run python tools/gen_docs.py --check
+node tools/gen_design.mjs --check
+cargo run -p sk-protocol --bin gen-ts -- --check
 ```
 
-The Electron app and the translations:
+The Windows console launcher `SpaceKnife.com` is a small workspace of its own:
 
 ```bash
-pnpm -C apps/electron typecheck
-pnpm -C apps/electron test
-uv run python tools/i18n_check.py
+cargo clippy --manifest-path packaging/console-launcher/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path packaging/console-launcher/Cargo.toml
 ```
 
-- CI runs the Python checks on Windows, Ubuntu 22.04 and macOS 14, with the native extension built, and the Electron checks with Node.js 22.
-- `SPACEKNIFE_NO_NATIVE=1` makes the backend use the Python fallbacks; the tests compare the native and Python results.
+The interface, the Electron shell, the tools and the translations:
+
+```bash
+pnpm -C apps/desktop typecheck
+pnpm -C apps/desktop test
+pnpm -C apps/electron-shell typecheck
+pnpm -C apps/electron-shell test
+node --test "tools/tests/*.test.mjs"
+node tools/i18n_check.mjs
+```
+
+- `cargo test --workspace` includes the parity gate's replay (`cargo test -p sk-server --test parity_replay`): the backend's answers over the protocol, compared with those 0.3.4's Python backend gave to the same scenarios. The live comparison against a `v0.3.4` worktree needs Python 3.12 and uv; how to run it and how to record the answers again is in [tests/parity/README.md](https://github.com/DuskXi/SpaceKnife/blob/main/tests/parity/README.md).
+- A bug fix comes with a test that fails without it.
 - Keep tests and benchmarks small and short. Never scan or write large amounts of data on a contributor's real drives.
 
 ## Build the installers
 
 ```bash
-uv sync --locked --group native --group package
-pnpm -C apps/electron install
-uv run python tools/build_package.py
+cd apps/desktop
+pnpm install
+pnpm bundle
+pnpm bundle:portable
 ```
 
-The script builds the installers of the system it runs on, into `dist/electron/`: the NSIS installer on Windows; AppImage, deb and rpm on Linux; a dmg for the Mac's own architecture on macOS.
+`pnpm bundle` builds the bundles of the system it runs on with Tauri, into `target/release/bundle/`: the NSIS installer on Windows; AppImage, deb and rpm on Linux; the app and a dmg on macOS. Before Tauri runs, `apps/desktop/scripts/prepare-bundle.mjs` builds `spaceknife-cli` (installed next to the app) and writes the license files. `pnpm bundle:portable`, after `pnpm bundle`, packs the portable archive into `target/portable/`. A release publishes the Tauri builds of the Windows installer, the deb, the macOS app and dmg and the portables; the rpm, the AppImage and the Linux portable under 0.3.4's file name come from the Electron shell instead: `pnpm -C apps/electron-shell package` builds them into `target/electron-shell/dist`.
 
-| Option | What it does |
-|---|---|
-| `--portable` | Also build the portable archive (Windows zip, Linux tar.gz) |
-| `--no-installers` | Only the unpacked app (and the portable archive with `--portable`) |
-| `--skip-backend` | Reuse the frozen backend in `dist/backend/` when only the Electron side changed |
-| `--targets AppImage deb rpm` | Linux: build only some of the formats |
-
-It runs these steps: a release build of the native extension with the build machine's paths removed; PyInstaller freezes the backend; a smoke test of the frozen backend (the native extension must load); on Linux, a check that nothing needs a glibc newer than 2.34 (RHEL 9); `electron-vite build`; the license files; `electron-builder`; a check that no packaged file contains the build machine's home folder; on macOS, a check of the ad-hoc signature.
-
-- The rpm needs `rpmbuild`; the AppImage's `.zsync` file needs `zsyncmake` (without it the update information is still written). The first run of electron-builder downloads its tools.
-- Test a packaged app with `uv run python packaging/smoke_app.py dist/electron/win-unpacked/SpaceKnife.exe` (or `linux-unpacked/spaceknife`, or an AppImage). It starts the app minimized with a temporary data folder, waits for the backend and the start page, then closes it like a user would.
+- Test a packaged app with `node packaging/smoke-app.mjs` (either shell), headless mode with `node packaging/smoke-headless.mjs`, and a portable copy's update with `node packaging/update-e2e.mjs`. `node packaging/update-from-034.mjs` updates a real 0.3.4 to a build; CI runs it for every kind of install.
+- The release file names are a contract with every installed copy: 0.3.4 looks for its file under exactly these names, so they never change.
 
 The details, including the release file names, are in [docs/packaging.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/packaging.md).
 
@@ -89,22 +90,25 @@ pnpm -C site install
 pnpm -C site dev
 ```
 
-The website lives in `site/` (Astro with Starlight) and is published to GitHub Pages from `main`. These documentation pages are Markdown files: `site/src/content/docs/docs/<id>.md` in English and `site/src/content/docs/zh/docs/<id>.md` in Chinese, ordered by `site/src/docs-nav.json`. From 0.3.2 the app's help page uses the same files. Read [docs/docs-writing.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/docs-writing.md) before you edit them: it lists the Markdown features both places can show. The shortcut and settings tables between `<!-- generated:… -->` markers are written by `uv run python tools/gen_docs.py` from `palette/commands.py` and `settings.py`; don't edit them by hand, and rerun the script after changing a command or a setting. `pnpm -C site build` checks that every link points to an existing page.
+The website lives in `site/` (Astro with Starlight) and is published to GitHub Pages from `main`. These documentation pages are Markdown files: `site/src/content/docs/docs/<id>.md` in English and `site/src/content/docs/zh/docs/<id>.md` in Chinese, ordered by `site/src/docs-nav.json`. From 0.3.2 the app's help page uses the same files. Read [docs/docs-writing.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/docs-writing.md) before you edit them: it lists the Markdown features both places can show. The shortcut and settings tables between `<!-- generated:… -->` markers mirror the command list (`crates/sk-core/src/palette/commands.rs`) and the settings registry (`crates/sk-core/src/settings/registry.rs`); until a generator reads them from the Rust code, they are kept up to date by hand: change them together with a command or a setting. `pnpm -C site build` checks that every link points to an existing page.
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `packages/protocol` | The protocol: pydantic message models, binary frame codec, JSON Schema |
-| `packages/backend` | The backend: WebSocket server, scanning, columnar store and snapshots, filter engine, layouts, views, monitoring, export, file operations, command line |
-| `packages/native` | The native Rust extension (PyO3): parallel folder walking, MFT parsing |
-| `packages/client` | Client core shared by Python front ends (no GUI dependencies) |
-| `apps/electron` | The Electron app and its installer configuration (`electron-builder.yml`) |
+| `crates/sk-protocol` | The protocol: message types, binary frame codec, the TypeScript types and JSON Schema it generates |
+| `crates/sk-store` | The columnar store of a scan and the snapshot files |
+| `crates/sk-native` | Parallel folder walking and MFT parsing |
+| `crates/sk-core` | Scanning, the filter engine, layouts, views, monitoring, export, file operations, settings, updates |
+| `crates/sk-server` | The WebSocket server and the `spaceknife-cli` command line |
+| `apps/desktop` | The app: the interface (`app/`, Nuxt + Vue) and the Tauri shell and bundle configuration (`src-tauri/`) |
+| `apps/electron-shell` | The Electron shell: main process and preload, no interface of its own |
 | `design/tokens`, `design/icons` | Design tokens and icon sources; `design/build` is generated |
-| `packaging` | The frozen backend (PyInstaller spec and entry point) and the smoke tests |
+| `packaging` | The tests of packaged apps (smoke, headless, updates, also from 0.3.4) and the Windows console launcher `SpaceKnife.com` |
+| `tests/parity` | The parity gate: the same protocol scenarios against 0.3.4's backend and the Rust one |
 | `site` | The website and this documentation |
 | `docs` | Design documents |
-| `tools` | Code generation and developer tools: `build_package.py`, `gen_design.py`, `gen_ts_protocol.py`, `i18n_check.py`, `demo/screenshots.py` |
+| `tools` | Code generation and developer tools: `gen_design.mjs`, `gen_pinyin.mjs`, `i18n_check.mjs`, `release.mjs`, `demo/screenshots.mjs` |
 
 ## Design documents
 
@@ -117,15 +121,15 @@ The design documents describe how each part works and the contracts between the 
 | [protocol.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/protocol.md) | The WebSocket protocol between the backend and the front ends |
 | [visuals.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/visuals.md) | The visualizations: layout engines, wire formats, renderer components |
 | [plugins.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/plugins.md) | Lessons and requirements for a future plugin system (not implemented) |
-| [packaging.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/packaging.md) | Installers, the frozen backend, data locations, update checks |
+| [packaging.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/packaging.md) | Installers, portable archives, data locations, update checks |
 | [memory.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/memory.md) | The memory model: cost per item, mapped storage, the watchdog |
 | [i18n.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/i18n.md) | How the interface texts are translated |
 | [docs-writing.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/docs-writing.md) | How to write these documentation pages |
-| [native.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/native.md) | The native extension, the scan helper and the disk-load limit |
+| [native.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/native.md) | The native scanning code, the scan helper and the disk-load limit |
 | [monitor.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/monitor.md) | Live monitoring (the file change hooks) |
 | [manage.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/manage.md) | The delete basket, snapshot comparison, export, insights and settings import |
 | [filter-syntax.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/filter-syntax.md) | The filter language, formally |
-| [export-templates.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/export-templates.md) | The export template language, the export formats and `spaceknife run` |
+| [export-templates.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/export-templates.md) | The export template language, the export formats and `spaceknife-cli run` |
 | [insights.md](https://github.com/DuskXi/SpaceKnife/blob/main/docs/insights.md) | The format of the insight rules |
 
 When you change an interface between parts, change its document first.
@@ -139,9 +143,9 @@ When you change an interface between parts, change its document first.
 
 For pull requests:
 
-- Match the surrounding code: naming, comment density, idioms. Python 3.12 with type hints (mypy strict); protocol messages are pydantic models; command-line output uses rich and logs use loguru.
+- Match the surrounding code: naming, comment density, idioms. Rust that passes `cargo fmt` and `cargo clippy -D warnings`; protocol messages are types in `sk-protocol`; logs use `tracing`. The interface is TypeScript with Vue's `<script setup>`.
 - One change per pull request, with a short description of what and why, and tests for behaviour changes.
-- Text the user sees goes through `_()` / `tr()` in the backend or `t()` in the front end, with an English entry in the catalogs.
+- Text the user sees goes through `t()` / `tr!` in the backend or `t()` in the interface, with an English entry in the catalogs.
 - No personal data: examples, tests, screenshots and logs use made-up paths and names, such as `C:\Users\lenny\…` or `/home/lenny/…`.
 - Windows and Linux must keep working; say so if you could only test one.
 

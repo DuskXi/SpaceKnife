@@ -50,7 +50,7 @@ An MFT quick scan shows its phases instead of a percentage: `Waiting for adminis
 A full scan lists folders in batches: each call lists up to 256 folders and returns after at most 50 ms with what it has. Batches run on a pool of **listing threads**; the main thread folds every batch into the tree, which is why the picture can grow while the scan runs.
 
 - **Listing threads**: one per CPU, between 2 and 16. On macOS twice the CPUs, between 4 and 16, because APFS listings wait in the kernel often enough that extra threads keep the CPUs busy. `SPACEKNIFE_SCAN_THREADS` sets the number (1 to 64).
-- **Native walker**: the listing is done by a native extension written in Rust, included in every installer. Without it (a source checkout without Rust) a Python walker runs in worker processes and is several times slower.
+- **Native walker**: the listing is done by SpaceKnife's own Rust code, with the system calls below.
 - **System calls**: on Windows one `NtQueryDirectoryFile` call returns names, sizes, size on disk, times, attributes and file IDs together; on Linux `openat`, `getdents64` and `fstatat`; on macOS `getattrlistbulk` for files and `fstatat` for folders.
 - **How many batches run at once** is decided by the disk-load limit and the kind of disk (below).
 
@@ -148,21 +148,26 @@ The **Idle** level always gives way, as soon as other programs use more than 10 
 After every full scan, the log file gets two lines like these (the numbers are an example):
 
 ```text
-scan done: 1,234,567 items, 1,103,402 files, 210.4 GiB in 41.20s (29,965 items/s), 12 errors
-scan profile: 1,234,567 items in 41.2s (29,965/s); listing threads busy 92% of 16; main thread folding 38%; held by the disk-load limit 0%; 4,823 slices; getattrlistbulk on
+scan done: 1234567 items, 1103402 files, 210.4 GiB in 41.20s (29965 items/s), 12 errors
+scan profile: 1234567 items in 41.2s (29965/s); listing calls busy 92% of 15.8 on average (16 at most) (listing width 8–16); io lane 2–24 (mean 9.6), cpu lane 8–16 (mean 12.4), 31% of folders in the io lane; cold fraction 0.84 0.71 0.52 0.40 0.33 0.28 0.25 0.22 0.20 0.18 0.17 0.15 (per 3.4s); device nvme; coordinator folding 38%; held by the disk-load limit 0%; 4823 slices; getattrlistbulk on
 ```
 
 The log file is `spaceknife.log` in the log folder (**Settings › Advanced › Files & diagnostics › Log folder**; see [Troubleshooting](../troubleshooting/)). The second line tells you what the scan waited for:
 
 | Part | Meaning | What helps |
 |---|---|---|
-| `listing threads busy 92% of 16` | The listing threads spent 92 % of their time in system calls | Near 100 %: the disk or file system is the limit. On an SSD with headroom, more threads (`SPACEKNIFE_SCAN_THREADS`) may help; on a busy or slow disk nothing will |
-| `main thread folding 38%` | Share of the scan the main thread spent adding results to the tree | Near 100 %: folding is the limit; more threads won't help |
+| `listing calls busy 92% of 15.8 on average (16 at most)` | The listing calls spent 92 % of their time in system calls; 15.8 ran at once on average, 16 at most | Near 100 %: the disk or file system is the limit. On an SSD with headroom, more threads (`SPACEKNIFE_SCAN_THREADS`) may help; on a busy or slow disk nothing will |
+| `listing width 8–16` | How many listing calls were allowed at once, lowest to highest, during the scan | — |
+| `io lane 2–24 (mean 9.6), cpu lane 8–16 (mean 12.4), 31% of folders in the io lane` | How many folders were listed at once among those waiting for the disk (the IO lane) and those already in the file cache (the CPU lane), and the share of folders listed in the IO lane | — |
+| `cold fraction … (per 3.4s)` | The share of folders that waited for the disk, one point per 3.4 s of the scan | — |
+| `device nvme` | The kind of drive the scan started from: `nvme`, `ssd`, `hdd`, `flash`, `network`, `virtual` or `unknown` | — |
+| `disk-load limit's concurrency 6.2 on average` | Only with a disk-load limit: how many folders the limit let be listed at once, on average | — |
+| `coordinator folding 38%` | Share of the scan the coordinating thread spent adding results to the tree | Near 100 %: folding is the limit; more threads won't help |
 | `held by the disk-load limit 0%` | Time no folder was being listed because the limit held the next batch | High: the limit is doing its job. Choose a higher level or Full speed if you want speed |
-| `4,823 slices` | Batches listed | — |
+| `4823 slices` | Batches listed | — |
 | `getattrlistbulk on` | macOS only: bulk listing is on, `off: <reason>`, or `untested` | — |
 
-When busy and folding are both low, the listing threads were waiting for work: a deep, narrow folder tree, or a scan that was yielding to other programs. The command line's `--profile` prints the same numbers.
+When busy and folding are both low, the listing calls were waiting for work: a deep, narrow folder tree, or a scan that was yielding to other programs. The command line's `--profile` prints the same numbers.
 
 ## Memory and very large disks
 

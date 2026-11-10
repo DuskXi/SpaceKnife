@@ -1,20 +1,24 @@
 # SpaceKnife 协议 v1
 
-后端与三个前端（Electron、Qt、WinUI3）之间只通过这套 WebSocket 协议通信。消息模型的唯一事实来源是 `packages/protocol`（pydantic v2）；机器可读的 JSON Schema 在 `packages/protocol/schema/protocol.schema.json`，由 `spaceknife schema` 生成，CI 会检查它与源码是否一致。
+后端（`crates/sk-server`）与界面（`apps/desktop`，Tauri 窗口或无头模式下的浏览器）之间只通过这套 WebSocket 协议通信。消息模型的唯一事实来源是 `crates/sk-protocol`（Rust，serde + schemars）；TypeScript 类型 `crates/sk-protocol/generated/protocol.ts` 和机器可读的 JSON Schema `crates/sk-protocol/generated/protocol.schema.json` 由 `cargo run -p sk-protocol --bin gen-ts`（`-- --schema <文件>` 写 Schema）生成，`--check` 检查生成的文件是否过期。
 
 ## 1. 启动与连接
 
-后端由前端进程以子进程方式启动：
+桌面应用在自己的进程里启动后端：`apps/desktop/src-tauri/src/backend.rs` 调用 `sk_server::start`，在随机的回环端口上监听，每次启动生成新的 token，直接交给窗口里的界面（没有子进程、没有 ready 行）；设了 `SPACEKNIFE_READY_FILE=<路径>` 时把 `{url, token, pid}` 写进那个文件一次（测试、演示、便携版的替换助手确认新版本已启动；外壳启动时就把这个变量从自己的环境里拿掉，它启动的程序不会继承，见 [packaging.md](packaging.md) 第 2 节）。
+
+其他启动方（测试、脚本、别的客户端）以子进程方式运行独立的后端：
 
 ```bash
-python -X utf8 -m spaceknife serve --token-stdin
+spaceknife-cli serve --token-stdin
 ```
+
+下面三条是它与启动方的约定（`crates/sk-server/src/cli/serve.rs`）。`--ready-file <路径>` 另外把 ready 信息（含 token）写进那个文件（只有本人可读，退出时删除）。
 
 1. 启动方在 stdin 第一行写入本次启动的随机 token（不放在 argv 或环境变量里，避免被同机其他用户看到）。
 2. 后端开始监听后，在 **stdout** 输出唯一一行 JSON，之后 stdout 不再输出任何内容；日志一律写 stderr：
 
    ```json
-   {"event": "ready", "url": "ws://127.0.0.1:53817/v1", "host": "127.0.0.1", "port": 53817, "pid": 1234, "protocol": "1.1", "subprotocol": "spaceknife.v1"}
+   {"event": "ready", "url": "ws://127.0.0.1:53817/v1", "host": "127.0.0.1", "port": 53817, "pid": 1234, "protocol": "1.1", "subprotocol": "spaceknife.v1", "updates_dir": "…"}
    ```
 
    不带 `--token-stdin` 时，后端自己生成 token，并放在 ready 行的 `token` 字段里（开发调试用）。
@@ -27,21 +31,21 @@ python -X utf8 -m spaceknife serve --token-stdin
 | 地址 | 只绑定 `127.0.0.1`，端口随机 |
 | 路径 | `/v1`，其他路径返回 HTTP 404 |
 | 子协议 | 必须协商 `spaceknife.v1`，否则 HTTP 400 |
-| Origin | 白名单：`app://spaceknife`、无 Origin（Python 客户端）、以及 `--allow-origin` 指定的开发地址；其他返回 HTTP 403 |
+| Origin | 白名单：应用窗口（`tauri://localhost`、`http(s)://tauri.localhost`）、`app://spaceknife`（Electron 时期的）、无 Origin（原生客户端）、以及 `--allow-origin` / `ServeOptions::allow_origins` 指定的开发地址；其他返回 HTTP 403（`crates/sk-server/src/app.rs`） |
 | 压缩 | 关闭（permessage-deflate 会让二进制吞吐下降约 8 倍） |
 | 入站消息上限 | 1 MiB |
 
 ### 无头模式（浏览器经 HTTP 连接）
 
-`SpaceKnife --headless` / `--listen <地址>`（[site 文档](../site/src/content/docs/zh/docs/headless.md)）不开窗口，Electron 主进程在指定地址上起一个 HTTP(S) 服务器（[headless-server.ts](../apps/electron/src/main/headless-server.ts)），后端照旧只监听 `127.0.0.1`，握手和协议不变：
+`spaceknife-cli headless [--listen <地址>]`（`--headless` / `--listen` 作为别名仍然接受；[site 文档](../site/src/content/docs/zh/docs/headless.md)）不开窗口，服务端直接在指定地址上提供 HTTP(S)：构建好的界面、`/sk/info` 和同一地址上的 `/v1` WebSocket（[crates/sk-server/src/http.rs](../crates/sk-server/src/http.rs)，[cli/headless.rs](../crates/sk-server/src/cli/headless.rs)），握手和协议不变：
 
 | 路径 | 内容 |
 |---|---|
-| `GET /`、`/assets/…` | 构建好的界面（`out/renderer`），公开；`index.html` 的 CSP `connect-src` 改为这个服务器自己的 `ws://` / `wss://` 地址，`no-store`，禁止被嵌入框架 |
+| `GET /`、`/assets/…` | 构建好的界面（默认是可执行文件旁边的 `ui`，`--ui <目录>` 可改），公开；`index.html` 的 CSP `connect-src` 改为这个服务器自己的 `ws://` / `wss://` 地址，`no-store`，禁止被嵌入框架 |
 | `GET /sk/info` | 界面连接前需要的 `{platform, version, hostname, home, secure}`；必须带 `Authorization: Bearer <token>`，否则 401 |
-| `GET /v1`（Upgrade） | 原样转发到后端的 `/v1`。浏览器的 `Origin` 必须等于 `<scheme>://<Host>`（页面自己的源，防跨站 WebSocket 劫持），否则 403；转发时 `Origin` 换成 `http://headless.spaceknife.invalid`（启动后端时用 `--allow-origin` 放行），去掉 `Forwarded` / `X-Forwarded-*` |
+| `GET /v1`（Upgrade） | 协议的 WebSocket，由同一个服务器直接提供（不再转发）。浏览器的 `Origin` 必须等于 `<scheme>://<Host>`（页面自己的源，防跨站 WebSocket 劫持），否则 403 |
 
-token 就是启动后端用的那个，放在打印出的链接的片段里（`#token=…`，浏览器不会发给服务器）；界面（[shim.ts](../apps/electron/src/renderer/src/shim.ts)）读出后从地址栏移除、存在标签页的 sessionStorage 里，`session.hello` 照常校验它。
+token 是这次启动生成的，放在打印出的链接的片段里（`#token=…`，浏览器不会发给服务器）；界面（[shim.ts](../apps/desktop/app/shim.ts)）读出后从地址栏移除、存在标签页的 sessionStorage 里，`session.hello` 照常校验它。
 
 ## 2. 握手
 
@@ -77,8 +81,10 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `layout.flame.v1` | 能解码并画 `flame.v1` 帧（火焰图） |
 | `layout.polar.v1` | 能解码并画 `polar.v1` 帧（火焰-极坐标图） |
 | `updates.v1` | 接收 `update.changed`（更新检查结果与下载进度，见 §3「更新检查」） |
+| `node-generation.v1` | 节点 id 带上它所属的编号：`FrameInfo`、`ViewResults`、`TreeSummaryResult` 的 `generation`（树重新编号——文件变化后的压缩、MFT 扫描接手、对比重新计算——之后换一个）；`basket.add` 带回读到 id 时的 `generation`，树已经重新编号过就拒绝（UNKNOWN_NODE），不会把同一个 id 现在指的别的项加进去 |
+| `basket-confirm.v1` | 删除篮的项带 `rev`（它覆盖的范围变大或重新加入时变）；`basket.execute` 用 `confirm`（用户确认时看到的每一项的 `id` 和 `rev`）代替 `ids`：只执行这些，其中有一项离开了删除篮或变了就什么都不执行（BASKET_CHANGED），界面按现在的内容再问一次 |
 
-`drawlist.v1`（树图）是基线，不需要能力。后端只给会话发它协商过的布局：没有对应能力的会话里，新视图和 `view.open` 的可视化退回树图，`view.set` 选不可用的可视化返回 INVALID_PARAMS；配色 `branch` 也只对带 `visuals.v1` 的会话开放。Electron 的能力列表由前端已注册的可视化组件生成。
+`drawlist.v1`（树图）是基线，不需要能力。后端只给会话发它协商过的布局：没有对应能力的会话里，新视图和 `view.open` 的可视化退回树图，`view.set` 选不可用的可视化返回 INVALID_PARAMS；配色 `branch` 也只对带 `visuals.v1` 的会话开放。界面的能力列表由已注册的可视化组件生成。
 
 ## 3. 文本帧（控制面）
 
@@ -97,6 +103,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 - 取消：客户端发 `$/cancel {"id": …}` 通知，被取消的请求回 -32800 REQUEST_CANCELLED。
 - 订阅：`$/subscribe {"topic", "params", "rate_hz"}` 返回 `{"sub"}`，之后以事件推送，事件 params 里带 `sub`；`$/unsubscribe {"sub"}` 结束订阅。
 - 出站顺序：响应优先，其次是二进制大块数据，最后是事件；客户端积压过多时丢弃事件。
+- 不是合法 Unicode 的名字（Windows 上的孤立代理项、POSIX 上不是 UTF-8 的字节）在文本帧里按 0.3.4 的转义形式写（Windows `\udc80`，POSIX `\xff`），名字、路径、`path.forms` 的文本形式、删除篮、结果列表、面包屑、命令面板、对比视图、文件操作的结果都一样，从不是 U+FFFD；二进制帧的 `names` 里每个这样的单元写成一个 `?`（0.3.4 的 `encode("utf-8", "replace")`）。这种文本按路径交给系统什么也找不到，或者找到另一项：只有 `path.forms` 的 `uri` 按原样的字节编码（这时它解不成 UTF-8），界面据此拒绝打开、显示或开终端。`tree.find` 和命令面板的路径也认转义形式：按原样找不到时，每级名字和它的转义形式比较（Windows 上转义里的 `\` 不算分隔符）。
 
 ### 当前方法
 
@@ -108,7 +115,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `app.shutdown` | 请求后端优雅退出（先回响应再关闭） |
 | `$/subscribe`、`$/unsubscribe` | 订阅管理 |
 | `volume.list` | 可扫描的卷：挂载点、文件系统、容量、已用、可用、簇大小、网络盘/可移动盘；介质（NVMe SSD / SATA SSD / 机械盘 / USB / 网络，免提权探测）、是否系统卷、网络路径、不可用原因（无介质、未连接、无法读取）（W1） |
-| `machine.disks` | 「本机磁盘」页（`MachineDisks`）：每块物理盘（型号、厂商、序列号、固件、容量、介质、接口、可移动、TRIM、系统盘）和它的链路 `DiskLink`（PCIe 代数与通道数、SATA / USB 速率，各有协商值和设备支持的最高值；SATA 盘另给控制器的 PCIe 链路）、盘上的卷（按盘上顺序，带在这块盘上占的字节数）；每个卷（`volume.list` 的同一份 `VolumeInfo`）所在的盘，以及打开着的整卷扫描（计数，扫完后还有最大的文件类别和顶层文件夹）或最新的整卷快照（只读头部的计数）。全部免提权读取（`spaceknife.disks`），系统没给的留空 |
+| `machine.disks` | 「本机磁盘」页（`MachineDisks`）：每块物理盘（型号、厂商、序列号、固件、容量、介质、接口、可移动、TRIM、系统盘）和它的链路 `DiskLink`（PCIe 代数与通道数、SATA / USB 速率，各有协商值和设备支持的最高值；SATA 盘另给控制器的 PCIe 链路）、盘上的卷（按盘上顺序，带在这块盘上占的字节数）；每个卷（`volume.list` 的同一份 `VolumeInfo`）所在的盘，以及打开着的整卷扫描（计数，扫完后还有最大的文件类别和顶层文件夹）或最新的整卷快照（只读头部的计数）。全部免提权读取（`crates/sk-core/src/disks/`），系统没给的留空 |
 | `scan.check_paths` | 校验输入的扫描路径：是否存在、是否文件夹、能否访问、所在卷；互相包含的路径合并到上层，返回最终要扫描的根（UI-W1-25） |
 | `scan.start` | 开始扫描一个或多个根（`roots`；`cross_mounts`、`workers`、`auto_snapshot` 省略时取设置），立即返回扫描状态 |
 | `scan.status`、`scan.list` | 扫描状态：项数、文件/文件夹数、占用与逻辑大小、近几秒的项速率与字节速率、百分比（整卷按已用空间，文件夹按同一目标上次扫描的项数）、剩余时间估计、无法访问的目录、可用/未知空间、快照路径 |
@@ -134,9 +141,9 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `palette.preview` | 一个过滤式在整个扫描上的匹配项数与大小（命令面板的过滤直达项与最近过滤项），按规范形与数据版本缓存 |
 | `palette.remember` / `palette.clear` | 记录在面板里执行过的路径跳转（按扫描目标）与过滤（全局）；清除某扫描目标的跳转和全部过滤 |
 | `view.render`、`view.list`、`view.close` | 重发一帧；列出本会话的视图；关闭视图（会话断开或扫描关闭时自动关闭） |
-| `update.status` | 更新检查的现状（`UpdateStatus`）：当前版本、安装方式、是否自动检查、通道、上次成功检查的时间与失败原因、下次自动检查的时间 `next_check_at`（自动检查关闭时为空）、落后程度 `level`、最新版本（标题、发布页、说明、本安装方式对应的文件）、卡片是否已关闭 `dismissed`、最新版本所属的系列 `series`（次版本更新为 major.minor，如 `"0.4"`；主版本更新为 major，如 `"1"`；修订版或没有更新时为空）与它是否被跳过 `muted`、下载状态 |
+| `update.status` | 更新检查的现状（`UpdateStatus`）：当前版本、安装方式、是否自动检查、通道、上次成功检查的时间与失败原因、下次自动检查的时间 `next_check_at`（自动检查关闭时为空）、落后程度 `level`、最新版本（标题、发布页、说明、本安装方式对应的文件）、卡片是否已关闭 `dismissed`、最新版本所属的系列 `series`（次版本更新为 major.minor，如 `"0.4"`；主版本更新为 major，如 `"1"`；修订版或没有更新时为空）与它是否被跳过 `muted`、下载状态；`rollback`（0.3.5 起）：便携版上一次更新在应用退出之后被撤回了（替换助手的说明 `updates/rollback-<版本>.json`，版本比正在运行的新）时的 `UpdateRollback`——`version`、用会话语言写的 `reason`、助手的英文原文 `detail`、`at`、更新日志的路径 `log`，否则为空 |
 | `update.check` | 立即检查 GitHub 发布列表（自动检查关闭时也查），检查进行中则等它结束；返回新的 `UpdateStatus` |
-| `update.dismiss` | `{version}` 的卡片 / 对话框已被关闭，此版本不再弹出（徽章保留） |
+| `update.dismiss` | `{version}` 的卡片 / 对话框已被关闭，此版本不再弹出（徽章保留）；撤回的说明（`rollback`）一并删除 |
 | `update.mute` | 跳过或恢复一个系列的提示（`UpdateMuteParams`：`series` 匹配 `^\d{1,6}(\.\d{1,6})?$`，取 `UpdateStatus.series` 的值；`muted` 默认 `true`，`false` 为恢复）：被跳过的系列的版本不弹卡片、不弹对话框、不显示徽章，也不自动下载（「关于与更新」页仍显示）。返回新的 `UpdateStatus`；恢复后如果「自动下载更新」开启，随即开始自动下载 |
 | `update.releases` | 缓存里最近的发布（`UpdateReleases`，最多 30 个，新的在前，每个的说明最多 16 KiB，不带文件），即「关于与更新」页的发布时间线；还没检查过时为空 |
 | `update.download` / `update.cancel` | 把 `{version}` 对应本安装方式的文件下载到数据目录的 `updates` 文件夹并校验 SHA-256（立即返回，进度见 `update.changed`）；不是当前可更新的版本返回 INVALID_PARAMS，没有对应文件返回 INVALID_REQUEST。停止下载并删除未完成的文件 |
@@ -160,10 +167,10 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 - **通道**：`preview`（默认）包括 GitHub 上标为 Pre-release 或版本号带预发布段（`0.4.0-beta.1`）的版本，`stable` 只要正式版；草稿和不是语义化版本号的 tag 一律忽略，取版本号最大的一个。
 - **落后程度** `level` 按第一个不同的版本段：`patch`（0.3.0 → 0.3.1，只在右上角显示徽章）、`minor`（0.3.x → 0.4.0，另在左上角挂出带说明的卡片）、`major`（0.x → 1.0.0，另弹出窗口内对话框）；同一版本的预发布 → 正式版算 `patch`。徽章对所有级别都显示（被跳过的系列除外），`dismissed` 只影响卡片 / 对话框。
 - **跳过一个系列**（`update.mute`）：`series` 只在 `minor` / `major` 时有值（`patch` 只有徽章，没有跳过按钮）。跳过 `"0.4"` 覆盖所有 0.4.x，跳过 `"1"` 覆盖 1.1.0、1.2.3 等所有 1.x；别的系列（0.5.0、2.0.0）照常提示。`muted` 为真时前端不显示卡片、对话框和徽章，`update.check` 只提示一句，「查看更新」打开「关于与更新」页。跳过的系列存在 `update.json` 的 `muted`（列表，最多 20 个，重启后保留，换了发布列表也保留）；运行的版本已经到了（或超过）的系列，在下一次改动这个列表时去掉。关闭卡片（`update.dismiss`）仍然只管那一个版本。
-- **文件**：按启动方传入的安装方式（`SPACEKNIFE_INSTALL_KIND`：`nsis` / `portable` / `appimage` / `deb` / `rpm` / `dmg`，不设为 `dev`）和平台、架构选发布里的文件（命名见 tools/build_package.py）；`dev`、`unknown` 或没有对应文件时 `latest.asset` 为空，只给发布页。SHA-256 取自发布里的 `SHA256SUMS*.txt`（下载时才取），不符时删除文件并报错；目标文件已存在且校验相符时直接复用。下载到数据目录的 `updates` 文件夹（不再用系统的「下载」文件夹，`SPACEKNIFE_DOWNLOAD_DIR` 已去掉）；AppImage 下载后设为可执行。
+- **文件**：按启动方传入的安装方式（`SPACEKNIFE_INSTALL_KIND`：`nsis` / `portable` / `appimage` / `deb` / `rpm` / `dmg`，不设为 `dev`）和平台、架构选发布里的文件（命名见 `crates/sk-core/src/update/mod.rs` 的 `asset_templates`）；`dev`、`unknown` 或没有对应文件时 `latest.asset` 为空，只给发布页。SHA-256 取自发布里的 `SHA256SUMS*.txt`（下载时才取），不符时删除文件并报错；目标文件已存在且校验相符时直接复用。下载到数据目录的 `updates` 文件夹（不再用系统的「下载」文件夹，`SPACEKNIFE_DOWNLOAD_DIR` 已去掉）；AppImage 下载后设为可执行。
 - **自动下载**：只在真正的应用里（有自动检查的调度器时）、设置「自动下载更新」开启时，检查之后自动开始下载找到的新版本；这个版本的下载正在进行、已完成或已失败时不再重复（失败的等下一次检查或用户点击）；被跳过的系列不自动下载。测试和演示不自动下载。
 - **清理**：应用启动时（调度器开始前）清理 `updates` 文件夹：没下完的 `*.part`，以及版本不高于当前版本的发布文件、`staging-<版本>`、`previous-<版本>`、换文件的计划 `update-<版本>.json` 和日志 `update-<版本>.log`（以及早期测试版留下的 `update-<版本>.ps1/.sh`）；更新的版本和认不出的名字都保留。
-- **当前版本**：`SPACEKNIFE_APP_VERSION`（Electron 传 `app.getVersion()`），否则取第一个声明 `updates.v1` 的会话在 `session.hello` 里报的客户端版本。测试与演示可以用 `SPACEKNIFE_UPDATE_FEED` 指向本机（只接受回环地址）的一份发布列表。
+- **当前版本**：启动方告诉后端的版本（应用内是 `ServeOptions::app_version`，取 Tauri 的应用版本；`spaceknife-cli serve --app-version`；或环境变量 `SPACEKNIFE_APP_VERSION`），否则取第一个声明 `updates.v1` 的会话在 `session.hello` 里报的客户端版本。测试与演示可以用 `SPACEKNIFE_UPDATE_FEED` 指向本机（只接受回环地址）的一份发布列表。
 
 ## 4. 二进制帧（数据面）
 
@@ -171,7 +178,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 [u32 小端：帧头长度 H][H 字节 UTF-8 JSON 帧头][补 0 到 8 字节对齐][数据区：各列小端、8 字节对齐]
 ```
 
-帧头（`BinaryFrameHeader`）：`stream`、`request_id`、`seq`、`final`、`layout`（带版本，如 `drawlist.v1`）、`count`（行数）、`columns: {name: {offset, dtype}}`，以及可选的 `blobs: {name: {offset, length}}`。各列都有 `count` 行，排在数据区前面；blob 是排在列之后的原始字节串（8 字节对齐），含义由 layout 规定。偏移量相对数据区起点；dtype 只允许 `<u1 <i1 <u2 <i2 <u4 <i4 <u8 <i8 <f4 <f8`。Python 端解码为只读、零拷贝的 numpy 视图（blob 为 uint8 数组）；JS 端可以在同一块内存上直接建 TypedArray。
+帧头（`BinaryFrameHeader`）：`stream`、`request_id`、`seq`、`final`、`layout`（带版本，如 `drawlist.v1`）、`count`（行数）、`columns: {name: {offset, dtype}}`，以及可选的 `blobs: {name: {offset, length}}`。各列都有 `count` 行，排在数据区前面；blob 是排在列之后的原始字节串（8 字节对齐），含义由 layout 规定。偏移量相对数据区起点；dtype 只允许 `<u1 <i1 <u2 <i2 <u4 <i4 <u8 <i8 <f4 <f8`。Rust 端（`crates/sk-protocol/src/binary.rs`）按列读写；JS 端可以在同一块内存上直接建 TypedArray。
 
 ### 4.1 视图帧与通用列
 
@@ -309,4 +316,5 @@ kind 1 是框加标题栏，子块画在框里。`FrameInfo.geometry` 和 `Frame
 | -32011 | SCAN_BUSY |
 | -32012 | UNKNOWN_VIEW |
 | -32013 | SETTINGS_CONFLICT（设置已被其他窗口修改，带上新版本号重试） |
+| -32014 | BASKET_CHANGED（确认过的删除篮项在确认之后离开了删除篮或变了，什么都没有执行；按现在的内容再确认。`error.data.state` 就是现在的删除篮（BasketState）：这个回答可能比那次变化的 `basket.changed` 事件先到，再确认要按它，不按客户端手里的那份） |
 | -32800 | REQUEST_CANCELLED |

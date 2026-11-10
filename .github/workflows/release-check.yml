@@ -1,10 +1,16 @@
 name: Release check
 
-# Reads a published release the way an installed SpaceKnife reads it (tools/release.py check):
+# Reads a published release the way an installed SpaceKnife reads it (the app's own update code,
+# cargo run -p sk-core --example release_check):
 # it must be the newest of its channel, every kind of install must find its file under the exact
 # name, and every file must match the checksum the app would read for it (each file is downloaded
-# and hashed). Runs when a release is published (also a draft the Release workflow left, published
-# by hand), and by hand for any version.
+# and hashed). Then the way an installed 0.3.4 reads it, with 0.3.4's own code (v0.3.4's tree and
+# Python environment, and its window's update.ts: tools/compat034.mjs): 0.3.4 picks the newest
+# release first and only then looks for its file by 0.3.4's names, so every release has to keep
+# them. And once v0.3.5 is tagged, the way an installed 0.3.5 reads it, with 0.3.5's own code (its
+# release check from v0.3.5's tree, compat035): the update code 0.3.5 ships with is frozen, every
+# later release must suit it (docs/packaging.md section 9). Runs when a release is published (also
+# a draft the Release workflow left, published by hand), and by hand for any version.
 on:
   release:
     types: [published]
@@ -25,15 +31,98 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+      - name: Set up Rust
+        run: rustup toolchain install --no-self-update # the one rust-toolchain.toml pins
 
-      - name: Install Python 3.12 and the backend
-        run: |
-          uv python install 3.12
-          uv sync --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-check
 
       - name: Every kind of install finds its file and checksum
         env:
           VERSION: ${{ inputs.version || github.event.release.tag_name }}
-        run: COLUMNS=160 uv run python tools/release.py check "${VERSION#v}" --download
+        run: cargo run --locked -q -p sk-core --example release_check -- "${VERSION#v}" --download
+
+  compat034:
+    name: Read the release as 0.3.4 does
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: v0.3.4's tree and its Python environment
+        run: |
+          set -euo pipefail
+          git fetch --quiet --depth=1 origin tag v0.3.4
+          pipx install uv==0.8.4
+          mkdir -p "$RUNNER_TEMP/v034"
+          git archive --format=tar v0.3.4 | tar -x -C "$RUNNER_TEMP/v034"
+          ~/.local/bin/uv sync --project "$RUNNER_TEMP/v034" --frozen --no-default-groups --package spaceknife-backend --python 3.12
+
+      - name: Every 0.3.4 install finds its file and checksum
+        env:
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
+        run: node tools/compat034.mjs --tree "$RUNNER_TEMP/v034" --version "${VERSION#v}" --github
+
+  # An installed 0.3.5 runs the update code it shipped with: v0.3.5's own release check (its
+  # sk-core example, from a worktree of the tag) must find every kind of install's file and
+  # checksum in each newer release. Until v0.3.5 is tagged, and for 0.3.5 itself (the check job is
+  # that code then) or an older version, it says why in a notice and runs nothing more.
+  compat035:
+    name: Read the release as 0.3.5 does
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: v0.3.5's tree
+        id: tree
+        env:
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${VERSION#v}"
+          skip() {
+            echo "::notice title=compat035::$1"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          }
+          newest=$(printf '%s\n' 0.3.5 "$version" | sort -V | tail -n 1)
+          if [ "$version" = 0.3.5 ] || [ "$newest" != "$version" ]; then
+            skip "$version is not newer than 0.3.5: nothing for 0.3.5 to update to"
+            exit 0
+          fi
+          # 2: no such tag (anything else is an error, not a reason to skip)
+          found=0
+          git ls-remote --exit-code --tags origin refs/tags/v0.3.5 > /dev/null || found=$?
+          if [ "$found" = 2 ]; then
+            skip "v0.3.5 is not tagged yet: there is no 0.3.5 to read the release with"
+            exit 0
+          elif [ "$found" != 0 ]; then
+            echo "::error title=compat035::git ls-remote failed ($found)"
+            exit 1
+          fi
+          git fetch --quiet --depth=1 origin tag v0.3.5
+          git worktree add --detach "$RUNNER_TEMP/v035" v0.3.5
+          git -C "$RUNNER_TEMP/v035" log -1 --format='v0.3.5 is %H (%cs)'
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Rust (the one v0.3.5's rust-toolchain.toml pins)
+        if: steps.tree.outputs.run == 'true'
+        working-directory: ${{ runner.temp }}/v035
+        run: rustup toolchain install --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.tree.outputs.run == 'true'
+        with:
+          shared-key: release-check-v035
+          workspaces: ${{ runner.temp }}/v035
+
+      - name: Every 0.3.5 install finds its file and checksum
+        if: steps.tree.outputs.run == 'true'
+        working-directory: ${{ runner.temp }}/v035
+        env:
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
+        run: cargo run --locked -q -p sk-core --example release_check -- "${VERSION#v}" --download

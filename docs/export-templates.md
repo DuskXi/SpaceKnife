@@ -1,6 +1,6 @@
 # SpaceKnife 导出模板与命令行
 
-本文是导出模板语言、CSV / JSON / HTML 导出格式和 `spaceknife run` 命令行的规范。参考实现在 `packages/backend/src/spaceknife/export/`（`template.py` 模板语言与遍历，`formats.py` 三种格式，`builtin/` 内置模板）和 `packages/backend/src/spaceknife/cli_run.py`（命令行）。接口约定见 [manage.md](manage.md) 第 4 节。
+本文是导出模板语言、CSV / JSON / HTML 导出格式和 `spaceknife-cli run` 命令行的规范。参考实现在 `crates/sk-core/src/export/`（`template.rs` 模板语言与遍历，`formats.rs` 三种格式，`builtin/` 内置模板）和 `crates/sk-server/src/cli/run.rs`（命令行）。接口约定见 [manage.md](manage.md) 第 4 节。
 
 ## 0. 依据与原则
 
@@ -37,7 +37,7 @@
 按文件夹分组：每个直接含有文件的文件夹先输出空行、完整路径和占用，再逐行列出其中的文件，占用右对齐到 8 个字符（内置模板 Grouped by folder）。
 
 ```shell
-spaceknife run scan "D:\Photos" filter "*.jpg;>5mb" export "Simple file list" big.txt autoclose
+spaceknife-cli run scan "D:\Photos" filter "*.jpg;>5mb" export "Simple file list" big.txt autoclose
 ```
 
 扫描、过滤、导出，不打开窗口。
@@ -168,7 +168,7 @@ spaceknife run scan "D:\Photos" filter "*.jpg;>5mb" export "Simple file list" bi
 | Summary | 汇总 | SpaceSniffer | 只有 footer：`Total size`、`Folders`、`Files` 三行 |
 | Folder tree | 文件夹树 | SpaceKnife | 按层级缩进（每级 4 个空格）的文件夹名和占用 |
 
-模板文本在 `packages/backend/src/spaceknife/export/builtin/*.sktpl`，可以复制一份改成自己的模板。SpaceSniffer 的四个模板与原版逐字一致（片段的拼接顺序由代码引用还原），只是写成了 SpaceKnife 的模板文件格式。名称查找不区分大小写。
+模板文本在 `crates/sk-core/src/export/builtin/*.sktpl`，可以复制一份改成自己的模板。SpaceSniffer 的四个模板与原版逐字一致（片段的拼接顺序由代码引用还原），只是写成了 SpaceKnife 的模板文件格式。名称查找不区分大小写。
 
 ## 10. CSV、JSON、HTML
 
@@ -206,10 +206,10 @@ spaceknife run scan "D:\Photos" filter "*.jpg;>5mb" export "Simple file list" bi
 
 名字里含有无法表示为 Unicode 的字符时（Windows 上不成对的代理项、POSIX 上不是 UTF-8 的字节），写文件时记作 `\udcXX`；在 JSON 里这正是合法的字符串转义。
 
-## 11. 命令行：`spaceknife run`
+## 11. 命令行：`spaceknife-cli run`
 
 ```shell
-spaceknife run <命令> [<命令> …]
+spaceknife-cli run <命令> [<命令> …]
 ```
 
 按顺序执行与 SpaceSniffer 相同的命令，不打开任何窗口。整个序列先检查一遍（未知命令、缺少参数、`filter`/`save`/`export` 前面没有 `scan`/`load`），有错就一条也不执行，退出码 2。
@@ -231,12 +231,12 @@ spaceknife run <命令> [<命令> …]
 
 **参数解析。** SpaceSniffer 自己解析原始命令行：参数以空白分隔，以开分隔符开头的参数一直到闭分隔符为止，**没有转义字符**，所以 `scan "C:\"` 里的 `\"` 不会像 C 运行库那样被当成转义的引号。SpaceKnife 在 Windows 上同样读取原始命令行（`GetCommandLineW` 中 `run` 之后的部分，且只在它与系统拆分的第一个词一致时采用）；在 Linux、macOS 上参数已由 shell 拆分，同样的规则作用在参数上：以开分隔符开头的参数会与后续参数（以一个空格相连）合并到闭分隔符为止。
 
-**执行。** 扫描在本进程内进行（有原生扩展时用 4 个线程，否则单线程），进度和消息输出到标准错误；没有 `autoclose` 时，结束后在标准输出列出每个视图（根、最大的 10 项及占比、合计），作为无界面时的“视图”。退出码：0 成功，2 命令行有误或某条命令失败（停在那条命令），130 被中断。
+**执行。** 扫描在本进程内进行（最多 4 个列目录线程，没有磁盘负载上限），进度和消息输出到标准错误；没有 `autoclose` 时，结束后在标准输出列出每个视图（根、最大的 10 项及占比、合计），作为无界面时的“视图”。退出码：0 成功，2 命令行有误或某条命令失败（停在那条命令），130 被中断。
 
 ```shell
-spaceknife run scan "C:\" save "C:\snap\c.sks" autoclose
-spaceknife run load c.sks filter "\node_modules" export html report.html
-spaceknife run @delim={} scan {D:\Photos} filter {"a;b.jpg";>1mb} export {Grouped by folder} {D:\out\files.txt}
+spaceknife-cli run scan "C:\" save "C:\snap\c.sks" autoclose
+spaceknife-cli run load c.sks filter "\node_modules" export html report.html
+spaceknife-cli run @delim={} scan {D:\Photos} filter {"a;b.jpg";>1mb} export {Grouped by folder} {D:\out\files.txt}
 ```
 
 ## 12. 与 SpaceSniffer 2.0.5.18 的关系
@@ -293,5 +293,5 @@ spaceknife run @delim={} scan {D:\Photos} filter {"a;b.jpg";>1mb} export {Groupe
 
 | 测试 | 内容 |
 |---|---|
-| `packages/backend/tests/test_export.py` | 每个标签在文件、文件夹、导出根上的值；`if` 的六种比较、分支、嵌套、写法错误与恢复；填充（多字符、不截断、运行时错误）；`nest`；三个转义函数与六个 `{&…}`；普通分组、空组、不配对的花括号；脚本模式及其诊断行列；模板文件的选项、段、注释、BOM、`\r\n`、末尾换行规则与诊断；三种排序选项；五个内置模板的完整输出；过滤（可见性、大小与计数、比树短的掩码）；硬链接与已删除行；多个根；分块输出；CSV（列、引号转义、过滤）、JSON（结构、流式）、HTML（自包含、转义、标签配对、截断行、过滤与多根）；按名查找与模板文件；原子写入与非 Unicode 名字 |
-| `packages/backend/tests/test_cli_run.py` | 内部解析器（反斜杠加引号、`@delim=` 的一字符和两字符形式、带分隔符的元命令是普通参数、未闭合）、`@parser=OS` 从头重解析、已拆分参数上的同样规则、按参数个数分组与顺序检查、原始命令行中 `run` 之后部分的定位；在临时目录上端到端执行 scan → filter → 多种 export → save → load → export，模板文件与终端摘要，同一视图的多个根与含 `;` 的文件夹名，执行前检查与各种失败（缺路径、过滤错误、未知模板、模板有错、目标文件夹不存在、`.sns`），过滤警告，帮助，以及按 `cli.py` 的方式注册成 typer 命令后的调用 |
+| `crates/sk-core/tests/export_templates.rs` | 每个标签在文件、文件夹、导出根上的值；`if` 的六种比较、分支、嵌套、写法错误与恢复；填充（多字符、不截断、运行时错误）；`nest`；三个转义函数与六个 `{&…}`；普通分组、空组、不配对的花括号；脚本模式及其诊断行列；模板文件的选项、段、注释、BOM、`\r\n`、末尾换行规则与诊断；三种排序选项；五个内置模板的完整输出；过滤（可见性、大小与计数、比树短的掩码）；硬链接与已删除行；多个根；分块输出；CSV（列、引号转义、过滤）、JSON（结构、流式）、HTML（自包含、转义、标签配对、截断行、过滤与多根）；按名查找与模板文件；原子写入与非 Unicode 名字 |
+| `crates/sk-server/src/cli/tests/run.rs` | 内部解析器（反斜杠加引号、`@delim=` 的一字符和两字符形式、带分隔符的元命令是普通参数、未闭合）、`@parser=OS` 从头重解析、已拆分参数上的同样规则、按参数个数分组与顺序检查、原始命令行中 `run` 之后部分的定位；在临时目录上端到端执行 scan → filter → 多种 export → save → load → export，模板文件与终端摘要，同一视图的多个根与含 `;` 的文件夹名，执行前检查与各种失败（缺路径、过滤错误、未知模板、模板有错、目标文件夹不存在、`.sns`），过滤警告，帮助 |

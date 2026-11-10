@@ -19,7 +19,7 @@ description: 首次启动的警告、权限、未知空间、扫描慢或卡住�
   「设置 › 高级 › 文件与诊断 › 日志文件夹 › 打开」无论它在哪里都能打开（便携版和 `SPACEKNIFE_HOME` 会改变位置，见[数据位置与便携模式](../data-locations/)）。
 - **更详细的日志**：把「设置 › 高级 › 日志 › 日志文件级别」改成「调试」，重现问题，再改回「信息」。
 - 「复制诊断信息」（「设置 › 高级 › 文件与诊断」）：复制界面和后端的版本、平台、后端的能力清单，以及设置文件和日志文件夹的路径。
-- **命令行**：`spaceknife-backend version` 输出各部分的版本；其中的 `native none` 表示原生扩展没有加载（见[命令行](../command-line/#version)）。
+- **命令行**：`spaceknife-cli version` 输出版本（见[命令行](../command-line/#version)）。
 
 ## 首次启动
 
@@ -31,6 +31,10 @@ description: 首次启动的警告、权限、未知空间、扫描慢或卡住�
 
 - 解压后第一次启动会慢几秒，Windows 要先检查这些新文件。
 - 解压到你有写权限的文件夹。放在 `C:\Program Files` 之类的位置时，便携版写不了旁边的 `data` 文件夹。
+
+### Windows：窗口打不开
+
+SpaceKnife 的窗口由 Microsoft Edge WebView2 Runtime（89.0.774.44 或更新）绘制。Windows 11 自带，多数 Windows 10 电脑也已经装好；安装包会装上或升级它，便携版不会。缺少或太旧时，SpaceKnife 在打开窗口之前就会说明（「SpaceKnife 需要 Microsoft Edge WebView2 Runtime，这台电脑上没有」或「……需要更新版本的 Microsoft Edge WebView2 Runtime」），什么都不改：点「下载 WebView2 Runtime」，免费安装后再启动 SpaceKnife；或者改用安装包。
 
 ### macOS：提示无法验证 SpaceKnife
 
@@ -45,17 +49,17 @@ macOS 版还没有经过苹果公证，第一次打开会被拦下，需要放�
 xattr -dr com.apple.quarantine /Applications/SpaceKnife.app
 ```
 
-### Linux：AppImage 打不开
+### Linux：AppImage 或便携版打不开
 
 - AppImage 需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）。没有时用 `./SpaceKnife-<版本>-x86_64.AppImage --appimage-extract-and-run` 运行，或者改用不需要 FUSE 的 deb、rpm 或便携版 tar.gz。
-- 在限制非特权用户命名空间的发行版上（Ubuntu 23.10 起的 AppArmor 规则），AppImage 和便携版 tar.gz 可能启动不了，因为其中 Chromium 的沙箱程序没有 setuid。加 `--no-sandbox` 启动。Ubuntu 22.04 和 RHEL 9 不受影响。
+- 在限制非特权用户命名空间的发行版上（Ubuntu 23.10 起的 AppArmor 规则），AppImage 和便携版 `…-linux-<架构>-portable.tar.gz` 可能启动不了，因为其中 Chromium 的沙箱程序没有 setuid。加 `--no-sandbox` 启动，或者改用 deb 或小巧的便携版。Ubuntu 22.04 和 RHEL 9 不受影响。
+- 小巧的便携版 `…-linux-<架构>-tauri.tar.gz` 需要 WebKitGTK 4.1。没有时 `./spaceknife` 报 `error while loading shared libraries: libwebkit2gtk-4.1.so.0` 后退出。装上它（Ubuntu 和 Debian 上 `sudo apt install libwebkit2gtk-4.1-0`）；RHEL 9 没有它，请改用 rpm 或便携版 `…-linux-<架构>-portable.tar.gz`。它的 `spaceknife-cli` 和无头模式不需要 WebKitGTK。
 
 ### 「后端没有启动」
 
-窗口出现了，但被一段提示盖住，状态栏显示「后端不可用」。标题下面写着原因：「后端 30 秒内没有就绪」「后端启动失败（退出码 N）」或「后端已退出（退出码 N）」。
+窗口出现了，但被一段提示盖住，状态栏显示「后端不可用」。标题下面写着原因：「后端 30 秒内没有就绪」「后端启动失败（退出码 N）」或「后端已退出（退出码 N）」。Electron 版的后端是应用旁边的 `spaceknife-cli` 程序；其他版本的后端在应用里面运行。
 
-- 重新打开 SpaceKnife。再次出现时，在终端里单独运行后端：`spaceknife-backend version`（位置见[命令行](../command-line/#程序在哪里)）。那里的报错就是需要报告的内容。
-- 在 Linux 和 macOS 上，从终端启动 SpaceKnife 可以看到后端自己的输出，每行以 `[backend]` 开头。
+- 重新打开 SpaceKnife。再次出现时，在终端里运行命令行：`spaceknife-cli version`（位置见[命令行](../command-line/#程序在哪里)）。那里的报错，连同标题下面的原因，就是需要报告的内容。
 
 ## 权限
 
@@ -117,6 +121,21 @@ macOS 上没有「完全磁盘访问权限」时，系统会为桌面、文稿�
 - 关掉不需要的扫描和标签页。
 - 只开着很少的扫描、甚至没有扫描时警告仍然出现，请报告问题。这时日志文件里 `memory above what the scans account for:` 之后有一段明细，列出每个扫描的数据、视图和各个队列，请附上它。
 - 想再附上占用内存最多的代码行：设置环境变量 `SPACEKNIFE_MEMTRACE=1` 后启动 SpaceKnife，重现问题，附上新的明细。它会让 SpaceKnife 变慢，用完请去掉。
+
+## 更新
+
+### 「无法启动更新」
+
+便携版的「无缝更新」在替换任何东西之前先查两件事。任何一件不行，就什么都不改：这份副本照常使用，SpaceKnife 显示「无法启动更新：」和原因（0.3.5 起留在更新卡片上；0.3.4 只短暂提示）。
+
+- **文件夹里不只有 SpaceKnife。**更新只换 SpaceKnife 自己的文件，所以程序所在的文件夹里还放着你别的东西（别的应用、文档）时，它不开始，并列出这些名字：「文件夹里还有不是 SpaceKnife 的东西（…）」。把 SpaceKnife 和它的 `data` 文件夹单独放进一个文件夹再试，或者用「自己替换」。系统自己放进文件夹的文件（`desktop.ini`、`.DS_Store`）不算，原样留着。
+- **新版本在这台电脑上启动不了。**常见的原因是缺少网页视图：Windows 上的 WebView2 Runtime（这时新版本会弹出一个窗口，说明缺什么、去哪里下载），或者小巧的 Linux 便携版要的 WebKitGTK 4.1（RHEL 9 没有）。装上它再试，或者换另一种下载（[下载哪个文件](../install/#下载哪个文件)）。
+
+如果更新已经换上、又不得不撤回（新版本没能启动），旧版本（0.3.5 起）重新打开时会在更新卡片上说明：「更新没有完成：…」。每一步记在数据文件夹的 `updates/update-<版本>.log` 里。
+
+### 安装包的更新没有完成
+
+Windows 安装包的「无缝更新」做不下去时（比如 WebView2 Runtime 下载不了，或者为所有用户安装时你拒绝了管理员授权），安装程序保持旧版本原样，并重新打开它。稍后再试，或者在更新卡片里点「运行安装程序」，按安装向导一步步来。
 
 ## 恢复设置
 

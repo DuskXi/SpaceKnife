@@ -10,13 +10,21 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
 jobs:
   changes:
     name: Changed areas
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      python: ${{ steps.areas.outputs.python }}
+      rust: ${{ steps.areas.outputs.rust }}
+      desktop: ${{ steps.areas.outputs.desktop }}
       electron: ${{ steps.areas.outputs.electron }}
     steps:
       - uses: actions/checkout@v7
@@ -43,113 +51,229 @@ jobs:
             areas=$(bash .github/scripts/ci-areas.sh < changed.txt)
           else
             echo "(everything)" > changed.txt
-            areas=$'python=true\nelectron=true'
+            areas=$'rust=true\ndesktop=true\nelectron=true'
           fi
           echo "$areas" | tee -a "$GITHUB_OUTPUT"
           { echo "### Jobs to run"; echo; echo "$areas" | sed 's/^/- /'; echo; echo "Changed files:"; echo; echo '```'; cat changed.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-  python:
-    name: Python · ${{ matrix.os }}
+  rust:
+    name: Rust · ${{ matrix.os }}
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30  # the suite takes a few minutes; a hang must not hold a runner for hours
+    timeout-minutes: 45 # a cold build and the suite take a while; a hang must not hold a runner for hours
     strategy:
       fail-fast: false
       matrix:
         # Platform floors from docs/PLAN.md: Windows 10+, Ubuntu 22.04+ / RHEL 9+ (glibc 2.34), macOS 14+.
-        os: [windows-latest, ubuntu-22.04, macos-14]
+        # GitHub retired its macos-14 runners on 2026-11-02: macOS 15 (Apple Silicon) is the oldest
+        # there is; the app still asks for macOS 14.0 (tauri.conf.json minimumSystemVersion, which
+        # apps/desktop/src-tauri/tests/config.rs keeps), and macos.yml builds on macos-15 and
+        # macos-15-intel.
+        os: [windows-latest, ubuntu-22.04, macos-15]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+      # the toolchain rust-toolchain.toml pins, with its components (rustfmt, clippy): the lints
+      # are those of that version here and on every developer's machine, not of whatever stable
+      # the runner has today
+      - name: Set up Rust (rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          enable-cache: true
+          shared-key: ci
 
-      # the native extension too (Rust is on every runner image): its walkers are checked against
-      # the Python ones on each OS, macOS's getattrlistbulk path included
-      - name: Install Python 3.12 and the workspace
+      # what the Tauri shell (apps/desktop/src-tauri, a workspace member) links on Linux
+      - name: Install Tauri's libraries
+        if: runner.os == 'Linux'
         run: |
-          uv python install 3.12
-          uv sync --locked --group native
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf
 
-      # The Rust unit tests of packages/native (MFT parsing, the walkers' entry rules, the file id
-      # check of Windows' relative opens). They link the workspace's Python, whose library must also
-      # be found when the test binary runs (python3.dll on Windows, libpython elsewhere).
-      - name: Native unit tests
-        shell: bash
+      # The shell embeds the generated interface (frontendDist, ../.output/public) at compile time;
+      # the Rust tests don't look at it, so a placeholder page stands in for `pnpm generate`.
+      - name: A placeholder for the generated interface
         run: |
-          py=$(uv run python -c "import sys; print(sys.executable)")
-          base=$(uv run python -c "import sys; print(sys.base_prefix)")
-          if [ "$RUNNER_OS" = Windows ]; then base=$(cygpath -u "$base"); fi
-          export PYO3_PYTHON="$py" PATH="$base:$PATH" LD_LIBRARY_PATH="$base/lib" DYLD_LIBRARY_PATH="$base/lib"
-          cargo test --release --lib --manifest-path packages/native/Cargo.toml
+          mkdir -p apps/desktop/.output/public
+          [ -f apps/desktop/.output/public/index.html ] || echo '<!doctype html><title>SpaceKnife</title>' > apps/desktop/.output/public/index.html
 
-      - name: Lint
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Generated protocol types are up to date
+        if: runner.os == 'Linux'
         run: |
-          uv run ruff check .
-          uv run ruff format --check .
+          cargo run --locked -q -p sk-protocol --bin gen-ts -- --check
+          cargo run --locked -q -p sk-protocol --bin gen-ts -- --check apps/desktop/app/protocol/generated.ts
 
-      - name: Type check
-        run: uv run mypy packages/protocol/src packages/backend/src packages/client/src tools/gen_design.py
-
-      - name: Generated artefacts are up to date
+      # The parity replay's Linux goldens (tests/parity/README.md, "Directory order") were recorded
+      # on an ext4, which lists each folder by a hash of the names with its own seed; 0.3.4 keeps
+      # that order for entries of equal size, so the replay compares exactly only where folders are
+      # listed alike. The runner's ext4 has another seed: a scenario that differs in the runner's
+      # temp folder while it lists the fixture folders otherwise is replayed again in an ext4 made
+      # with the recording's seed (golden/linux/listing.json, SPACEKNIFE_PARITY_TMP), where it
+      # must find them listed as recorded. It is mounted inside /tmp: the goldens were recorded in
+      # the system's temp folder, and the backend takes a folder for a temp folder by its path (the
+      # insight rule posix-temp: /tmp, /var/tmp, …; compare gives its note as a change's reason),
+      # not by TMPDIR, so a mount elsewhere loses those reasons.
+      - name: An ext4 that lists folders as the Linux goldens' did
+        if: runner.os == 'Linux'
         run: |
-          uv run python tools/gen_design.py --check
-          uv run spaceknife schema --check packages/protocol/schema/protocol.schema.json
-          uv run python tools/gen_ts_protocol.py --check
+          set -euo pipefail
+          fs=tests/parity/golden/linux/listing.json
+          seed=$(jq -r .filesystem.hash_seed "$fs")
+          img="$RUNNER_TEMP/parity-ext4.img"
+          truncate -s 2G "$img"
+          mkfs.ext4 -q -F -b "$(jq -r .filesystem.block_size "$fs")" -E "hash_seed=$seed" "$img"
+          tune2fs -E "hash_alg=$(jq -r .filesystem.hash "$fs")" "$img" > /dev/null
+          head=$(dumpe2fs -h "$img" 2>/dev/null)
+          grep -E '^(Directory Hash Seed|Default directory hash|Filesystem flags):' <<< "$head"
+          grep -Eq "^Directory Hash Seed: +$seed\$" <<< "$head"
+          grep -Eq "^Default directory hash: +$(jq -r .filesystem.hash "$fs")\$" <<< "$head"
+          grep -Eq "^Filesystem flags: +$(jq -r .filesystem.flags "$fs")" <<< "$head"
+          sudo mkdir -p /tmp/sk-parity
+          sudo mount -o loop "$img" /tmp/sk-parity
+          sudo chown "$(id -u):$(id -g)" /tmp/sk-parity
+          echo "SPACEKNIFE_PARITY_TMP=/tmp/sk-parity" >> "$GITHUB_ENV"
 
       - name: Tests
-        run: uv run pytest
+        run: cargo test --workspace --locked
 
-  electron:
-    name: Electron · ${{ matrix.os }}
+      # SpaceKnife.com, the Windows console launcher (its own small workspace, not a member of the
+      # repository's): formatted, lint-free, and its tests (the routing; on Windows, run as a
+      # terminal runs it, with stand-ins next to it)
+      - name: Console launcher (packaging/console-launcher)
+        run: |
+          m=packaging/console-launcher/Cargo.toml
+          if [ "$RUNNER_OS" = Linux ]; then cargo fmt --manifest-path "$m" --check; fi
+          cargo clippy --manifest-path "$m" --all-targets --locked -- -D warnings
+          cargo test --manifest-path "$m" --locked
+
+      # The developer tools (tools/*.mjs) read crates/ and design/; Node only, no install. The same on
+      # every OS: once.
+      - name: Set up Node 24
+        if: runner.os == 'Linux'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Tools and generated files
+        if: runner.os == 'Linux'
+        run: |
+          node --test "tools/tests/*.test.mjs"
+          node tools/nsis_fork.mjs check
+          node tools/gen_design.mjs --check
+          node tools/gen_pinyin.mjs --check
+          node tools/i18n_check.mjs --area core
+
+  # Moving to the trash and deleting permanently on every file system people keep files on
+  # (docs/manage.md §2.3.2 「各文件系统」): sk-core's ops tests (ops_trash, ops_basket, ops_case_twins,
+  # ops_paths, ops_locks, ops_fs) and ops_bench (delete, then trash) with the temporary folder on a
+  # small volume of each, made for the job — Windows: NTFS, ReFS, exFAT, FAT32 (virtual disks) and
+  # an SMB share; Linux: ext4, xfs, btrfs, vfat, exfat, ntfs3 (loop images), tmpfs; macOS: APFS, HFS+,
+  # FAT32, ExFAT (disk images). The real trash of each volume is used and emptied of what the run
+  # put there. What a file system cannot do (links, case-sensitive names, …) a test detects and
+  # skips, saying why: those notes are in the job summary. The scripts: .github/scripts/fs-matrix.*
+  fs-matrix:
+    name: File systems · ${{ matrix.os }}
     needs: changes
-    if: needs.changes.outputs.electron == 'true'
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # ReFS can be formatted on a Server edition: windows-2025 is one
+        os: [windows-2025, ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Rust (rust-toolchain.toml)
+        shell: bash
+        run: rustup toolchain install --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fs-matrix
+
+      - name: File-system tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q dosfstools exfatprogs ntfs-3g xfsprogs btrfs-progs
+
+      - name: Build the ops tests and ops_bench
+        shell: bash
+        run: |
+          cargo test -p sk-core --locked --no-run --test ops_trash --test ops_basket --test ops_case_twins --test ops_paths --test ops_locks --test ops_fs
+          cargo build -p sk-core --locked --features probe --example ops_bench
+
+      - name: Run on each file system (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/scripts/fs-matrix.ps1
+
+      - name: Run on each file system (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash .github/scripts/fs-matrix.sh
+
+  desktop:
+    name: Desktop interface · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-latest]
     defaults:
       run:
-        working-directory: apps/electron
+        working-directory: apps/desktop
     steps:
       - uses: actions/checkout@v7
 
-      # No packageManager field in apps/electron/package.json; pnpm-lock.yaml is lockfileVersion 9.0 → pnpm 10.
+      # No packageManager field in apps/desktop/package.json; pnpm-lock.yaml is lockfileVersion 9.0 → pnpm 10.
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - name: Set up Node 22
+      - name: Set up Node 24
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
-          cache-dependency-path: apps/electron/pnpm-lock.yaml
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
 
-      # The renderer's @design alias resolves to the committed design/build artefacts (kept in sync by
-      # the python job's gen_design.py --check), so no Python toolchain is needed here. Tests and the
-      # build never launch Electron, so its binary download is skipped.
+      # The @design alias resolves to the committed design/build artefacts (kept in sync by the Rust
+      # job's gen_design.mjs --check), and the protocol types to the committed generated.ts.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
-      # Every renderer text needs an English entry (t() falls back to the Chinese source). The check
-      # needs node_modules, which the python job doesn't install; the result is the same on every OS.
-      - name: Set up uv
+      # The Windows installer's forked NSIS template follows the stock template of the locked
+      # tauri-cli (src-tauri/windows/upstream.json): a CLI update that brings another one fails here
+      # (crates.io's tauri-bundler and the installed CLI's own program are compared)
+      - name: The NSIS fork follows the locked tauri-cli
         if: runner.os == 'Linux'
-        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+        working-directory: .
+        run: node tools/nsis_fork.mjs check
 
+      # Every interface text needs an English entry (t() falls back to the Chinese source). The
+      # result is the same on every OS.
       - name: Translations
         if: runner.os == 'Linux'
         working-directory: .
-        run: uv run --no-project --python 3.12 tools/i18n_check.py --area electron
+        run: node tools/i18n_check.mjs --area desktop
 
       - name: Type check
         run: pnpm typecheck
@@ -157,14 +281,58 @@ jobs:
       - name: Tests
         run: pnpm test
 
-      - name: Build
-        run: pnpm build
+      - name: Generate
+        run: pnpm generate
 
+  electron:
+    name: Electron shell · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.electron == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # the shell of the RHEL 9 rpm, the AppImage and the Linux portable copy under 0.3.4's name;
+        # its code is checked on Windows as well
+        os: [ubuntu-22.04, windows-latest]
+    defaults:
+      run:
+        working-directory: apps/electron-shell
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/electron-shell/pnpm-lock.yaml
+
+      # Electron's own download is not needed for the type check, the unit tests or the build
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Build the main process and preload
+        run: pnpm build
   # The one check branch protection requires: skipped jobs report under their unexpanded matrix
   # name, so requiring each job would leave a pull request waiting forever.
   result:
     name: CI passed
-    needs: [changes, python, electron]
+    needs: [changes, rust, fs-matrix, desktop, electron]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

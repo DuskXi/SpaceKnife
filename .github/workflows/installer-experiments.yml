@@ -1,0 +1,104 @@
+name: Installer experiments
+
+# The Windows installer's upgrade experiments (packaging/installer-experiments.ps1) on throwaway
+# GitHub runners, Windows Server 2022 and 2025: 0.3.4's real installer, then the candidate the
+# way 0.3.4's 「无缝更新」 starts it (CreateProcess with --updated /S --force-run and the scope),
+# per user, for all users, with 0.3.4 running and a file held, without WebView2, downgrade and
+# reinstall, both scopes, the fork over itself, a folder of the user's, 0.3.4 in the data folder,
+# 0.3.4 whose registry keys are gone, the console launcher, Microsoft Defender; every assertion
+# goes into a JSON file in the run's artifacts. Runners are administrators with UAC off: what
+# needs UAC on (S0 CreateProcess and the manifest, the self-elevation of S2's and S7's per-machine
+# updates, which run elevated from the start here, S4's elevated lock) is recorded as skipped there
+# and needs the Hyper-V VM the script describes.
+# The candidate: built here by the Windows installer build (windows-installer.yml, with all its own
+# tests), or the installer of an earlier run of it (run_id). On every push to an exp/ branch, and
+# by hand.
+on:
+  push:
+    branches: ["exp/**"]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: A Windows installer build run whose installer to use (empty - build one here)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read # the artifact of another run
+
+concurrency:
+  group: installer-experiments-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Windows installer build
+    if: ${{ !inputs.run_id }}
+    uses: ./.github/workflows/windows-installer.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+  experiments:
+    name: Experiments · ${{ matrix.os }}
+    needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The candidate
+        uses: actions/download-artifact@v7
+        with:
+          name: SpaceKnife-installers-win-x64
+          path: candidate
+          run-id: ${{ inputs.run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      # 0.3.4's real installer (checked against the v0.3.4 release's own checksums) and the
+      # candidate under its release name
+      - name: The share
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory share | Out-Null
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir share --pattern SpaceKnife-0.3.4-Setup-x64.exe --pattern SHA256SUMS.txt
+          $want = (Select-String -Path share/SHA256SUMS.txt -Pattern ' SpaceKnife-0\.3\.4-Setup-x64\.exe$').Line.Split(' ')[0]
+          if ((Get-FileHash -Algorithm SHA256 share/SpaceKnife-0.3.4-Setup-x64.exe).Hash.ToLower() -ne $want) { throw 'SpaceKnife-0.3.4-Setup-x64.exe does not match the v0.3.4 release' }
+          $setup = @(Get-ChildItem candidate -Recurse -Filter 'SpaceKnife-*-Setup-x64.exe')
+          if ($setup.Count -ne 1) { throw "the artifact holds $($setup.Count) installers" }
+          $version = $setup[0].Name -replace '^SpaceKnife-(.+)-Setup-x64\.exe$', '$1'
+          Copy-Item $setup[0].FullName share/
+          "SK_NEW_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Get-ChildItem share | Format-Table Name, Length
+
+      # Windows PowerShell 5.1, as on the machines the script is written for
+      - name: Run the experiments
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File packaging\installer-experiments.ps1 -Share "$PWD\share" -NewVersion $env:SK_NEW_VERSION -IAmOnATestMachine
+
+      - name: The installer's log
+        if: always()
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:TEMP 'SpaceKnife-install.log'
+          if (Test-Path $f) { Copy-Item $f share/; Get-Content -Encoding Unicode $f -Tail 200 } else { "no $f" }
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: installer-experiments-${{ matrix.os }}
+          path: |
+            share/installer-experiments-*.json
+            share/SpaceKnife-install.log
+          if-no-files-found: warn
+          retention-days: 14

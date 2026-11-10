@@ -1,0 +1,416 @@
+name: Next version
+
+# Can the version about to be released update every kind of install to the version after it? Once
+# a version is out its update code is frozen: every later version is found, checked, downloaded and
+# handed to the system or to the new version's swap helper by that code, and a mistake there
+# strands its users (docs/packaging.md, 9 and 11). Here the old version's real files, installed or
+# unpacked as users have them, update themselves with their own code to a real build of the next
+# version (packaging/update-next.mjs; a release list on 127.0.0.1 offers both): the portable copies
+# (Windows x64 and arm64, and an x64 copy on ARM; Linux, the Tauri app and the Electron shell, x64
+# and arm64; macOS arm64 and Intel), the Windows installer (Windows Server 2022 and 2025, also
+# packaging/nsis-e2e.mjs --previous and installer-experiments.ps1 S8, the fork over a newer fork),
+# the AppImage, the deb (Ubuntu 22.04 and 24.04), the rpm (Rocky Linux 9) and the dmg; then the new
+# version finds the release after it. 「无缝更新」 is clicked in the old version's window where it
+# has a DevTools port (the Electron shell; WebView2 on Windows), done by the test as the button does
+# it where it has none (the Tauri app on Linux and macOS); the packages' system step is the test's.
+#
+# Before every release: Actions › Next version › Run workflow, with the build runs of the release
+# (old: Portable build with the deb, macOS build, the run that made SpaceKnife-installers-win-x64,
+# Electron shell build) and of a build of the next version (new: the same tree with the version
+# raised, built by the same four workflows). The versions come from the file names. The artifacts
+# are kept 14 days.
+on:
+  workflow_dispatch:
+    inputs:
+      old_portable:
+        description: "Old: Portable build run (built with the deb)"
+        type: string
+        required: true
+      old_macos:
+        description: "Old: macOS build run"
+        type: string
+        required: true
+      old_windows:
+        description: "Old: the run with SpaceKnife-installers-win-x64 (Windows installer build or Installer experiments)"
+        type: string
+        required: true
+      old_electron:
+        description: "Old: Electron shell build run"
+        type: string
+        required: true
+      new_portable:
+        description: "New: Portable build run (built with the deb)"
+        type: string
+        required: true
+      new_macos:
+        description: "New: macOS build run"
+        type: string
+        required: true
+      new_windows:
+        description: "New: the run with SpaceKnife-installers-win-x64"
+        type: string
+        required: true
+      new_electron:
+        description: "New: Electron shell build run"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read # the artifacts of the build runs
+
+concurrency:
+  group: next-version-${{ github.ref }}
+  cancel-in-progress: true
+
+# a push has no inputs: the same runs as the defaults above
+env:
+  OLD_PORTABLE: ${{ inputs.old_portable }}
+  OLD_MACOS: ${{ inputs.old_macos }}
+  OLD_WINDOWS: ${{ inputs.old_windows }}
+  OLD_ELECTRON: ${{ inputs.old_electron }}
+  NEW_PORTABLE: ${{ inputs.new_portable }}
+  NEW_MACOS: ${{ inputs.new_macos }}
+  NEW_WINDOWS: ${{ inputs.new_windows }}
+  NEW_ELECTRON: ${{ inputs.new_electron }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  windows-portable:
+    name: Portable · ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-2025
+            machine: x64
+          - target: win-arm64
+            runner: windows-11-arm
+            machine: arm64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # -R: gh outside a clone of the repository does not know which one
+      - name: The old and the new archive
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_PORTABLE" -R DuskXi/SpaceKnife --name "SpaceKnife-portable-${{ matrix.target }}" --dir old
+          gh run download "$NEW_PORTABLE" -R DuskXi/SpaceKnife --name "SpaceKnife-portable-${{ matrix.target }}" --dir new
+          (cd old && sha256sum -c SHA256SUMS-*.txt) && (cd new && sha256sum -c SHA256SUMS-*.txt)
+
+      - name: Update (clicked in the old version's window)
+        timeout-minutes: 30
+        run: node packaging/update-next.mjs portable old/*-portable.zip new/*-portable.zip --expect-machine ${{ matrix.machine }}
+
+      # the old version's x64 copy (run emulated) takes the arm64 build and runs native afterwards
+      - name: Update the old x64 copy on ARM
+        if: matrix.target == 'win-arm64'
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_PORTABLE" -R DuskXi/SpaceKnife --name SpaceKnife-portable-win-x64 --dir old-x64
+          (cd old-x64 && sha256sum -c SHA256SUMS-*.txt)
+          node packaging/update-next.mjs portable old-x64/*-portable.zip new/*-portable.zip --expect-machine arm64
+
+  windows-installer:
+    name: Installer · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: The old and the new installer
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_WINDOWS" -R DuskXi/SpaceKnife --name SpaceKnife-installers-win-x64 --dir old
+          gh run download "$NEW_WINDOWS" -R DuskXi/SpaceKnife --name SpaceKnife-installers-win-x64 --dir new
+          (cd old && sha256sum -c SHA256SUMS-*.txt) && (cd new && sha256sum -c SHA256SUMS-*.txt)
+
+      # per user, as the installer installs by default; the runner is an administrator with UAC off
+      - name: Update (clicked in the old version's window)
+        timeout-minutes: 30
+        run: node packaging/update-next.mjs nsis old/SpaceKnife-*-Setup-x64.exe new/SpaceKnife-*-Setup-x64.exe
+
+      - name: The installer's log
+        if: failure()
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:TEMP 'SpaceKnife-install.log'
+          if (Test-Path $f) { Get-Content -Encoding Unicode $f -Tail 200 } else { "no $f" }
+
+  # the installer tests that take an earlier installer: nsis-e2e.mjs --previous (the old version,
+  # then the new one with the update's arguments, then an update in place, the uninstall), and
+  # installer-experiments.ps1 S8, the fork over a newer fork (it wants 0.3.4's installer in its
+  # share, which it checks, though S8 does not use it)
+  windows-installer-tests:
+    name: Installer tests · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: The old and the new installer
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_WINDOWS" -R DuskXi/SpaceKnife --name SpaceKnife-installers-win-x64 --dir old
+          gh run download "$NEW_WINDOWS" -R DuskXi/SpaceKnife --name SpaceKnife-installers-win-x64 --dir new
+          (cd old && sha256sum -c SHA256SUMS-*.txt) && (cd new && sha256sum -c SHA256SUMS-*.txt)
+
+      - name: nsis-e2e, the new installer over the old one
+        timeout-minutes: 20
+        run: node packaging/nsis-e2e.mjs new/SpaceKnife-*-Setup-x64.exe --previous old/SpaceKnife-*-Setup-x64.exe
+
+      - name: The share for S8
+        run: |
+          set -euo pipefail
+          mkdir share
+          gh release download v0.3.4 -R DuskXi/SpaceKnife --dir share --pattern SpaceKnife-0.3.4-Setup-x64.exe
+          cp old/SpaceKnife-*-Setup-x64.exe new/SpaceKnife-*-Setup-x64.exe share/
+          old=$(basename old/SpaceKnife-*-Setup-x64.exe); new=$(basename new/SpaceKnife-*-Setup-x64.exe)
+          old=${old#SpaceKnife-}; new=${new#SpaceKnife-}
+          echo "SK_OLD=${old%-Setup-x64.exe}" >> "$GITHUB_ENV"
+          echo "SK_NEW=${new%-Setup-x64.exe}" >> "$GITHUB_ENV"
+          ls -l share
+
+      # Windows PowerShell 5.1, as on the machines the script is written for
+      - name: S8, the old fork updated to the new one
+        timeout-minutes: 20
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File packaging\installer-experiments.ps1 -Share "$PWD\share" -NewVersion $env:SK_OLD -NextVersion $env:SK_NEW -Only S8 -IAmOnATestMachine
+
+      - name: The installer's log
+        if: failure()
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:TEMP 'SpaceKnife-install.log'
+          if (Test-Path $f) { Get-Content -Encoding Unicode $f -Tail 200 } else { "no $f" }
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: next-version-s8-${{ matrix.os }}
+          path: share/installer-experiments-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  linux-tauri:
+    name: Portable · linux-${{ matrix.arch }} (Tauri)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # what the app needs to run (GTK comes with WebKitGTK), not the build's -dev packages
+      - name: WebKitGTK and xvfb
+        timeout-minutes: 15
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 xvfb
+
+      - name: The old and the new archive
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_PORTABLE" -R DuskXi/SpaceKnife --name "SpaceKnife-portable-linux-${{ matrix.arch }}" --dir old
+          gh run download "$NEW_PORTABLE" -R DuskXi/SpaceKnife --name "SpaceKnife-portable-linux-${{ matrix.arch }}" --dir new
+          (cd old && sha256sum -c SHA256SUMS-*.txt) && (cd new && sha256sum -c SHA256SUMS-*.txt)
+
+      # WebKitGTK's web view has no DevTools port: 「无缝更新」 is done by the test as the button does it
+      - name: Update (done by the test)
+        timeout-minutes: 30
+        run: xvfb-run -a node packaging/update-next.mjs portable old/*-tauri.tar.gz new/*-tauri.tar.gz --expect-machine ${{ matrix.arch }}
+
+  linux-electron:
+    name: Portable · linux-${{ matrix.arch }} (Electron)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: The old and the new archive
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_ELECTRON" -R DuskXi/SpaceKnife --name "SpaceKnife-electron-portable-linux-${{ matrix.arch }}" --dir old
+          gh run download "$NEW_ELECTRON" -R DuskXi/SpaceKnife --name "SpaceKnife-electron-portable-linux-${{ matrix.arch }}" --dir new
+          (cd old && sha256sum -c SHA256SUMS-*.txt) && (cd new && sha256sum -c SHA256SUMS-*.txt)
+
+      - name: Update (clicked in the old version's window)
+        timeout-minutes: 30
+        run: xvfb-run -a node packaging/update-next.mjs portable old/*-portable.tar.gz new/*-portable.tar.gz --expect-machine ${{ matrix.arch }}
+
+  appimage:
+    name: AppImage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: xvfb and FUSE 2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libfuse2
+
+      - name: The old and the new AppImage
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_ELECTRON" -R DuskXi/SpaceKnife --name SpaceKnife-electron-linux-x64 --dir old
+          gh run download "$NEW_ELECTRON" -R DuskXi/SpaceKnife --name SpaceKnife-electron-linux-x64 --dir new
+          (cd old && sha256sum -c SHA256SUMS-*.txt) && (cd new && sha256sum -c SHA256SUMS-*.txt)
+
+      - name: Update (clicked in the old version's window)
+        timeout-minutes: 30
+        run: xvfb-run -a node packaging/update-next.mjs appimage old/*.AppImage new/*.AppImage
+
+  deb:
+    name: deb · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: The old and the new deb
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_PORTABLE" -R DuskXi/SpaceKnife --name SpaceKnife-installers-linux-x64 --dir old
+          gh run download "$NEW_PORTABLE" -R DuskXi/SpaceKnife --name SpaceKnife-installers-linux-x64 --dir new
+          (cd old && sha256sum -c SHA256SUMS-*.txt) && (cd new && sha256sum -c SHA256SUMS-*.txt)
+
+      # the old version finds, downloads and checks the new deb; apt-get installs it
+      - name: Update
+        timeout-minutes: 30
+        run: xvfb-run -a node packaging/update-next.mjs deb old/*.deb new/*.deb
+
+  # RHEL 9: the rpm (the Electron shell), installed with dnf
+  rpm:
+    name: rpm · Rocky Linux 9
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    container: rockylinux:9
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: What the test needs
+        run: |
+          dnf install -y 'dnf-command(config-manager)' epel-release
+          dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+          dnf install -y gh xorg-x11-server-Xvfb xorg-x11-xauth which procps-ng
+
+      # the system's Node is too old for the test (it needs the global WebSocket of Node 22+)
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: The old and the new rpm
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_ELECTRON" -R DuskXi/SpaceKnife --name SpaceKnife-electron-linux-x64 --dir old
+          gh run download "$NEW_ELECTRON" -R DuskXi/SpaceKnife --name SpaceKnife-electron-linux-x64 --dir new
+          (cd old && sha256sum -c SHA256SUMS-*.txt) && (cd new && sha256sum -c SHA256SUMS-*.txt)
+
+      - name: Update
+        timeout-minutes: 30
+        run: xvfb-run -a node packaging/update-next.mjs rpm old/*.rpm new/*.rpm
+
+  macos:
+    name: macOS · ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: The old and the new files
+        run: |
+          set -euo pipefail
+          gh run download "$OLD_MACOS" -R DuskXi/SpaceKnife --name "SpaceKnife-mac-${{ matrix.arch }}" --dir old
+          gh run download "$NEW_MACOS" -R DuskXi/SpaceKnife --name "SpaceKnife-mac-${{ matrix.arch }}" --dir new
+          (cd old && shasum -a 256 -c SHA256SUMS-*.txt) && (cd new && shasum -a 256 -c SHA256SUMS-*.txt)
+
+      # macOS's web view has no DevTools port: 「无缝更新」 is done by the test as the button does it
+      - name: Update the portable copy (done by the test)
+        timeout-minutes: 30
+        run: node packaging/update-next.mjs portable old/*-portable.zip new/*-portable.zip --expect-machine ${{ matrix.arch }}
+
+      - name: Update the disk image's app
+        timeout-minutes: 30
+        run: node packaging/update-next.mjs dmg old/*.dmg new/*.dmg

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "values": {
+    "advanced.log_level": "DEBUG",
+    "advanced.snapshot_keep": 7,
+    "appearance.accent": "#FF8800",
+    "appearance.theme": "dark",
+    "general.update_channel": "stable",
+    "scan.unit_base": "1024",
+    "scan.workers": 2,
+    "tags.name_red": "Delete me",
+    "treemap.flame_origin": "top",
+    "treemap.font_scale": 120
+  }
+}

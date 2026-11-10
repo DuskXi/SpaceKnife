@@ -1,0 +1,25 @@
+{
+ "version": 1,
+ "jumps": {
+  "plain-5a7af21d1a09": [
+   {
+    "text": "/home/lenny/sk-fixture/plain/photos/2026",
+    "at": 1794105968.2138238
+   },
+   {
+    "text": "/home/lenny/sk-fixture/plain/docs",
+    "at": 1794105968.2131908
+   }
+  ]
+ },
+ "filters": [
+  {
+   "text": ">1MB | :class:video",
+   "at": 1794105968.2152023
+  },
+  {
+   "text": "*.mp4",
+   "at": 1794105968.214544
+  }
+ ]
+}

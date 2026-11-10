@@ -1,0 +1,42 @@
+{
+ "version": 1,
+ "feed": "https://api.github.com/repos/DuskXi/SpaceKnife/releases",
+ "checked_at": "2026-11-01T12:30:15.123456Z",
+ "failed_at": null,
+ "etag": "W/\"0123abcd\"",
+ "releases": [
+  {
+   "version": "0.3.4",
+   "tag": "v0.3.4",
+   "name": "SpaceKnife 0.3.4",
+   "prerelease": true,
+   "published_at": "2026-10-26T08:00:00Z",
+   "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.3.4",
+   "notes": "Notes of 0.3.4",
+   "assets": [
+    {
+     "name": "SpaceKnife-0.3.4-Setup-x64.exe",
+     "size": 123,
+     "url": "https://github.com/DuskXi/SpaceKnife/releases/download/v0.3.4/SpaceKnife-0.3.4-Setup-x64.exe"
+    }
+   ]
+  },
+  {
+   "version": "0.3.3",
+   "tag": "v0.3.3",
+   "name": "SpaceKnife 0.3.3",
+   "prerelease": true,
+   "published_at": "2026-10-21T08:00:00Z",
+   "url": "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.3.3",
+   "notes": "Notes of 0.3.3",
+   "assets": []
+  }
+ ],
+ "kept": 30,
+ "dismissed": [
+  "0.3.3"
+ ],
+ "muted": [
+  "0.2"
+ ]
+}

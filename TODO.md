@@ -10,7 +10,7 @@
   - 两端各实现三种可视化组件：`drawlist.v1`、`flame.v1`、`polar.v1`（几何、标签、缝、命中和配色按 [docs/visuals.md](docs/visuals.md)），并通过同一套一致性测试
   - 三端 golden 截图对比（含火焰图和火焰-极坐标图）
   - 受影响的后续项：M8 里 Qt / WinUI3 的 PyInstaller 打包和 Windows App Runtime 安装一并挂起
-  - 恢复条件：用户决定恢复
+  - 恢复条件：用户决定恢复；2026-11-08 起后端是 Rust，恢复时两端接到 Rust 后端（协议 v1、`spaceknife-cli serve`）上，Python 的共享视图层不再适用（挂起，不是取消）
 
 ## macOS（2026-10-19 恢复）
 
@@ -30,7 +30,7 @@
 - [ ] 限速精度实测：稳态 5 s 均值 ≤ 上限、单点超出 ≤ 5 个百分点、改档 3 s 内收敛
 - [x] 负载口径（用户 2026-10-18 决定）：限速继续按「忙碌度 / 队列深度」折算的占用计算；任务管理器式的「活动时间」显示在旁边作参考（状态栏、扫描详情、负载曲线的点线）
 - [x] 硬扫描结果归并向量化（`NodeStore.ingest_slice`）：每个列表 30–78 µs → 1–3 µs，瓶颈转到系统目录枚举
-- [x] Linux 的提权助手（0.3.3）：pkexec + polkit，目前只给「本机磁盘」读磁盘自己的记录（`disk_health`），点按钮才请求；macOS 不需要（NVMe 的记录不提权就能读），`elevate=True` 仍返回 `not_supported`
+- [x] Linux 的提权助手（0.3.3）：pkexec + polkit，目前只给「本机磁盘」读磁盘自己的记录（`disk_health`），点按钮才请求；macOS 不需要（0.3.4 不提权就能读 NVMe 的记录；0.3.5 的 Rust 后端还没移植这段，见「本机统计页面」），`elevate=True` 仍返回 `not_supported`
 - [ ] W2 扫描摘要卡（扫描中选中某块时，详情面板顶部的进度 + 档位 + 负载）
 - [ ] 日志面板「扫描统计」页复用负载曲线与并发
 
@@ -72,24 +72,24 @@
 - [x] 首次启动按系统语言自动选择（Windows / Linux / macOS；Electron 把系统界面语言传给后端），设置里可切换、即时生效
 - [x] 数字、大小单位、日期：两种语言同一格式；相对时间、时长与常见计数有英文单复数
 - [x] 过滤语法：关键字只有一套 ASCII 写法；内置类别名两种语言都能用（英文界面显示 Video / Pictures …，中文名作别名）
-- [x] 检查脚本 tools/i18n_check.py（含在测试里）：没有遗漏的硬编码文案、每条都有英文
+- [x] 检查脚本 `tools/i18n_check.mjs`（含在测试里；0.3.x 时是 Python 版）：没有遗漏的硬编码文案、每条都有英文
 - [ ] 英文复数仍有少数「1 items」式的说法（计数文案多，按需逐条加单数）
 
 ## M8 打包与发布（Windows 与 Linux）
 
-- [x] 应用图标：用户选定「D 斜切」（`design/app-icon/spaceknife.svg`）；`tools/render_app_icons.py --app` 生成 Windows `.ico`（16–256，10 个尺寸）、Linux hicolor PNG（16–512）、窗口图标；NSIS 安装 / 卸载图标、`.desktop`；标题栏标识改成同一个图形
-- [x] Electron 安装包：Windows NSIS；Linux deb / rpm / AppImage（`tools/build_package.py`，见 [docs/packaging.md](docs/packaging.md)）
-- [x] 冻结后端：PyInstaller onedir，扫描助手与工作进程走同一个可执行文件；Linux 包的 glibc 下限 2.34 有检查
-- [x] 冒烟测试：Windows 11 上 `win-unpacked`，WSL（Ubuntu 22.04）上 `linux-unpacked` 与 AppImage（`packaging/smoke_app.py`）
+- [x] 应用图标：用户选定「D 斜切」（`design/app-icon/spaceknife.svg`）；由母版生成 Windows `.ico`（0.3.5 起用 `pnpm tauri icon`，见 [design/app-icon/README.md](design/app-icon/README.md)）（16–256，10 个尺寸）、Linux hicolor PNG（16–512）、窗口图标；NSIS 安装 / 卸载图标、`.desktop`；标题栏标识改成同一个图形
+- [x] 安装包：Windows NSIS；Linux deb / rpm / AppImage（0.3.x 的 Electron 版用已删的 `tools/build_package.py`；0.3.5 起见 [docs/packaging.md](docs/packaging.md)）
+- [x] 冻结后端（0.3.x；0.3.5 起后端是 Rust，没有冻结的 Python 后端）：PyInstaller onedir，扫描助手与工作进程走同一个可执行文件；Linux 包的 glibc 下限 2.34 有检查
+- [x] 冒烟测试：Windows 11 上 `win-unpacked`，WSL（Ubuntu 22.04）上 `linux-unpacked` 与 AppImage（0.3.x 的 `packaging/smoke_app.py`；0.3.5 起是 `packaging/smoke-app.mjs`）
 - [x] Windows 安装包本身：静默「仅当前用户」安装、冒烟、卸载，卸载后与安装前一致（Windows 11）
 - [ ] 干净机器安装测试：Windows 10、RHEL 9、Ubuntu 22.04（装 / 运行 / 扫描 / 卸载；deb / rpm 还没实际安装过）
 - [ ] Windows 代码签名：没有证书时先发未签名包（SmartScreen 会提示）
-- [x] 许可证 MIT；安装包带第三方许可清单（Python、Rust、界面 JavaScript 与字体；`tools/third_party_licenses.py`）
-- [x] 项目主页 `https://github.com/DuskXi/SpaceKnife`；发布包里不带构建机路径（原生扩展单独做发布构建，构建时检查）
-- [ ] 包体积：只 strip 没被 auditwheel 改过的库（libpython、zstandard、原生扩展），Linux 后端约省 40 MB 解压后体积
+- [x] 许可证 MIT；安装包带第三方许可清单（Rust、界面 JavaScript 与字体；由 `apps/desktop/scripts/prepare-bundle.mjs` 生成）
+- [x] 项目主页 `https://github.com/DuskXi/SpaceKnife`；发布包里不带构建机路径（发布构建重映射路径，`tools/package_checks.mjs` 检查）
+- [x] 包体积：只 strip 没被 auditwheel 改过的库（libpython、zstandard、原生扩展）——不再适用：0.3.5 起没有 Python 后端
 - [x] 更新提示（2026-10-20）：每天最多一次检查 GitHub 发布；修订号只显示徽章，次版本号左上角挂卡片，主版本号弹对话框；一键下载对应安装方式的文件并按 SHA256SUMS 校验，Windows 安装包一键安装（docs/packaging.md「更新检查」）
 - [ ] 设计图标集里加一个「下载」图标（现在用旋转 180° 的向上箭头）
-- [x] **无缝更新与零残留卸载**（2026-10-21 用户决定，0.3.3 在 dev 上做完；端到端测试 `packaging/update_e2e.py` 在「Portable build」里跑）
+- [x] **无缝更新与零残留卸载**（2026-10-21 用户决定，0.3.3 在 dev 上做完；端到端测试 `packaging/update-e2e.mjs`（0.3.x 时是 `update_e2e.py`）在「Portable build」里跑）
   - **更新方式**：后台下载并按 SHA-256 校验，下载好后更新卡片给出两个大按钮：「无缝更新」（静默安装或换文件后重新打开，不弹安装向导）和经典方式（安装向导、磁盘映像、安装包，便携版和 AppImage 是自己替换）。用户点了才安装，扫描进行中要再点一次确认；从不自己安装，也不做全自动安装的选项。次版本 / 主版本还能「跳过 0.4.x」/「跳过 1.x」，整个系列不再提示（「关于与更新」里恢复）。
   - **下载位置**：更新文件放进数据目录下的 `updates`，不再放「下载」文件夹（现在每次更新都会在「下载」里留下一个 130 多 MB 的安装包）。装完即删，启动时清掉过期的。
   - **Windows 安装版**：运行新安装包时带 `/S`，安装范围和当前一致（`/currentuser` 或 `/allusers`；所有用户安装的会弹一次管理员确认），装完重新打开。
@@ -116,7 +116,7 @@
 - [x] 便携版（小众软件用户请求）：Windows x64 zip、Linux x64 tar.gz，程序旁的 `data` 文件夹存放全部数据（GitHub Actions「Portable build」，解压后以便携模式冒烟）
 - [x] Windows / Linux ARM64 便携版（2026-10-25）：「Portable build」在 `windows-11-arm`、`ubuntu-22.04-arm` 上构建 `win-arm64` / `linux-arm64` 便携包并跑冒烟和无缝更新测试；便携版更新按处理器架构挑包（Windows on ARM 上的 x64 便携版会换成 arm64 版）
 - [ ] ARM64 真机试用（Windows 11 ARM 笔记本、树莓派 5 之类的 ARM Linux）：扫描、MFT、监控、回收站、无缝更新
-- [ ] ARM64 安装包（NSIS arm64、deb arm64、rpm aarch64、AppImage aarch64）：文件名、更新挑包和发布清单都要跟着改。32 位 Windows 做不了：Electron 44 已不再提供 ia32
+- [ ] ARM64 安装包（NSIS arm64、deb arm64、rpm aarch64、AppImage aarch64）：文件名、更新挑包和发布清单都要跟着改。32 位 Windows：暂不做
 
 ## 索引扫描调研：Btrfs / ReFS / XFS（2026-10-21 记下）
 
@@ -126,7 +126,7 @@
   - 其他文件系统：一律并行硬扫描。Windows 用 `NtQueryDirectoryFile` / `FileIdExtdDirectoryInfo`；Linux 用 `open` + `getdents64` + 每项一次 `fstatat`；macOS 用 `getattrlistbulk`。
 - [docs/PLAN.md](docs/PLAN.md) 3.1 节规划了 Linux 上 Btrfs `TREE_SEARCH` 和 XFS `bulkstat`，作为需要提权、可选的索引扫描，还没实现。
 - Windows 上的 ReFS 卷（包括 Windows 11 的开发人员驱动器 Dev Drive），以及 WinBtrfs 驱动挂载的 Btrfs 卷，现在都走硬扫描。
-- `scan/volume.py` 已能识别 `fs_type`，可以按卷选择扫描后端。
+- `crates/sk-core/src/volume.rs` 已能识别 `fs_type`，可以按卷选择扫描后端。
 
 **要调研的点**
 - [ ] **Btrfs（Linux）**
@@ -172,7 +172,7 @@
 - [ ] **分几步筛，尽量少读盘**
   - [ ] 按大小分组：节点表里已有大小，不读盘。去掉只有一个文件的大小和 0 字节文件。
   - [ ] 同一组里先读每个文件头尾各一小块（比如 64 KiB），算快速哈希再分组。
-  - [ ] 剩下的再算整个文件的哈希（BLAKE3 或 xxh3-128），放在 Rust 扩展里多线程算、不占 GIL；要不要再逐字节比一遍，待定。
+  - [ ] 剩下的再算整个文件的哈希（BLAKE3 或 xxh3-128），在 Rust 里多线程算；要不要再逐字节比一遍，待定。
 - [ ] **不算重复的**
   - [ ] 同一个文件的多个硬链接（`ino` / `nlink`，`HARDLINK_DUP`）。
   - [ ] 云盘占位文件：读内容会触发下载，跳过并说明。
@@ -196,11 +196,11 @@
 
 起因：试过「按文件 ID 打开子目录」，结果在 C: 上悄悄漏扫了三分之一，在 WinBtrfs 上无限循环，后来去掉了（经过见 [docs/native.md](docs/native.md) 2.2「试过但去掉的」）。同时对照了小众软件论坛上各款空间分析软件在 WinSxS 上结果不一致的讨论。
 
-- [x] **非 ID、只保留访问时间的硬扫描：冷热缓存实测与整盘核对**（2026-10-22）：C:（NTFS 876 万项）、W:（ReFS 321 万项）、I:（WinBtrfs 149 万项）各冷 2 次、热 2 次，逐个文件夹与参照（C: 读 MFT，W:/I: Python 遍历器）比对，没有漏扫和扫错，差异都能归到期间的文件变动或已知的有意差异（docs/native.md 2.2）。
-- [x] **子目录相对父目录句柄、按名字打开**（`relative_open`，默认开；代替按 ID 打开）：每个目录打开后核对文件 ID；重解析点、没有 ID、名字带 `\`、接近长度上限的都按完整路径；WinBtrfs 的 FileIdExtd ID 不可信时改用 FileIdBoth。热缓存 W: 快约 25–30%、C: 约 4%，冷缓存看不出差别；三块盘逐个文件夹比对一致（docs/native.md 2.2）。
+- [x] **非 ID、只保留访问时间的硬扫描：冷热缓存实测与整盘核对**（2026-10-22）：C:（NTFS 876 万项）、ReFS 盘（321 万项）、WinBtrfs 盘（149 万项）各冷 2 次、热 2 次，逐个文件夹与参照（C: 读 MFT，ReFS 盘和 WinBtrfs 盘用 Python 遍历器）比对，没有漏扫和扫错，差异都能归到期间的文件变动或已知的有意差异（docs/native.md 2.2）。
+- [x] **子目录相对父目录句柄、按名字打开**（`relative_open`，默认开；代替按 ID 打开）：每个目录打开后核对文件 ID；重解析点、没有 ID、名字带 `\`、接近长度上限的都按完整路径；WinBtrfs 的 FileIdExtd ID 不可信时改用 FileIdBoth。热缓存 ReFS 盘快约 25–30%、C: 约 4%，冷缓存看不出差别；三块盘逐个文件夹比对一致（docs/native.md 2.2）。
 - [x] **保留访问时间在受保护的系统文件夹里不起作用**：`C:\Windows\WinSxS`、`DriverStore\FileRepository` 等只给 TrustedInstaller 写权限，管理员打开 `FILE_WRITE_ATTRIBUTES` 也被拒（系统盘上约 16% 的文件夹），硬扫描整个 C: 仍写 0.25–0.7 GB。不启用 `SeRestorePrivilege`（2026-10-22 用户决定）：这些文件夹照常列，关键是结果不能错、扫描要快，WinSxS 这类文件夹不占多数。
 - [x] Rust 单元测试（`cargo test --lib`，含 Windows 上相对打开的 ID 核对测试）在 CI 的 Python 任务里三个系统都跑（「Native unit tests」）。
-- [ ] WinBtrfs 上的硬扫描用时在约 1 s 和约 5.8 s（每次读 1.2 GB）之间跳，和开不开相对打开无关，看起来是 WinBtrfs 自己的缓存；Python 遍历器（FindFirstFileEx）有时不读盘。查清楚是不是 `FileIdExtdDirectoryInformation` 让它多读了 inode。
+- [ ] WinBtrfs 上的硬扫描用时在约 1 s 和约 5.8 s（每次读 1.2 GB）之间跳，和开不开相对打开无关，看起来是 WinBtrfs 自己的缓存。查清楚是不是 `FileIdExtdDirectoryInformation` 让它多读了 inode。
 - [ ] **Windows 硬扫描的硬链接只计一次**（PLAN.md 的正确性要求，现在没做到）
   - 现状：每行都是 `ino=0, nlink=1`，每个名字都算一次。本机 WinSxS 的情况：
     - 每个名字都算：27.21 GiB；
@@ -208,7 +208,7 @@
     - 其中与 System32 等共享：8.00 GiB（33,920 个文件）。
   - 后果：整盘合计会多算 10 GiB 以上，可能超过卷的已用空间（违反 UI-W7-18 的验收）。删除篮在 Windows 硬扫描下也判断不了硬链接（docs/manage.md）。
   - [ ] 原生遍历器把 `FileIdExtdDirectoryInformation` 已经给出的文件 ID 填进 `ino`，不多花系统调用。
-    - 注意 WinBtrfs（2026-10-22 实测）：它的 `FileIdExtdDirectoryInformation` 给每个子项填的都是被列目录自己的 ID（`I:\usr` 下 bin、games、include 都是 `I:\usr` 的 `…0775`），`FileIdBothDirectoryInformation` 和句柄上查到的 ID 才是对的。照搬就会把整个文件夹当成同一个文件的硬链接。相对打开已经按「一次列表里两个子目录同一 ID」识别它并改用 FileIdBoth（`win.rs` `shares_ids`），硬链接要用同一份判断；文件之间的重复 ID 本来就可能是硬链接，只能从子目录判断。
+    - 注意 WinBtrfs（2026-10-22 实测）：它的 `FileIdExtdDirectoryInformation` 给每个子项填的都是被列目录自己的 ID（`usr` 下 bin、games、include 都是 `usr` 的 `…0775`），`FileIdBothDirectoryInformation` 和句柄上查到的 ID 才是对的。照搬就会把整个文件夹当成同一个文件的硬链接。相对打开已经按「一次列表里两个子目录同一 ID」识别它并改用 FileIdBoth（`win.rs` `shares_ids`），硬链接要用同一份判断；文件之间的重复 ID 本来就可能是硬链接，只能从子目录判断。
   - [ ] 没有 nlink，要自己找重复：扫描结束时按 `ino` 排序（870 万项约 70 MB、1 秒量级），或者边扫边找；然后修正 `HARDLINK_DUP` 和各级合计。内存按 docs/memory.md 估算。
   - [ ] 三种扫描统一归属规则。现在：
     - MFT 快扫：算在 MFT 记录里第一个名字上；
@@ -235,7 +235,7 @@
   - 用正确的版本、按扫描器的调度方式，重测 8 / 16 / 32 个线程的用时和 CPU。
   - 再决定动态线程算法要不要盯「每 CPU 秒列出的项数」；默认上限仍按核数。
 - [ ] **WinBtrfs 上名字含 `\` 的 Linux 文件打不开**
-  - 现状：`I:\usr` 里有 8 个，例如 systemd 的 `app-chromium\x2dbrowser-.scope.d`。Windows 上 `\` 是分隔符，按路径打不开，现在记为错误。
+  - 现状：WinBtrfs 盘上一份 Linux 的 `usr` 里有 8 个，例如 systemd 的 `app-chromium\x2dbrowser-.scope.d`。Windows 上 `\` 是分隔符，按路径打不开，现在记为错误。
   - 可以试：相对父目录句柄、按单个名字打开（`RootDirectory` + 名字）。先查清 WinBtrfs 怎么把这类名字映射给 Windows。
 - [ ] **改打开或列目录的方式之前，先在真实的整盘上比对**
   - 做法：设 `SPACEKNIFE_TEST_SCAN_ROOT=<盘或目录>`，跑 `test_native_scan_of_a_real_tree_matches_the_python_walker`。Python 遍历器在前后各扫一次，排除扫描期间的文件变动。
@@ -254,11 +254,19 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
   - [x] 快照边压缩边写，zstd 最多 4 个线程，name_off 分块换基（docs/memory.md §4）
   - [x] Linux glibc：mmap 阈值 4 MiB、arena 最多 4 个，扫完和空闲时 malloc_trim（docs/memory.md §8；`SPACEKNIFE_GLIBC_DEFAULTS=1` 回退）
   - [x] 预派发切片（在途切片 = 1.5 × 列目录线程）：默认线程放置下热缓存 C:\Windows 按轮交替 8 次，墙钟 0.97 倍 [0.90–1.05]、CPU 0.98 倍，没有确定的收益（第一轮的 −4–5% 是绑 P 核时测的；归并移进 Rust 之后列目录线程已忙 91%），**不做**。
-- [ ] 第一步里还没做的一项（等用户决定）：NodeStore 的列放进预留地址空间、按需提交（第一轮：880 万行模拟 append 0.46 → 0.14 s，扫描结束时提交等于实际用量）：生命周期、提交失败回退、映射模式切换要设计，还差在 W: 上端到端测。
-- [ ] 第二步：载体池替换 rayon 小池（宽度先固定为今天的值），之前先查清同宽度下 W: 冷缓存慢约 30% 的原因，补上 POSIX 的 fd 预算和资源错误重排。并发提高以后在大并发下重测 glibc 的 `M_ARENA_MAX=4`（docs/memory.md §8）。
-- [ ] K:、W:（TOPMORE NVMe）冷缓存每臂至少 8 轮，按每次运行的读延迟分层或配对，确认第一步在这两块盘上冷缓存没有变慢（评审：按中位数慢 33%，但盘的延迟状态在两次运行之间差 5 倍）。
+- [ ] 第一步里还没做的一项（等用户决定）：NodeStore 的列放进预留地址空间、按需提交（第一轮：880 万行模拟 append 0.46 → 0.14 s，扫描结束时提交等于实际用量）：生命周期、提交失败回退、映射模式切换要设计，还差在 ReFS 盘上端到端测。
+- [ ] 第二步：载体池替换 rayon 小池（宽度先固定为今天的值），之前先查清同宽度下 ReFS 盘冷缓存慢约 30% 的原因，补上 POSIX 的 fd 预算和资源错误重排。并发提高以后在大并发下重测 glibc 的 `M_ARENA_MAX=4`（docs/memory.md §8）。
+- [ ] 两块 NVMe 数据盘（NTFS、ReFS）冷缓存每臂至少 8 轮，按每次运行的读延迟分层或配对，确认第一步在这两块盘上冷缓存没有变慢（评审：按中位数慢 33%，但盘的延迟状态在两次运行之间差 5 倍）。
 - [ ] 第三、四步：governor 的上限交给 Rust；控制器先作为默认关闭的选项（报告 §2.4 的几处先修，离线回放后再实机验证）。
 - [ ] 不做：父目录拒绝写属性就让子目录直接普通打开（预测错的文件夹会被更新访问时间，改变了访问时间行为）；绑 P 核及类似的机器专用设置。
+
+## 0.3.5（Rust 重写）遗留
+
+Rust 后端合进来时还没补上的（原来记在 `crates/PORTING-BACKEND.md` 的「Known gaps」）：
+
+- [ ] macOS 的 NVMe 健康记录：见「本机统计页面」，0.3.6 移植，在 Intel Mac 上实测
+- [ ] `ops::names` 仍是文件操作模块自己的一份扫描名字检查（`ops/names.rs`、`ops/win.rs` 里的 `TODO(scan)`），和扫描器的合成一份
+- [ ] 删除篮里不是合法 Unicode 的名字：按真实路径（`BasketItem::os_path` / `os_members`）找到并执行，显示的名字相同的两个兄弟也是两项；但占用检测（Restart Manager，按显示的路径）说不出是谁占着这类文件
 
 ## 其他
 
@@ -269,16 +277,16 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
 
 - [ ] MFT 快扫：卷根目录下若真有名为「$NTFS 元数据」/「$孤立文件」的文件，会和伪文件夹同名并排显示（合计正确，只是名字重复）；给伪文件夹加后缀避让（Hypothesis 找到的边界情况）
 
-- [ ] 浅色主题（0.3.4 暂定稿，起因是 AppImage 目录审核 AppImage/appimage.github.io#10482）：A2 的浅色模式，默认跟随系统；外框、树图、火焰图、火焰-极坐标图、分支色（`visual.branch.*`）和环形色（`visual.ring.*`）都有浅色值（`design/tokens/themes/light.tokens.json`），类别颜色按主题保存。实现已完成，色值经用户评审之前不算完成，也不合进发布
-  - [ ] 用户评审浅色色板：`uv run python tools/preview_design.py <out.html>` 的深浅对照和实机截图。要问清：当初否决 B「纸本」的理由（暖色和印刷感，还是「浅底加白色表面」本身；若是后者，这一稿同样踩中）；青柠、橙色预设在浅色里变深（#4F6200 军绿、#954104 锈褐）能不能接受；黄色标签在外框里是暗金 #957700、画布上是深色底座上的亮黄 #FFD23F，同一屏两种黄，要不要改成外框也用深色底座加亮色；命令面板的 22% 石墨遮罩把黄、橙块压成芥末黄、焦褐，要不要换成不压暗的遮罩；警告的浅底现在垫在淡黄 `status.warningBase` 上（帮助页「注意」框 #FEF4CA），标题和边线仍是暗金 #845D00
+- [ ] 浅色主题（0.3.4 暂定稿，起因是 AppImage 目录审核 AppImage/appimage.github.io#10482）：A2 的浅色模式，默认跟随系统；外框、树图、火焰图、火焰-极坐标图、分支色（`visual.branch.*`）和环形色（`visual.ring.*`）都有浅色值（`design/tokens/themes/light.tokens.json`），类别颜色按主题保存。实现已完成，已随 0.3.4 发布（默认跟随系统）；色值经用户评审之前这一项不算完成
+  - [ ] 用户评审浅色色板：深浅对照（原 `tools/preview_design.py`，Python 版已删，需要时再写 Node 版）和实机截图。要问清：当初否决 B「纸本」的理由（暖色和印刷感，还是「浅底加白色表面」本身；若是后者，这一稿同样踩中）；青柠、橙色预设在浅色里变深（#4F6200 军绿、#954104 锈褐）能不能接受；黄色标签在外框里是暗金 #957700、画布上是深色底座上的亮黄 #FFD23F，同一屏两种黄，要不要改成外框也用深色底座加亮色；命令面板的 22% 石墨遮罩把黄、橙块压成芥末黄、焦褐，要不要换成不压暗的遮罩；警告的浅底现在垫在淡黄 `status.warningBase` 上（帮助页「注意」框 #FEF4CA），标题和边线仍是暗金 #845D00
   - [ ] Linux 实测「跟随系统」：GNOME 默认（应为浅色）、GNOME 深色、没有 xdg-desktop-portal 的桌面（如 Xfce）各跑一次 AppImage；实测之前 UNRELEASED 不写 Linux 的具体行为
   - [ ] macOS 实测「跟随系统」：系统设置 › 外观的浅色、深色、自动；红绿灯按钮和系统菜单跟随应用的选择
-  - [ ] 帮助页的三张配图按主题出两套（`vite-plugins/help-pictures.ts` 按 `themeName()` 选图源）；在此之前浅色里仍是深色截图。`tools/demo/screenshots.cjs` 用 `SHOT_THEME=light` 截浅色
+  - [ ] 帮助页的三张配图按主题出两套（`vite-plugins/help-pictures.ts` 按 `themeName()` 选图源）；在此之前浅色里仍是深色截图。`node tools/demo/screenshots.mjs --theme light` 截浅色
   - [ ] 分支色板在绿色盲下有几对槽位接近（如 4 / 5、8 / 1），两套主题相同（V 待定 1）
-- [ ] 深色主题原有的对比度不足（`tools/tests/test_gen_design.py` 的 `DARK_SHORT`）：`treemap.time.2` 的名称 4.43、大小行 3.71；分支第 3 档 1、3、5、7 槽的大小行 4.26–4.41；火焰图和火焰-极坐标图点亮的文件夹条（大小行已改用名称的颜色），分支第 3 档 1、3、5、7 槽点亮后的名称 4.31–4.44。另有点阵阈值：代码用亮度 0.18，规格写 0.2。非文字：深色里「其他」和「游戏」的类别色在面板上不到 3:1；本机磁盘「外接盘」的深蓝段在深色卡片上约 2:1
+- [ ] 深色主题原有的对比度不足（`tools/tests/gen_design.test.mjs` 的 `DARK_SHORT`）：`treemap.time.2` 的名称 4.43、大小行 3.71；分支第 3 档 1、3、5、7 槽的大小行 4.26–4.41；火焰图和火焰-极坐标图点亮的文件夹条（大小行已改用名称的颜色），分支第 3 档 1、3、5、7 槽点亮后的名称 4.31–4.44。另有点阵阈值：代码用亮度 0.18，规格写 0.2。非文字：深色里「其他」和「游戏」的类别色在面板上不到 3:1；本机磁盘「外接盘」的深蓝段在深色卡片上约 2:1
 - [ ] 0.3.3 里明确选过「深色」的用户升级后第一次启动：还没有 `theme.json`，窗口先按系统出一次，设置到了才翻成深色（只此一次，之后 `theme.json` 记着）。要消掉得让 main 照 platformdirs 找到后端的 `settings.json` 读 `appearance.theme`（SPACEKNIFE_HOME、Windows 的 LocalAppData、macOS / Linux 的 XDG_CONFIG_HOME 各一套），先不做
 - [ ] 扁平配色按主题保存（等 UI-W7-31 ⑤ 的改色实现）：每个元素、每个主题一个设置项 `appearance.flat_<元素>_<主题>`，空为 `treemap.flat.*` 的默认色
-- [ ] 导出报告的浅色色板（`export/formats.py`）对齐浅色令牌：它的三级灰在底色上只有 4.62:1
+- [ ] 导出报告的浅色色板（`crates/sk-core/src/export/formats.rs`）对齐浅色令牌：它的三级灰在底色上只有 4.62:1
 
 ## 本机统计页面（2026-10-20 记下；2026-10-21 做成「本机磁盘」页，0.3.3）
 
@@ -293,10 +301,11 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
 - [x] 协议：`machine.disks`（`spaceknife_protocol.machine`），前端只负责显示
 - [x] 界面：单独的标签页（`pages/MachinePage.tsx`），每块盘一张卡片，盘上的卷按盘上顺序；链路比盘能跑的慢时用一行说明（不弹窗）
 - [ ] macOS 只用记录的数据形状测过（`system_profiler` 的键名随系统版本变化，比如 macOS 15 的 `SPUSBHostDataType`）：在真机上核对 NVMe / SATA / USB 链路
-- [x] 磁盘自己的记录（0.3.3）：Windows 不提权读 NVMe 健康日志 / ATA 设备统计日志；macOS 经 IOKit 的 NVMe SMART 接口读 NVMe 盘（不提权）；Linux 点「用管理员权限读取…」后由提权助手读（NVMe 管理命令、SG_IO 的 ATA 直通）
-- [ ] macOS 的 NVMe SMART 在 Intel Mac 上实测（`disks/mac_smart.py` 还没在真机上跑过）：数值和 smartctl / DriveDx 对一下；另一个程序（Stats、DriveDx）占着接口时安静地读不到；连读约 20 次看有没有泄漏；正式签名（Developer ID、hardened runtime、不加 disable-library-validation）的包里也读得到。有机会在 Apple 芯片的 Mac 上跑一次
+- [x] 磁盘自己的记录（0.3.3）：Windows 不提权读 NVMe 健康日志 / ATA 设备统计日志；Linux 点「用管理员权限读取…」后由提权助手读（NVMe 管理命令、SG_IO 的 ATA 直通）；macOS 经 IOKit 的 NVMe SMART 接口读 NVMe 盘（不提权）只到 0.3.4，见下一项
+- [ ] macOS 的 NVMe 健康记录移植到 Rust（0.3.6）：0.3.5 的 `sk_core::disks::mac_smart` 是空壳（IOKit 的 NVMe SMART user client 那段 FFI 没有移植），Mac 上「本机磁盘」读不到 NVMe 盘自己的记录（累计读写、温度、通电时间、剩余寿命），0.3.5 的发布说明已写进已知限制。移植后在 Intel Mac 上实测（见下一项）
+- [ ] macOS 的 NVMe SMART 在 Intel Mac 上实测（0.3.4 的 `disks/mac_smart.py` 没在真机上跑过；Rust 版移植之后一起测）：数值和 smartctl / DriveDx 对一下；另一个程序（Stats、DriveDx）占着接口时安静地读不到；连读约 20 次看有没有泄漏；正式签名（Developer ID、hardened runtime、不加 disable-library-validation）的包里也读得到。有机会在 Apple 芯片的 Mac 上跑一次
 - [ ] macOS 的 SATA 盘（iMac 2019 的机械盘 / Fusion Drive）：`ATASMARTLib` 的接口还没调研（要不要 root、读得到什么）
-- [ ] Linux 的 deb / rpm 在真机桌面上走一遍：polkit 密码框、冻结后端以 root 跑 `--helper`；可以随包附带一个 polkit 策略文件（`org.freedesktop.policykit.exec.path` 指向 `/opt/SpaceKnife/resources/backend/spaceknife-backend/spaceknife-backend`），让密码框写清楚要做什么（现在是 pkexec 的通用说明）
+- [ ] Linux 的 deb / rpm 在真机桌面上走一遍：polkit 密码框、以 root 跑 `spaceknife-cli helper`；可以随包附带一个 polkit 策略文件（`org.freedesktop.policykit.exec.path` 指向 `/usr/bin/spaceknife-cli`（deb）/ `/opt/SpaceKnife/spaceknife-cli`（rpm）），让密码框写清楚要做什么（现在是 pkexec 的通用说明）
 - [ ] Linux 上 SATA 盘只有当前速率（设备支持的最高速率要 IDENTIFY，需要 root）：提权助手读健康记录时已经拿到 IDENTIFY，可以顺带补上
 - [ ] Windows 把 USB 3.2 Gen 2×2 报告成 10 Gb/s：`IOCTL_USB_GET_NODE_CONNECTION_SUPERSPEEDPLUS_INFORMATION` 能分出 20 Gb/s
 
@@ -311,7 +320,7 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
 - [ ] 与旧树图对比手动检查：缩放动画、闪烁、呼吸、悬停卡、右键菜单、分屏（树图的宿主拆分后行为应一致；缩放返回时旧画面的文字现在随画面一起淡出）
 - [ ] 无障碍与布局手动检查：Tab 焦点顺序、屏幕阅读器读出「可视化（V）」和各段名称
 - [ ] 窄窗口时工具栏的收起顺序：过滤框先压缩，然后是芯片、配色，可视化切换最后（工具栏右侧现在没有收起逻辑，需要 CSS 改动）
-- [ ] 截图回归：`tools/demo/screenshots.py` 加火焰图和火焰-极坐标图
+- [ ] 截图回归：`tools/demo/screenshots.mjs` 加火焰图和火焰-极坐标图
 - [ ] 分支色板（8 色 × 4 档）：设计评审与色盲检查，或换成用户给的色相
 - [x] 在 Linux（WSL）上跑全量测试（2026-10-22，带原生扩展：1797 项通过、237 项按平台跳过；真实目录对照 `SPACEKNIFE_TEST_SCAN_ROOT=/` 也通过）
 - [ ] 发布说明：旧版本后端读到 `branch`、`flame`、`flame_polar` 或新的设置键时，会判整份设置文件不合法，退回上一次的有效设置（`settings.py` 的校验）；按单项回落的改造另行排期

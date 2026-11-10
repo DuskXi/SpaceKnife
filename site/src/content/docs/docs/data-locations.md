@@ -12,9 +12,11 @@ A scan only reads the disk. What SpaceKnife keeps lives in a few per-user folder
 | Data: snapshots, tags, logs | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | Configuration: settings, file classes | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | Cache | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
-| Interface profile (the window's storage and caches) | `%APPDATA%\SpaceKnife\electron` | `~/.config/SpaceKnife/electron` | `~/Library/Application Support/SpaceKnife/electron` |
+| Window files (the window's theme, storage and caches) | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife`; Electron builds: `~/.config/SpaceKnife/electron` | `~/Library/Application Support/io.github.duskxi.spaceknife` (theme); `~/Library/WebKit/io.github.duskxi.spaceknife` (web view storage and caches) |
 
-On Linux, the folders follow `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` when you set them.
+These are the folders 0.3.x used for the data, configuration and cache, so an upgrade finds everything where it was. On Linux, and on macOS as in 0.3.x, the folders follow `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` when you set them to an absolute path.
+
+The window files belong to the shell that draws the window. The Tauri one (Windows, macOS, the deb and the small Linux portable) names its folder after the app's identifier, `io.github.duskxi.spaceknife`; the system's web view (WebView2, WebKitGTK, WebKit) may keep caches of its own as well. The Electron one (the rpm, the AppImage and the Linux portable that brings its own engine) keeps them in `~/.config/SpaceKnife/electron`, as 0.3.x did. 0.3.4 kept its window files in `%APPDATA%\SpaceKnife\electron` (Windows), `~/.config/SpaceKnife/electron` (Linux) and `~/Library/Application Support/SpaceKnife/electron` (macOS). The Electron builds go on using that folder; the Tauri builds read the theme from it once, at their first start, and leave it alone after that.
 
 You don't have to look them up: **Settings › Advanced** shows them.
 
@@ -28,20 +30,23 @@ You don't have to look them up: **Settings › Advanced** shows them.
 |---|---|---|
 | `snapshots/` | data | One folder per scanned location, one `.sks` file per snapshot |
 | `tags/` | data | Saved tags, one file per scanned location |
-| `logs/spaceknife.log` | data | The log file |
+| `logs/spaceknife.log` | data | The log file, and the older ones `spaceknife.log.1` to `.5` |
 | `update.json` | data | The last update check, the recent releases with their notes, and the versions whose update card you closed |
 | `updates/` | data | A downloaded new version until it runs, and while a portable copy is replaced, its new and old program files. Emptied at the next start ([Nothing left behind](../updates-privacy/#nothing-left-behind)) |
 | `palette_recent.json` | data | Recent jumps and filters of the command palette |
 | `volume_summaries.json` | data | What the Disks page kept of each volume's last complete scan (file classes, largest folders) |
 | `settings.json` | configuration | Your settings |
 | `classes.json` | configuration | Your file classes |
+| `class_folders.json` | configuration | Folders you put in a file class |
 | `columns/` | cache | Scan data moved out of memory for very large scans |
 
 SpaceKnife's own folders, like the folder it is installed in, are protected: you can't delete or move them from inside SpaceKnife.
 
 ### Snapshots
 
-Automatic snapshots are saved as `snapshots/<location>-<id>/<date>-<time>.sks`, for example `snapshots/Videos-3f2a9c41d0be/20261020-081530.sks`. The date and time are in UTC.
+Automatic snapshots are saved as `snapshots/<location>-<id>/<date>-<time>.sks`, for example `snapshots/Videos-3f2a9c41d0be/20261020-081530.sks`. The date and time are in UTC. The folder of a location has the same name as in 0.3.x, so its tags and snapshots stay together after an upgrade.
+
+Snapshots saved by 0.3.x open and compare as they are; 0.3.5 saves a newer format, which 0.3.x can't open. The cleanup below never deletes a snapshot file SpaceKnife can't read (damaged, or saved by a newer version).
 
 For each location SpaceKnife keeps the newest 10 (**Settings › Advanced › Recent snapshots to keep**, 1–100), and of the older ones the newest of each week; the rest are deleted after each automatic save.
 
@@ -55,7 +60,7 @@ Files whose names aren't a date and time are never deleted by that cleanup: rena
 
 ### Logs
 
-`logs/spaceknife.log` grows to 10 MB, then starts a new file; the 5 newest old files are kept. **Settings › Advanced › Log file level** chooses **Info** or **Debug**. The log panel (<kbd>Ctrl</kbd>+<kbd>J</kbd>) shows the events of this session.
+`logs/spaceknife.log` grows to 10 MB, then starts a new file; the 5 newest old files are kept, as `spaceknife.log.1` (the newest) to `spaceknife.log.5`. The old logs 0.3.x kept (`spaceknife.<time>.log`) are deleted at the first start of 0.3.5. **Settings › Advanced › Log file level** chooses **Info** or **Debug**. The log panel (<kbd>Ctrl</kbd>+<kbd>J</kbd>) shows the events of this session.
 
 For a bug report, **Settings › Advanced › Copy diagnostics** puts the versions, platform, capabilities and the paths of the settings file and log folder on the clipboard. Nothing is sent anywhere.
 
@@ -72,7 +77,8 @@ Set the environment variable `SPACEKNIFE_HOME` to a folder, and SpaceKnife keeps
 | `SPACEKNIFE_HOME/data` | Snapshots, tags, logs, update state |
 | `SPACEKNIFE_HOME/config` | Settings, file classes |
 | `SPACEKNIFE_HOME/cache` | Cache |
-| `SPACEKNIFE_HOME/electron` | Interface profile |
+| `SPACEKNIFE_HOME/desktop` | Window files (the Tauri builds; on macOS the web view's storage and caches stay in `~/Library/WebKit/io.github.duskxi.spaceknife`) |
+| `SPACEKNIFE_HOME/electron` | Window files (the Electron builds) |
 
 Use it for a separate profile (to try settings without touching your own), to keep snapshots on another drive, or for demos and tests. Give an absolute path.
 
@@ -101,11 +107,11 @@ macOS:
 SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife
 ```
 
-The [command line](../command-line/) reads the same variable, so `spaceknife-backend snapshot list` with `SPACEKNIFE_HOME` set lists the snapshots in that folder.
+The [command line](../command-line/) reads the same variable, so `spaceknife-cli snapshot list` with `SPACEKNIFE_HOME` set lists the snapshots in that folder.
 
 ## Portable mode
 
-The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-linux-<arch>-portable.tar.gz` and `SpaceKnife-<version>-mac-<arch>-portable.zip`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the interface profile all stay in it, and nothing is written to your user profile.
+The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-mac-<arch>-portable.zip`, and for Linux `SpaceKnife-<version>-linux-<arch>-tauri.tar.gz` and `SpaceKnife-<version>-linux-<arch>-portable.tar.gz`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the window files all stay in it (`data/data`, `data/config`, `data/cache`, and `data/desktop` or `data/electron`), and nothing is written to your user profile. The one exception is macOS: WKWebView takes no other folder, so the web view's own data (page storage and caches) always goes to `~/Library/WebKit/io.github.duskxi.spaceknife`, also for a portable copy and with `SPACEKNIFE_HOME`.
 
 - An explicitly set `SPACEKNIFE_HOME` wins over the `data` folder.
 - Delete or rename `data` and the copy uses the normal per-user folders. Put it back and it is portable again.
@@ -113,14 +119,15 @@ The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKni
 - The in-app update knows it is a portable copy: it downloads the portable archive, and **Seamless update** replaces the program files and keeps `data`; **Replace it yourself** shows the archive so that you unpack it over the old files (see [Upgrading](../install/#upgrading)).
 - On macOS, an app opened straight from where it was unzipped may be run from a hidden read-only copy (App Translocation). SpaceKnife finds the original folder and still keeps its data in `data` there.
 - An app installed from the dmg (with no `data` folder next to it in Applications) and the AppImage have no portable mode.
+- A copy updated from 0.3.4 may still have the folder `data/electron` that 0.3.4's window used. The Tauri builds read the theme from it once and then leave it alone; you can delete it.
 
 :::caution[The command line and portable mode]
-Only the app looks for the `data` folder; the command line inside a portable copy doesn't. To work with a portable copy's snapshots from a terminal, point `SPACEKNIFE_HOME` at its `data` folder, as in the example below.
+Only the app and headless mode look for the `data` folder; `scan`, `run` and `snapshot` in a portable copy don't. To work with a portable copy's snapshots from a terminal, point `SPACEKNIFE_HOME` at its `data` folder, as in the example below.
 :::
 
 ```powershell
 $env:SPACEKNIFE_HOME = "C:\Users\lenny\Apps\SpaceKnife-portable\data"
-& "C:\Users\lenny\Apps\SpaceKnife-portable\resources\backend\spaceknife-backend.exe" snapshot list
+& "C:\Users\lenny\Apps\SpaceKnife-portable\spaceknife-cli.exe" snapshot list
 ```
 
 ### Moving your data
@@ -129,4 +136,4 @@ To take your settings into a portable copy (or out of one), export them in one c
 
 ## Removing all data
 
-The Windows uninstaller does it for you: tick **Also delete the snapshots, settings and logs** on its second page ([Uninstalling](../install/#uninstalling)). Otherwise, to start fresh or to remove everything after uninstalling, quit SpaceKnife and delete the folders in the [first table](#where-things-are) (on Windows: `%LOCALAPPDATA%\SpaceKnife` and `%APPDATA%\SpaceKnife`), or the `SPACEKNIFE_HOME` folder or `data` folder you use. **Settings › Advanced › Restore all defaults** resets only the settings and file classes.
+To start fresh or to remove everything after uninstalling, quit SpaceKnife and delete the folders in the [first table](#where-things-are), or the `SPACEKNIFE_HOME` folder or `data` folder you use. On Windows these are `%LOCALAPPDATA%\SpaceKnife` and `%LOCALAPPDATA%\io.github.duskxi.spaceknife`, and `%APPDATA%\SpaceKnife` if 0.3.x was installed; the Windows uninstaller removes all of them when you tick **Also delete the snapshots, settings and logs** ([Uninstalling](../install/#uninstalling)). On macOS, also delete `~/Library/WebKit/io.github.duskxi.spaceknife`. **Settings › Advanced › Restore all defaults** resets only the settings and file classes.

@@ -1,0 +1,18 @@
+{
+  "about": "The upstream files the forked NSIS template (installer.nsi, spaceknife.nsh) follows: tauri-bundler's, the version the locked tauri-cli pins. tools/nsis_fork.mjs check compares them (SHA-256 with LF line ends) with crates.io and with the CLI the build installs. When tauri-cli moves on, merge the upstream changes into the fork, then update this file (node tools/nsis_fork.mjs hashes <unpacked tauri-bundler crate>).",
+  "tauriCli": "2.12.4",
+  "tauriBundler": "2.10.4",
+  "nsis": "3.13",
+  "nsisTauriUtils": "0.5.3",
+  "nsisSha1": "DB14F8AF2EA346B786C6AE19343F61AAF5E09B8E",
+  "nsisExeSha1": "6D45D4E8CCF18FE1FDAC9164058F356102A2ECF2",
+  "nsisTauriUtilsSha1": "75197FEE3C6A814FE035788D1C34EAD39349B860",
+  "files": {
+    "src/bundle/windows/nsis/installer.nsi": "d00089d3b1a2c4a30d7b6e098079100cb8f25e980f84d4515aca4597b95e967d",
+    "src/bundle/windows/nsis/utils.nsh": "78272bd40b8a783c0ab94e4bcb400fd947ba306a7575f2bbbbccb7478f40447f",
+    "src/bundle/windows/nsis/FileAssociation.nsh": "85ce72519d5461b5777f95123176b5536de163abd9a4742f9235453c4ddf56d8",
+    "src/bundle/windows/nsis/languages/English.nsh": "e663ba48d3c4248d77d447766d935d5ad0e9122bb452e2ee75ddf9b59975f141",
+    "src/bundle/windows/nsis/languages/SimpChinese.nsh": "642256c9893a4295ab5648c605337fd4f1f59a11bc41c057da9460202dcb140d",
+    "src/bundle/windows/nsis/mod.rs": "ce129133be31063c51ee3649f69f600b9397f6af1e24075dec3b0d54ae637a2c"
+  }
+}

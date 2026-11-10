@@ -1,0 +1,61 @@
+{
+ "version": 2,
+ "classes": [
+  {
+   "id": "image",
+   "name": "图片",
+   "aliases": [
+    "Image",
+    "Images",
+    "Picture",
+    "Pictures",
+    "Pictures/Images",
+    "Photos"
+   ],
+   "extensions": [
+    "jpg",
+    "png"
+   ],
+   "color": "#FF0000",
+   "color_light": "#AA0000"
+  },
+  {
+   "id": "u-logs",
+   "name": "Logs",
+   "aliases": [],
+   "extensions": [
+    "log",
+    "txt"
+   ],
+   "color": "#00FF00",
+   "color_light": ""
+  },
+  {
+   "id": "video",
+   "name": "视频",
+   "aliases": [
+    "Video",
+    "Videos",
+    "Movies",
+    "Video/Movies"
+   ],
+   "extensions": [
+    "mp4"
+   ],
+   "color": "#0000FF",
+   "color_light": ""
+  },
+  {
+   "id": "other",
+   "name": "其他",
+   "aliases": [
+    "Other",
+    "Others",
+    "Unclassified"
+   ],
+   "extensions": [],
+   "color": "",
+   "color_light": ""
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "version": 1,
+ "tags": [
+  {
+   "root": 0,
+   "path": "a",
+   "color": "red"
+  },
+  {
+   "root": 0,
+   "path": "many",
+   "color": "blue"
+  }
+ ]
+}

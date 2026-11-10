@@ -1,6 +1,6 @@
 # SpaceKnife 过滤语法（SKF 1）
 
-本文是过滤语言的规范。参考实现是 `packages/protocol/src/spaceknife_protocol/filter_syntax.py`（解析、规范化、格式化，纯 Python，后端和 Python 前端共用），求值在 `packages/backend/src/spaceknife/filter/`。Electron 前端通过协议方法 `filter.parse` 拿到同一份解析结果。
+本文是过滤语言的规范。参考实现是 `crates/sk-protocol/src/filter_syntax.rs`（解析、规范化、格式化，后端各处共用），求值在 `crates/sk-core/src/filter/`。界面通过协议方法 `filter.parse` 拿到同一份解析结果。
 
 ## 0. 设计原则与五条性质
 
@@ -193,7 +193,7 @@ bare       = 不含 ";" "\" "|" "<" ">" 的非空文本 ;
 | data | 数据/模型 | 数据、模型、Data、Datasets、Models、Databases（SpaceKnife 新增） |
 | other | 其他 | Other、Others、Unclassified（不属于任何类别的文件） |
 
-类别的扩展名列表来自「文件类别」设置（默认表在 `packages/protocol/src/spaceknife_protocol/classes.py`，包含 SpaceSniffer 的全部默认扩展名）。`ts`、`mts` 同时在视频和代码里，按文件大小归入其中一个（`spaceknife.classes.STREAM_SPLITS`：16 MiB 以上，或 1 MiB 以上且大小是整数个传输流包——`ts` 188 字节、`mts` 192 字节——算视频，其余算代码）；只看大小，不读内容。认得出的文件夹（游戏、项目、模型缓存、系统区，`spaceknife.pathclass`）里的文件按文件夹的类别匹配，不按扩展名：`:class:video` 不匹配游戏里的 mp4；已安装的软件和应用数据里只有没有类别的文件改算「程序/系统」。不存在的类别名报 `unknown_class`，并列出候选。
+类别的扩展名列表来自「文件类别」设置（默认表在 `crates/sk-protocol/src/classes.rs`，包含 SpaceSniffer 的全部默认扩展名）。`ts`、`mts` 同时在视频和代码里，按文件大小归入其中一个（`crates/sk-core/src/classes.rs` 的 `STREAM_SPLITS`：16 MiB 以上，或 1 MiB 以上且大小是整数个传输流包——`ts` 188 字节、`mts` 192 字节——算视频，其余算代码）；只看大小，不读内容。认得出的文件夹（游戏、项目、模型缓存、系统区，`crates/sk-core/src/pathclass.rs`）里的文件按文件夹的类别匹配，不按扩展名：`:class:video` 不匹配游戏里的 mp4；已安装的软件和应用数据里只有没有类别的文件改算「程序/系统」。不存在的类别名报 `unknown_class`，并列出候选。
 
 ## 4. 取反
 
@@ -313,7 +313,7 @@ bare       = 不含 ";" "\" "|" "<" ">" 的非空文本 ;
 
 ### 9.1 实测方法
 
-`tools/spacesniffer_oracle.py` 用 SpaceSniffer 的命令行（`scan <目录> filter <表达式> export "Simple file list" <文件> autoclose`）对一个精确控制大小、时间、属性、类别和文件夹名的测试目录（`packages/backend/tests/filter_fixture.py`，16 个文件，外加一个用于区分进制和月、年长度的小目录）逐条求值。SpaceSniffer 运行在一个从不显示的独立桌面上；表达式非法时它会弹出「Filter contains errors」，工具读取弹窗原文后结束进程。共 170 条探针，结果在 `packages/backend/tests/data/spacesniffer_filter_oracle.json`，由 `test_filter_compat.py` 逐条回放。
+原先的 `tools/spacesniffer_oracle.py`（Python 版随 0.3.5 删除，需要时再写 Node 版）用 SpaceSniffer 的命令行（`scan <目录> filter <表达式> export "Simple file list" <文件> autoclose`）对一个精确控制大小、时间、属性、类别和文件夹名的测试目录（原 Python 测试的 `filter_fixture.py`，16 个文件，外加一个用于区分进制和月、年长度的小目录；Rust 的回放在内存里按同样的大小、时间和属性建出这棵树）逐条求值。SpaceSniffer 运行在一个从不显示的独立桌面上；表达式非法时它会弹出「Filter contains errors」，工具读取弹窗原文后结束进程。共 170 条探针，结果在 `crates/sk-core/tests/data/spacesniffer_filter_oracle.json`，由 `crates/sk-core/tests/filter_compat.rs` 逐条回放。
 
 ### 9.2 扩展（SpaceSniffer 判为非法，SpaceKnife 赋予含义）
 
@@ -357,6 +357,6 @@ bare       = 不含 ";" "\" "|" "<" ">" 的非空文本 ;
 
 | 测试 | 内容 |
 |---|---|
-| `packages/protocol/tests/test_filter_syntax.py` | 规范形式示例、等价写法归一、每个错误码的定位、UTF-16 位置、未完成条件与补全、SpaceSniffer 帮助示例；hypothesis 性质测试：全覆盖（随机字符串不抛异常、区间合法、解析是函数）、幂等与完整（`parse(canonical(x))` 的条件树等于 `x` 的）、顺序与重复无关 |
-| `packages/backend/tests/test_filter_engine.py` | 向量化引擎与一个独立的逐节点参考实现在随机树（约 2500 个节点、7–8 层、含非 ASCII 名字、硬链接、未知时间戳、标签）上逐项对拍，包括每个文件夹的匹配数和匹配大小 |
-| `packages/backend/tests/test_filter_compat.py` | SpaceSniffer 实测结果逐条回放（Windows）：结果一致，或双方都判为非法，或属于第 9 节列出的差异 |
+| `crates/sk-protocol/tests/filter_syntax.rs` | 规范形式示例、等价写法归一、每个错误码的定位、UTF-16 位置、未完成条件与补全、SpaceSniffer 帮助示例；性质测试（随机生成的输入）：全覆盖（随机字符串不抛异常、区间合法、解析是函数）、幂等与完整（`parse(canonical(x))` 的条件树等于 `x` 的）、顺序与重复无关 |
+| `crates/sk-core/tests/filter_engine.rs` | 向量化引擎与一个独立的逐节点参考实现在随机树（约 2500 个节点、7–8 层、含非 ASCII 名字、硬链接、未知时间戳、标签）上逐项对拍，包括每个文件夹的匹配数和匹配大小 |
+| `crates/sk-core/tests/filter_compat.rs` | SpaceSniffer 实测结果逐条回放：结果一致，或双方都判为非法，或属于第 9 节列出的差异 |

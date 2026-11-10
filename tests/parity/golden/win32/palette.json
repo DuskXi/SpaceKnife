@@ -1,0 +1,1488 @@
+{
+ "format": 1,
+ "scenario": "palette",
+ "platform": "win32",
+ "steps": [
+  {
+   "i": 0,
+   "call": "palette.commands",
+   "result": {
+    "commands": [
+     {
+      "id": "view.rescan",
+      "name": "Rescan current view",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "F5"
+      ],
+      "icon": "refresh",
+      "more": false
+     },
+     {
+      "id": "scan.rescan_all",
+      "name": "Rescan everything",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Shift+F5"
+      ],
+      "icon": "drive",
+      "more": false
+     },
+     {
+      "id": "view.cycle_color",
+      "name": "Cycle coloring",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "C"
+      ],
+      "icon": "palette",
+      "more": false
+     },
+     {
+      "id": "view.toggle_free",
+      "name": "Show/hide free space",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "F"
+      ],
+      "icon": "eye",
+      "more": false
+     },
+     {
+      "id": "basket.open",
+      "name": "Open delete basket",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "basket",
+      "more": false
+     },
+     {
+      "id": "snapshot.save",
+      "name": "Save snapshot",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+S"
+      ],
+      "icon": "snapshot",
+      "more": false
+     },
+     {
+      "id": "snapshot.compare",
+      "name": "Compare with snapshot…",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "diff",
+      "more": true
+     },
+     {
+      "id": "report.export",
+      "name": "Export report…",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "upload",
+      "more": true
+     },
+     {
+      "id": "app.settings",
+      "name": "Settings",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+,"
+      ],
+      "icon": "settings",
+      "more": false
+     },
+     {
+      "id": "nav.back",
+      "name": "Back",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Backspace",
+       "Alt+Left"
+      ],
+      "icon": "back",
+      "more": false
+     },
+     {
+      "id": "nav.forward",
+      "name": "Forward",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Alt+Right"
+      ],
+      "icon": "forward",
+      "more": false
+     },
+     {
+      "id": "nav.up",
+      "name": "Up one level",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Alt+Up"
+      ],
+      "icon": "up",
+      "more": false
+     },
+     {
+      "id": "nav.home",
+      "name": "Root",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+Home"
+      ],
+      "icon": "home",
+      "more": false
+     },
+     {
+      "id": "view.detail_up",
+      "name": "Raise detail level",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+="
+      ],
+      "icon": "plus",
+      "more": false
+     },
+     {
+      "id": "view.detail_down",
+      "name": "Lower detail level",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+-"
+      ],
+      "icon": "minus",
+      "more": false
+     },
+     {
+      "id": "view.cycle_visual",
+      "name": "Cycle visualization",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "V"
+      ],
+      "icon": "vizFlamePolar",
+      "more": false
+     },
+     {
+      "id": "filter.focus",
+      "name": "Focus filter",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "/",
+       "Ctrl+F"
+      ],
+      "icon": "filter",
+      "more": false
+     },
+     {
+      "id": "path.edit",
+      "name": "Edit path",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+L"
+      ],
+      "icon": "search",
+      "more": false
+     },
+     {
+      "id": "view.zoom_in",
+      "name": "Zoom in",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Enter"
+      ],
+      "icon": "layers",
+      "more": false
+     },
+     {
+      "id": "basket.add",
+      "name": "Add to delete basket",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Delete"
+      ],
+      "icon": "basket",
+      "more": false
+     },
+     {
+      "id": "item.preview",
+      "name": "Preview",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Space"
+      ],
+      "icon": "eye",
+      "more": false
+     },
+     {
+      "id": "item.copy_path",
+      "name": "Copy path",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+C"
+      ],
+      "icon": "copy",
+      "more": false
+     },
+     {
+      "id": "item.reveal",
+      "name": "Show in Explorer",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+E"
+      ],
+      "icon": "reveal",
+      "more": false
+     },
+     {
+      "id": "item.terminal",
+      "name": "Open terminal here",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+`"
+      ],
+      "icon": "terminal",
+      "more": false
+     },
+     {
+      "id": "tab.new",
+      "name": "New tab",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+T"
+      ],
+      "icon": "plus",
+      "more": false
+     },
+     {
+      "id": "tab.close",
+      "name": "Close tab",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+W"
+      ],
+      "icon": "close",
+      "more": false
+     },
+     {
+      "id": "tab.move_left",
+      "name": "Move tab left",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+Shift+PageUp"
+      ],
+      "icon": "back",
+      "more": false
+     },
+     {
+      "id": "tab.move_right",
+      "name": "Move tab right",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+Shift+PageDown"
+      ],
+      "icon": "forward",
+      "more": false
+     },
+     {
+      "id": "tag.red",
+      "name": "Red tag",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "1",
+       "Ctrl+1"
+      ],
+      "icon": "tag",
+      "more": false
+     },
+     {
+      "id": "tag.yellow",
+      "name": "Yellow tag",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "2",
+       "Ctrl+2"
+      ],
+      "icon": "tag",
+      "more": false
+     },
+     {
+      "id": "tag.green",
+      "name": "Green tag",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "3",
+       "Ctrl+3"
+      ],
+      "icon": "tag",
+      "more": false
+     },
+     {
+      "id": "tag.blue",
+      "name": "Blue tag",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "4",
+       "Ctrl+4"
+      ],
+      "icon": "tag",
+      "more": false
+     },
+     {
+      "id": "tag.clear",
+      "name": "Clear tag",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "0",
+       "Ctrl+0"
+      ],
+      "icon": "tag",
+      "more": false
+     },
+     {
+      "id": "view.toggle_unknown",
+      "name": "Show/hide unknown space",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "U"
+      ],
+      "icon": "eye",
+      "more": false
+     },
+     {
+      "id": "view.toggle_trash",
+      "name": "Show/hide the Recycle Bin",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "R"
+      ],
+      "icon": "basket",
+      "more": false
+     },
+     {
+      "id": "view.split",
+      "name": "Split view",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "split",
+      "more": false
+     },
+     {
+      "id": "scan.pause",
+      "name": "Pause scan",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "pause",
+      "more": false
+     },
+     {
+      "id": "scan.resume",
+      "name": "Resume scan",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "play",
+      "more": false
+     },
+     {
+      "id": "scan.stop",
+      "name": "Stop scan",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "stop",
+      "more": false
+     },
+     {
+      "id": "scan.continue",
+      "name": "Continue the stopped scan",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "play",
+      "more": false
+     },
+     {
+      "id": "scan.new",
+      "name": "New scan",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "drive",
+      "more": false
+     },
+     {
+      "id": "snapshot.open",
+      "name": "Open snapshot file…",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "snapshot",
+      "more": true
+     },
+     {
+      "id": "app.log",
+      "name": "Log panel",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+J"
+      ],
+      "icon": "log",
+      "more": false
+     },
+     {
+      "id": "app.help",
+      "name": "Help",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "F1"
+      ],
+      "icon": "info",
+      "more": false
+     },
+     {
+      "id": "app.check_updates",
+      "name": "Check for updates",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "refresh",
+      "more": false
+     },
+     {
+      "id": "app.show_update",
+      "name": "Show update",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "info",
+      "more": false
+     },
+     {
+      "id": "app.disks",
+      "name": "Disks",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "diskGauge",
+      "more": false
+     },
+     {
+      "id": "app.about",
+      "name": "About & updates",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "info",
+      "more": false
+     }
+    ]
+   }
+  },
+  {
+   "i": 1,
+   "call": "palette.query",
+   "result": {
+    "text": "",
+    "direct": [],
+    "recent": [],
+    "commands": [
+     {
+      "id": "view.rescan",
+      "name": "Rescan current view",
+      "hits": [],
+      "status": "Needs a finished scan",
+      "enabled": false,
+      "keys": [
+       "F5"
+      ],
+      "icon": "refresh",
+      "more": false
+     },
+     {
+      "id": "scan.rescan_all",
+      "name": "Rescan everything",
+      "hits": [],
+      "status": "Needs a finished scan",
+      "enabled": false,
+      "keys": [
+       "Shift+F5"
+      ],
+      "icon": "drive",
+      "more": false
+     },
+     {
+      "id": "view.cycle_color",
+      "name": "Cycle coloring",
+      "hits": [],
+      "status": "Needs a finished scan",
+      "enabled": false,
+      "keys": [
+       "C"
+      ],
+      "icon": "palette",
+      "more": false
+     },
+     {
+      "id": "view.toggle_free",
+      "name": "Show/hide free space",
+      "hits": [],
+      "status": "Needs a finished scan",
+      "enabled": false,
+      "keys": [
+       "F"
+      ],
+      "icon": "eye",
+      "more": false
+     },
+     {
+      "id": "basket.open",
+      "name": "Open delete basket",
+      "hits": [],
+      "status": "Empty",
+      "enabled": true,
+      "keys": [],
+      "icon": "basket",
+      "more": false
+     },
+     {
+      "id": "snapshot.save",
+      "name": "Save snapshot",
+      "hits": [],
+      "status": "Needs a finished scan",
+      "enabled": false,
+      "keys": [
+       "Ctrl+S"
+      ],
+      "icon": "snapshot",
+      "more": false
+     },
+     {
+      "id": "snapshot.compare",
+      "name": "Compare with snapshot…",
+      "hits": [],
+      "status": "Needs a finished scan",
+      "enabled": false,
+      "keys": [],
+      "icon": "diff",
+      "more": true
+     },
+     {
+      "id": "report.export",
+      "name": "Export report…",
+      "hits": [],
+      "status": "Needs a finished scan",
+      "enabled": false,
+      "keys": [],
+      "icon": "upload",
+      "more": true
+     },
+     {
+      "id": "app.settings",
+      "name": "Settings",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+,"
+      ],
+      "icon": "settings",
+      "more": false
+     }
+    ],
+    "paths": false,
+    "seed": null
+   }
+  },
+  {
+   "i": 3,
+   "wait_scan": {
+    "state": "done"
+   },
+   "monotonic": true
+  },
+  {
+   "i": 5,
+   "call": "palette.query",
+   "result": {
+    "text": "",
+    "direct": [],
+    "recent": [],
+    "commands": [
+     {
+      "id": "view.rescan",
+      "name": "Rescan current view",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "F5"
+      ],
+      "icon": "refresh",
+      "more": false
+     },
+     {
+      "id": "scan.rescan_all",
+      "name": "Rescan everything",
+      "hits": [],
+      "status": "Full scan · about 1 s",
+      "enabled": true,
+      "keys": [
+       "Shift+F5"
+      ],
+      "icon": "drive",
+      "more": false
+     },
+     {
+      "id": "view.cycle_color",
+      "name": "Cycle coloring",
+      "hits": [],
+      "status": "Current: File classes",
+      "enabled": true,
+      "keys": [
+       "C"
+      ],
+      "icon": "palette",
+      "more": false
+     },
+     {
+      "id": "view.toggle_free",
+      "name": "Show/hide free space",
+      "hits": [],
+      "status": "Current: shown",
+      "enabled": true,
+      "keys": [
+       "F"
+      ],
+      "icon": "eye",
+      "more": false
+     },
+     {
+      "id": "basket.open",
+      "name": "Open delete basket",
+      "hits": [],
+      "status": "Empty",
+      "enabled": true,
+      "keys": [],
+      "icon": "basket",
+      "more": false
+     },
+     {
+      "id": "snapshot.save",
+      "name": "Save snapshot",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+S"
+      ],
+      "icon": "snapshot",
+      "more": false
+     },
+     {
+      "id": "snapshot.compare",
+      "name": "Compare with snapshot…",
+      "hits": [],
+      "status": "No snapshots",
+      "enabled": false,
+      "keys": [],
+      "icon": "diff",
+      "more": true
+     },
+     {
+      "id": "report.export",
+      "name": "Export report…",
+      "hits": [],
+      "status": "CSV · JSON · HTML",
+      "enabled": true,
+      "keys": [],
+      "icon": "upload",
+      "more": true
+     },
+     {
+      "id": "app.settings",
+      "name": "Settings",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "Ctrl+,"
+      ],
+      "icon": "settings",
+      "more": false
+     }
+    ],
+    "paths": false,
+    "seed": null
+   }
+  },
+  {
+   "i": 6,
+   "call": "palette.query",
+   "result": {
+    "text": "zoom",
+    "direct": [],
+    "recent": [],
+    "commands": [
+     {
+      "id": "view.zoom_in",
+      "name": "Zoom in",
+      "hits": [],
+      "status": "Nothing selected",
+      "enabled": false,
+      "keys": [
+       "Enter"
+      ],
+      "icon": "layers",
+      "more": false
+     },
+     {
+      "id": "view.visual.flame_polar",
+      "name": "Visualization: polar flame graph",
+      "hits": [
+       {
+        "start": 7,
+        "end": 8
+       },
+       {
+        "start": 11,
+        "end": 12
+       },
+       {
+        "start": 16,
+        "end": 17
+       },
+       {
+        "start": 24,
+        "end": 25
+       }
+      ],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "vizFlamePolar",
+      "more": false
+     }
+    ],
+    "paths": true,
+    "seed": null
+   }
+  },
+  {
+   "i": 7,
+   "call": "palette.query",
+   "result": {
+    "text": "fd",
+    "direct": [],
+    "recent": [],
+    "commands": [
+     {
+      "id": "view.zoom_in",
+      "name": "Zoom in",
+      "hits": [],
+      "status": "Nothing selected",
+      "enabled": false,
+      "keys": [
+       "Enter"
+      ],
+      "icon": "layers",
+      "more": false
+     },
+     {
+      "id": "nav.forward",
+      "name": "Forward",
+      "hits": [
+       {
+        "start": 0,
+        "end": 1
+       },
+       {
+        "start": 6,
+        "end": 7
+       }
+      ],
+      "status": "Nothing to go forward to",
+      "enabled": false,
+      "keys": [
+       "Alt+Right"
+      ],
+      "icon": "forward",
+      "more": false
+     },
+     {
+      "id": "app.check_updates",
+      "name": "Check for updates",
+      "hits": [
+       {
+        "start": 6,
+        "end": 7
+       },
+       {
+        "start": 12,
+        "end": 13
+       }
+      ],
+      "status": "Current version 0.3.4",
+      "enabled": true,
+      "keys": [],
+      "icon": "refresh",
+      "more": false
+     },
+     {
+      "id": "filter.focus",
+      "name": "Focus filter",
+      "hits": [],
+      "status": "",
+      "enabled": true,
+      "keys": [
+       "/",
+       "Ctrl+F"
+      ],
+      "icon": "filter",
+      "more": false
+     },
+     {
+      "id": "view.color.time",
+      "name": "Coloring: date modified",
+      "hits": [
+       {
+        "start": 19,
+        "end": 20
+       },
+       {
+        "start": 22,
+        "end": 23
+       }
+      ],
+      "status": "",
+      "enabled": true,
+      "keys": [],
+      "icon": "palette",
+      "more": false
+     },
+     {
+      "id": "item.reveal",
+      "name": "Show in Explorer",
+      "hits": [],
+      "status": "Nothing selected",
+      "enabled": false,
+      "keys": [
+       "Ctrl+E"
+      ],
+      "icon": "reveal",
+      "more": false
+     }
+    ],
+    "paths": true,
+    "seed": null
+   }
+  },
+  {
+   "i": 8,
+   "call": "palette.query",
+   "result": {
+    "text": "$ROOT/tree/a",
+    "direct": [
+     {
+      "kind": "path",
+      "text": "$ROOT/tree/a",
+      "tokens": [],
+      "diagnostics": [],
+      "valid": true,
+      "state": "in_scan",
+      "node": "@$ROOT/tree/a",
+      "is_dir": true,
+      "alloc": 139264,
+      "complete": "$ROOT/tree/a/"
+     }
+    ],
+    "recent": [],
+    "commands": [],
+    "paths": true,
+    "seed": null
+   }
+  },
+  {
+   "i": 9,
+   "call": "palette.query",
+   "result": {
+    "text": "*.log;>200b",
+    "direct": [
+     {
+      "kind": "filter",
+      "text": "*.log;>200b",
+      "tokens": [
+       {
+        "kind": "mask",
+        "start": 0,
+        "end": 5
+       },
+       {
+        "kind": "separator",
+        "start": 5,
+        "end": 6
+       },
+       {
+        "kind": "compare",
+        "start": 6,
+        "end": 11
+       }
+      ],
+      "diagnostics": [],
+      "valid": true,
+      "state": null,
+      "node": null,
+      "is_dir": true,
+      "alloc": null,
+      "complete": null
+     }
+    ],
+    "recent": [],
+    "commands": [],
+    "paths": true,
+    "seed": null
+   }
+  },
+  {
+   "i": 10,
+   "call": "palette.query",
+   "result": {
+    "text": ">>bad",
+    "direct": [
+     {
+      "kind": "filter",
+      "text": ">>bad",
+      "tokens": [
+       {
+        "kind": "compare",
+        "start": 0,
+        "end": 5
+       }
+      ],
+      "diagnostics": [
+       {
+        "code": "bad_operator",
+        "severity": "error",
+        "start": 0,
+        "end": 2,
+        "cond_start": 0,
+        "cond_end": 5,
+        "text": ">>",
+        "expected": [
+         "<",
+         ">",
+         "<=",
+         ">="
+        ]
+       }
+      ],
+      "valid": false,
+      "state": null,
+      "node": null,
+      "is_dir": true,
+      "alloc": null,
+      "complete": null
+     }
+    ],
+    "recent": [],
+    "commands": [],
+    "paths": true,
+    "seed": null
+   }
+  },
+  {
+   "i": 11,
+   "call": "palette.query",
+   "result": {
+    "text": "theme",
+    "direct": [],
+    "recent": [],
+    "commands": [
+     {
+      "id": "view.cycle_color",
+      "name": "Cycle coloring",
+      "hits": [],
+      "status": "Needs a finished scan",
+      "enabled": false,
+      "keys": [
+       "C"
+      ],
+      "icon": "palette",
+      "more": false
+     }
+    ],
+    "paths": false,
+    "seed": null
+   }
+  },
+  {
+   "i": 12,
+   "call": "palette.check",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 13,
+   "call": "palette.check",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 14,
+   "call": "palette.check",
+   "error": {
+    "code": -32602,
+    "loc": null
+   }
+  },
+  {
+   "i": 15,
+   "call": "palette.paths",
+   "result": {
+    "text": "",
+    "items": [],
+    "total": 0,
+    "partial": false,
+    "seed": null,
+    "folder": null
+   }
+  },
+  {
+   "i": 16,
+   "call": "palette.paths",
+   "result": {
+    "text": "15.lo",
+    "items": [
+     {
+      "node": "@$ROOT/tree/many/f015.log",
+      "name": "f015.log",
+      "parent": "$ROOT/tree/many",
+      "is_dir": false,
+      "alloc": 0,
+      "hits": [
+       {
+        "start": 2,
+        "end": 7
+       }
+      ],
+      "tier": 2,
+      "complete": "$ROOT/tree/many/f015.log"
+     },
+     {
+      "node": "@$ROOT/tree/many/f115.log",
+      "name": "f115.log",
+      "parent": "$ROOT/tree/many",
+      "is_dir": false,
+      "alloc": 0,
+      "hits": [
+       {
+        "start": 2,
+        "end": 7
+       }
+      ],
+      "tier": 2,
+      "complete": "$ROOT/tree/many/f115.log"
+     },
+     {
+      "node": "@$ROOT/tree/many/f215.log",
+      "name": "f215.log",
+      "parent": "$ROOT/tree/many",
+      "is_dir": false,
+      "alloc": 0,
+      "hits": [
+       {
+        "start": 2,
+        "end": 7
+       }
+      ],
+      "tier": 2,
+      "complete": "$ROOT/tree/many/f215.log"
+     },
+     {
+      "node": "@$ROOT/tree/many/f105.log",
+      "name": "f105.log",
+      "parent": "$ROOT/tree/many",
+      "is_dir": false,
+      "alloc": 0,
+      "hits": [
+       {
+        "start": 1,
+        "end": 2
+       },
+       {
+        "start": 3,
+        "end": 7
+       }
+      ],
+      "tier": 3,
+      "complete": "$ROOT/tree/many/f105.log"
+     },
+     {
+      "node": "@$ROOT/tree/many/f125.log",
+      "name": "f125.log",
+      "parent": "$ROOT/tree/many",
+      "is_dir": false,
+      "alloc": 0,
+      "hits": [
+       {
+        "start": 1,
+        "end": 2
+       },
+       {
+        "start": 3,
+        "end": 7
+       }
+      ],
+      "tier": 3,
+      "complete": "$ROOT/tree/many/f125.log"
+     }
+    ],
+    "total": 21,
+    "partial": false,
+    "seed": null,
+    "folder": null
+   }
+  },
+  {
+   "i": 17,
+   "call": "palette.paths",
+   "result": {
+    "text": "$ROOT/tree/a",
+    "items": [
+     {
+      "node": "@$ROOT/tree/a",
+      "name": "a",
+      "parent": "$ROOT/tree",
+      "is_dir": true,
+      "alloc": 139264,
+      "hits": [
+       {
+        "start": 0,
+        "end": 1
+       }
+      ],
+      "tier": 0,
+      "complete": "$ROOT/tree/a/"
+     },
+     {
+      "node": "@$ROOT/tree/empty.dat",
+      "name": "empty.dat",
+      "parent": "$ROOT/tree",
+      "is_dir": false,
+      "alloc": 0,
+      "hits": [
+       {
+        "start": 7,
+        "end": 8
+       }
+      ],
+      "tier": 2,
+      "complete": "$ROOT/tree/empty.dat"
+     },
+     {
+      "node": "@$ROOT/tree/many",
+      "name": "many",
+      "parent": "$ROOT/tree",
+      "is_dir": true,
+      "alloc": 0,
+      "hits": [
+       {
+        "start": 1,
+        "end": 2
+       }
+      ],
+      "tier": 2,
+      "complete": "$ROOT/tree/many/"
+     }
+    ],
+    "total": 3,
+    "partial": false,
+    "seed": null,
+    "folder": "$ROOT/tree"
+   }
+  },
+  {
+   "i": 18,
+   "call": "palette.paths",
+   "result": {
+    "text": "照片",
+    "items": [
+     {
+      "node": "@$ROOT/tree/中文 文件夹/照片.jpg",
+      "name": "照片.jpg",
+      "parent": "$ROOT/tree/中文 文件夹",
+      "is_dir": false,
+      "alloc": 4096,
+      "hits": [
+       {
+        "start": 0,
+        "end": 2
+       }
+      ],
+      "tier": 1,
+      "complete": "$ROOT/tree/中文 文件夹/照片.jpg"
+     }
+    ],
+    "total": 1,
+    "partial": false,
+    "seed": null,
+    "folder": null
+   }
+  },
+  {
+   "i": 19,
+   "call": "palette.preview",
+   "result": {
+    "text": "*.log",
+    "valid": true,
+    "files": 300,
+    "alloc": 0,
+    "size": 74850
+   }
+  },
+  {
+   "i": 20,
+   "call": "palette.preview",
+   "result": {
+    "text": ">>bad",
+    "valid": false,
+    "files": 0,
+    "alloc": 0,
+    "size": 0
+   }
+  },
+  {
+   "i": 21,
+   "call": "palette.remember",
+   "result": {}
+  },
+  {
+   "i": 22,
+   "call": "palette.remember",
+   "result": {}
+  },
+  {
+   "i": 23,
+   "call": "palette.remember",
+   "result": {}
+  },
+  {
+   "i": 24,
+   "call": "palette.query",
+   "result": {
+    "recent": [
+     {
+      "kind": "filter",
+      "text": "*.mp4",
+      "hits": [],
+      "tokens": [
+       {
+        "kind": "mask",
+        "start": 0,
+        "end": 5
+       }
+      ],
+      "exists": true,
+      "node": null,
+      "is_dir": true,
+      "alloc": null
+     },
+     {
+      "kind": "filter",
+      "text": "*.log",
+      "hits": [],
+      "tokens": [
+       {
+        "kind": "mask",
+        "start": 0,
+        "end": 5
+       }
+      ],
+      "exists": true,
+      "node": null,
+      "is_dir": true,
+      "alloc": null
+     },
+     {
+      "kind": "jump",
+      "text": "$ROOT/tree/a/sub",
+      "hits": [],
+      "tokens": [],
+      "exists": true,
+      "node": "@$ROOT/tree/a/sub",
+      "is_dir": true,
+      "alloc": 126976
+     }
+    ]
+   }
+  },
+  {
+   "i": 27,
+   "wait_scan": {
+    "state": "done"
+   },
+   "monotonic": true
+  },
+  {
+   "i": 28,
+   "call": "palette.query",
+   "result": {
+    "recent": [
+     {
+      "kind": "filter",
+      "text": "*.mp4",
+      "hits": [],
+      "tokens": [
+       {
+        "kind": "mask",
+        "start": 0,
+        "end": 5
+       }
+      ],
+      "exists": true,
+      "node": null,
+      "is_dir": true,
+      "alloc": null
+     },
+     {
+      "kind": "filter",
+      "text": "*.log",
+      "hits": [],
+      "tokens": [
+       {
+        "kind": "mask",
+        "start": 0,
+        "end": 5
+       }
+      ],
+      "exists": true,
+      "node": null,
+      "is_dir": true,
+      "alloc": null
+     },
+     {
+      "kind": "jump",
+      "text": "$ROOT/tree/a/sub",
+      "hits": [],
+      "tokens": [],
+      "exists": true,
+      "node": "@$ROOT/tree/a/sub",
+      "is_dir": true,
+      "alloc": 126976
+     }
+    ]
+   }
+  },
+  {
+   "i": 29,
+   "call": "palette.clear",
+   "result": {}
+  },
+  {
+   "i": 30,
+   "call": "palette.query",
+   "result": {
+    "recent": []
+   }
+  },
+  {
+   "i": 31,
+   "call": "palette.paths",
+   "error": {
+    "code": -32007,
+    "loc": null
+   }
+  }
+ ]
+}

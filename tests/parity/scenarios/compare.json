@@ -1,0 +1,40 @@
+{
+  "name": "compare",
+  "description": "Auto-saved snapshots and comparisons: a scan saved on completion, the tree changed, a second scan, compare.sources / open / progress / info, a compare view with its frame, compare.summary and compare.node, close; snapshot.list and expected items.",
+  "fixtures": {"tree": "standard"},
+  "known_diffs": [
+    {"path": "**/snapshots/*/file_bytes", "why": "snapshot format 3 (Rust) compresses differently from format 2 (0.3.4)"},
+    {"path": "steps/1/wait_scan/snapshot", "why": "the auto-snapshot folder is named by 0.3.4's root key (SHA-1 of the root's absolute path, restored in Rust: review #4), and the replayer's temporary root is not the one the golden was recorded on. The keys themselves are checked by sk-store's 0.3.4 fixture keys (tests/v034.rs) and the upgrade scenario"},
+    {"path": "**/snapshots/*/path", "why": "the same folder name"},
+    {"path": "**/base/path", "why": "the same folder name, as the comparison's base"}
+  ],
+  "normalize": {"drop_keys": ["span_s", "daily", "days_to_full"]},
+  "steps": [
+    {"call": "scan.start", "params": {"roots": ["$ROOT/tree"], "workers": 0, "auto_snapshot": true}, "as": "s1", "record": false},
+    {"wait_scan": "$s1.scan_id", "snapshot": true, "pick": ["state", "items", "snapshot", "expected_items"]},
+    {"call": "snapshot.list", "params": {}, "omit": []},
+    {"call": "scan.close", "params": {"scan_id": "$s1.scan_id"}},
+    {"fs": {"op": "write", "path": "$ROOT/tree/a/grown.bin", "size": 300000}},
+    {"fs": {"op": "remove", "path": "$ROOT/tree/many"}},
+    {"fs": {"op": "write", "path": "$ROOT/tree/c.txt", "size": 5000}},
+    {"fs": {"op": "touch", "path": "$ROOT/tree/a"}},
+    {"fs": {"op": "touch", "path": "$ROOT/tree"}},
+    {"call": "scan.start", "params": {"roots": ["$ROOT/tree"], "workers": 0, "auto_snapshot": false}, "as": "s2", "pick": ["expected_items"]},
+    {"wait_scan": "$s2.scan_id", "pick": ["state", "items", "expected_items"]},
+    {"call": "compare.sources", "params": {"scan_id": "$s2.scan_id"}, "as": "src"},
+    {"call": "compare.open", "params": {"scan_id": "$s2.scan_id", "base": "$src.snapshots.0.path"}, "as": "cmp"},
+    {"events": "compare.progress", "stop_at": {"field": "phase", "in": ["ready", "failed"]}, "timeout": 60, "mode": "last"},
+    {"call": "compare.info", "params": {"compare_id": "$cmp.compare_id"}},
+    {"call": "view.open", "params": {"scan_id": "$cmp.compare_id", "viewport": {"width": 800, "height": 600}}, "as": "cv", "binary": true},
+    {"call": "compare.summary", "params": {"view_id": "$cv.state.view_id"}},
+    {"call": "compare.summary", "params": {"view_id": "$cv.state.view_id", "limit": 2}},
+    {"call": "tree.find", "params": {"scan_id": "$s2.scan_id", "path": "$ROOT/tree/a"}, "as": "a", "record": false},
+    {"call": "compare.node", "params": {"view_id": "$cv.state.view_id", "key": "$cv.state.zoom_key"}},
+    {"call": "view.set", "params": {"view_id": "$cv.state.view_id", "settings": {"direction": "grow"}}, "binary": true},
+    {"call": "view.set", "params": {"view_id": "$cv.state.view_id", "settings": {"direction": "shrink"}}, "binary": true},
+    {"call": "compare.open", "params": {"scan_id": "$s2.scan_id", "base": "$TMP/none.sks"}},
+    {"call": "compare.info", "params": {"compare_id": "no-such-compare"}},
+    {"call": "compare.close", "params": {"compare_id": "$cmp.compare_id"}},
+    {"call": "compare.info", "params": {"compare_id": "$cmp.compare_id"}}
+  ]
+}

@@ -245,7 +245,7 @@ Limits the disk read load a scan may cause.
 | Use low I/O priority when idle | On | On `true` · Off `false` | The "Idle" level uses the low I/O priority and leaves the disk to the apps you are using. Applies from the next scan. | `scan.idle_low_io` |
 | Give way when the disk is busy | On | On `true` · Off `false` | When other programs push the whole disk past the limit, the scan slows down to a minimum. Applies from the next scan. | `scan.yield_when_busy` |
 | Maximum concurrency | Auto | Auto `"auto"` · Manual `"manual"` | Auto: chosen from the number of processor cores. Manual: the number below. Applies from the next scan. | `scan.concurrency` |
-| Manual concurrency | 4 | 1 to 64 | In manual mode, how many folders are listed at the same time at most (worker processes when the native extension is missing). Applies from the next scan. Can be changed when "Maximum concurrency" is set to "Manual". | `scan.workers` |
+| Manual concurrency | 4 | 1 to 64 | In manual mode, how many folders are listed at the same time at most. Applies from the next scan. Can be changed when "Maximum concurrency" is set to "Manual". | `scan.workers` |
 
 #### Scan scope
 
@@ -344,6 +344,6 @@ Version, updates and the release timeline.
 | --- | --- | --- | --- | --- |
 | Check for updates automatically | On | On `true` · Off `false` | At most once a day, it only reads this project's release list on GitHub and sends no usage data; small updates only show a badge at the top right. | `general.update_check` |
 | Download updates automatically | On | On `true` · Off `false` | A new version is downloaded and checked in the background. It is installed only when you click Seamless update or the other way in the update card, never by itself. Can be changed when "Check for updates automatically" is on. | `general.update_download` |
-| Versions to offer | Include previews | Include previews `"preview"` · Releases only `"stable"` | Previews are the releases marked as pre-release on GitHub. | `general.update_channel` |
+| Versions to offer | Include previews | Include previews `"preview"` · Releases only `"stable"` | Previews are versions with a pre-release part (such as 0.4.0-beta.1) and, from 1.0 on, releases marked as pre-release on GitHub. | `general.update_channel` |
 
 <!-- generated:settings:end -->

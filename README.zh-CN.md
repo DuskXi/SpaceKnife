@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="apps/electron/build/icons/128x128.png" width="96" height="96" alt="SpaceKnife 图标">
+  <img src="apps/desktop/src-tauri/icons/128x128.png" width="96" height="96" alt="SpaceKnife 图标">
 </p>
 
 <h1 align="center">SpaceKnife</h1>
@@ -28,12 +28,9 @@
   <a href="https://github.com/DuskXi/SpaceKnife/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22"><img alt="新手任务" src="https://img.shields.io/github/issues/DuskXi/SpaceKnife/good%20first%20issue?color=7057ff&label=%E6%96%B0%E6%89%8B%E4%BB%BB%E5%8A%A1"></a>
 </p>
 <p align="center">
-  <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white">
-  <img alt="Rust 原生扩展" src="https://img.shields.io/badge/Rust-%E5%8E%9F%E7%94%9F%E6%89%A9%E5%B1%95-000000?logo=rust&logoColor=white">
-  <img alt="Electron" src="https://img.shields.io/github/package-json/dependency-version/DuskXi/SpaceKnife/dev/electron/main?filename=apps%2Felectron%2Fpackage.json&logo=electron&logoColor=white&color=47848F&label=Electron">
-  <a href="https://github.com/astral-sh/uv"><img alt="uv" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"></a>
-  <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"></a>
-  <img alt="用 mypy 检查类型" src="https://img.shields.io/badge/types-mypy-2a6db2">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-2024%20edition-000000?logo=rust&logoColor=white">
+  <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white">
+  <img alt="Vue 3 与 Nuxt 4" src="https://img.shields.io/badge/Vue%203%20%2B%20Nuxt%204-42B883?logo=vuedotjs&logoColor=white">
 </p>
 
 <p align="center">
@@ -46,7 +43,7 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 
 ## 截图
 
-截图里是模拟数据：一个虚构的 2 TB 数据盘（[tools/demo/mock_snapshot.py](tools/demo/mock_snapshot.py) 生成），不是真实的磁盘。
+截图里是模拟数据：一个虚构的 2 TB 数据盘（`cargo run -p sk-store --example mock_snapshot` 生成），不是真实的磁盘。
 
 ![树图：块的面积就是占用，悬停显示详情](docs/images/treemap.png)
 
@@ -68,13 +65,13 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 
 - **实时树图**：WebGL 渲染，边扫边画；缩放动画、悬停详情、细节层级、小项聚合，可用空间与未知空间也画出来；可分屏开两个视图。
 - **三种可视化**：树图、火焰图、火焰-极坐标图，扫描中也能随时切换，每个视图各用各的。
-- **快**：Rust 原生扩展做并行目录遍历；Windows 上可读取 NTFS 主文件表（MFT）快速扫描（通过一个只读的提权助手，需要管理员确认）。
+- **快**：Rust 并行遍历目录；Windows 上可读取 NTFS 主文件表（MFT）快速扫描（通过一个只读的提权助手，需要管理员确认）。
 - **不拖慢电脑**：扫描可以限制自己造成的磁盘负载（极速 / 均衡 / 安静 / 空闲 / 自定义），别的程序在用磁盘时自动让路。
 - **实时监控**：扫描后继续跟踪文件变化（Windows ReadDirectoryChangesW + USN 日志补偿；Linux inotify，额度不够时改为轮询；macOS FSEvents），变化的块会闪烁。
 - **过滤语言**：按名称、类型、大小、时间、属性、标签过滤，可以组合；与 SpaceSniffer 的过滤写法兼容并做了扩展（[语法](docs/filter-syntax.md)）。
 - **快照与对比**：扫描后自动保存快照；任意两次对比，或与「现在」对比，只看增长或减少。
 - **安全的清理**：右键菜单与删除篮，默认移到回收站，可以撤销；系统和程序目录受保护。
-- **导出与命令行**：CSV / JSON / HTML 等模板导出；`spaceknife-backend scan / run / snapshot` 可在终端里用。
+- **导出与命令行**：CSV / JSON / HTML 等模板导出；`spaceknife-cli scan / run / snapshot` 可在终端里用，`spaceknife-cli headless` 可以在浏览器里使用 SpaceKnife。
 - **双语界面**：简体中文与英文，默认跟随系统语言，设置里即时切换。
 
 ## 下载
@@ -83,18 +80,21 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 
 | 系统 | 文件 |
 |---|---|
-| Windows 10+ x64 | `SpaceKnife-<版本>-Setup-x64.exe`（可选仅当前用户或所有用户；还没有代码签名，第一次运行时 SmartScreen 会提示「未知发布者」，点「更多信息 › 仍要运行」） |
-| Ubuntu 22.04+ / Debian 系 | `spaceknife_<版本>_amd64.deb` |
+| Windows 10+ x64 | `SpaceKnife-<版本>-Setup-x64.exe`（可装给当前用户或所有用户；缺少 WebView2 Runtime 时会装上它；还没有代码签名，第一次运行时 SmartScreen 会提示「未知发布者」，点「更多信息 › 仍要运行」） |
+| Ubuntu 22.04+ / Debian 12+ | `spaceknife_<版本>_amd64.deb`（需要 WebKitGTK 4.1，apt 会装上） |
 | RHEL 9+ / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` |
 | 其他 Linux x64 | `SpaceKnife-<版本>-x86_64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
-| Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `SpaceKnife.exe`；快照和设置都存在旁边的 `data` 文件夹里；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |
-| Linux x64 便携版 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz`（解压后运行 `./spaceknife`，不需要 FUSE；数据存在旁边的 `data` 文件夹里） |
-| ARM 版 Windows 11 / ARM Linux 便携版 | `SpaceKnife-<版本>-win-arm64-portable.zip` / `SpaceKnife-<版本>-linux-arm64-portable.tar.gz`（同样的便携版，为 arm64 构建；安装包只有 x64） |
+| Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `SpaceKnife.exe`；快照和设置都存在旁边的 `data` 文件夹里；需要 WebView2 Runtime，Windows 11 自带；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |
+| Linux x64 / arm64 便携版，小巧的一种 | `SpaceKnife-<版本>-linux-<x64 或 arm64>-tauri.tar.gz`（解压后运行 `./spaceknife`，不需要 FUSE；数据存在旁边的 `data` 文件夹里；用系统的 WebKitGTK 4.1，所以不适用于 RHEL 9） |
+| Linux x64 / arm64 便携版，任意发行版 | `SpaceKnife-<版本>-linux-<x64 或 arm64>-portable.tar.gz`（同样用法，自带引擎（Electron），RHEL 9 上也能用；和 0.3.4 的 Linux 便携版同名） |
+| ARM 版 Windows 11 便携版 | `SpaceKnife-<版本>-win-arm64-portable.zip`（为 arm64 构建的 Windows 便携版；安装包只有 x64） |
 | macOS 14+，Apple Silicon | `SpaceKnife-<版本>-mac-arm64.dmg`（预览版：还没经过苹果公证，见下文） |
 | macOS 14+，Intel | `SpaceKnife-<版本>-mac-x64.dmg`（预览版：还没经过苹果公证，见下文） |
 | macOS 14+ 便携版 | `SpaceKnife-<版本>-mac-<arm64 或 x64>-portable.zip`（解压到任意位置，打开 `SpaceKnife.app`；数据存在旁边的 `data` 文件夹里；第一次打开同样要按下文放行一次） |
 
-每个版本都附带 `SHA256SUMS.txt`。
+每个版本都附带 `SHA256SUMS.txt` 以及 `SHA256SUMS-portable-…`、`SHA256SUMS-tauri-linux-…`、`SHA256SUMS-mac-…` 校验清单。每个安装包都在应用旁边带上命令行程序 `spaceknife-cli`。各个版本的窗口都一样：多数下载用系统的网页视图（WebView2、WebKit、WebKitGTK）绘制，体积很小；rpm、AppImage 和便携版 `…-linux-<架构>-portable.tar.gz` 自带引擎（Electron），因为 RHEL 9 没有 WebKitGTK 4.1。
+
+> **从 0.3.4 升级：** 发布文件沿用 0.3.4 的名字，0.3.4 的更新检查能找到 0.3.5，像平常的更新一样装上：Windows 安装版（把 0.3.5 装在 0.3.4 原来的位置，快捷方式不变，应用列表里只有一项）、便携版和 AppImage 用「无缝更新」；dmg、deb 和 rpm 打开磁盘映像或安装包。设置、文件类别、标签和快照都保留，0.3.x 存的快照照样能打开。每种安装方式有什么变化：[从 0.3.4 升级](https://spaceknife.kaltsit.dev/zh/docs/install/#从-034-升级)。
 
 从 0.3.1 起，SpaceKnife 每天最多检查一次本仓库的发布（不发送任何关于你或你的文件的信息）。小版本只在右上角显示徽章；版本跨度更大时还会显示更新概要。新版本在后台下载，并按发布里的校验和核对。从 0.3.3 起，更新卡片提供两种安装方式：「无缝更新」（Windows 安装版、便携版和 AppImage）换上新版本并重新打开 SpaceKnife，经典方式打开安装程序、磁盘映像或安装包（或者显示下载的文件，由你自己替换）；「跳过 0.4.x」让整个系列不再提示。SpaceKnife 从不自己安装更新：只有你点了才会开始。可以在「设置 › 关于与更新」里关掉检查。
 
@@ -124,50 +124,76 @@ macOS 版还没有经过苹果公证，第一次打开会被系统拦下，需�
 - 可视化（引擎、线上布局、前端组件）：[docs/visuals.md](docs/visuals.md)
 - 过滤语法（SKF 1）：[docs/filter-syntax.md](docs/filter-syntax.md)
 - 设计 token 与图标：[design/README.md](design/README.md)
-- 打包与发布（Windows NSIS、Linux AppImage / deb / rpm）：[docs/packaging.md](docs/packaging.md)
+- 打包与发布（安装包、便携版、Tauri 与 Electron 两个外壳、更新）：[docs/packaging.md](docs/packaging.md)
 
 ## 开发环境
 
-需要 [uv](https://docs.astral.sh/uv/)，Python 3.12 由 uv 管理。
+需要 [rustup](https://rustup.rs/)（第一次在仓库里运行 cargo 时，它会装上 `rust-toolchain.toml` 固定的 Rust 版本，edition 2024；CI 用的是同一个）、Node.js 24 和 pnpm 10。Linux 上 Tauri 还需要系统 WebView 和几个库：
 
 ```bash
-uv sync
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf
+```
+
+构建并测试 Rust 工作区（`cargo build` 构建 `crates/` 下的 crate；加 `--workspace` 还包括 `apps/desktop/src-tauri` 里的 Tauri 应用）：
+
+```bash
+cargo build
 ```
 
 ```bash
-uv run pytest
+cargo test --workspace
 ```
+
+启动应用窗口（后端在应用进程内运行）：
 
 ```bash
-uv run spaceknife serve
+cd apps/desktop && pnpm install && pnpm tauri dev
 ```
 
-`serve` 启动后在 stdout 打印一行 `ready` JSON（含 WebSocket 地址和开发用 token），日志输出到 stderr。
+同一套界面也跑在 Electron 外壳里（`apps/electron-shell`：RHEL 9 没有 WebKitGTK 4.1，rpm、AppImage 和自带引擎的 Linux 便携版用它）。它以 `spaceknife-cli serve` 为后端，加载构建好的界面：
+
+```bash
+cargo build -p sk-server --bin spaceknife-cli && pnpm -C apps/desktop generate && pnpm -C apps/electron-shell install && pnpm -C apps/electron-shell dev
+```
+
+在 `apps/desktop` 里打 Tauri 的安装包（`pnpm bundle`：Windows 上是 NSIS，Linux 上是 AppImage / deb / rpm，macOS 上是 app / dmg）和便携版（`pnpm bundle:portable`，在 `pnpm bundle` 之后）；Electron 外壳的安装包是 `pnpm -C apps/electron-shell package`（发布时各用哪一个，见 [docs/packaging.md](docs/packaging.md)）：
+
+```bash
+pnpm bundle && pnpm bundle:portable
+```
+
+命令行程序是 `spaceknife-cli`。`serve` 启动后在 stdout 打印一行 `ready` JSON（含 WebSocket 地址和开发用 token），日志输出到 stderr：
+
+```bash
+cargo run -p sk-server --bin spaceknife-cli -- serve
+```
 
 在终端里直接扫描（并行硬扫描，完成后自动保存快照）：
 
 ```bash
-uv run spaceknife scan "C:\Program Files"
+cargo run --release -p sk-server --bin spaceknife-cli -- scan "C:\Program Files"
 ```
 
 加 `--profile` 可以看耗时分解：列目录线程有多忙（系统调用），主线程把结果合并进树用了多久。环境变量 `SPACEKNIFE_SCAN_THREADS` 设定列目录线程数（命令行和应用都认），用来对比。
 
 ```bash
-uv run spaceknife snapshot list
+cargo run -p sk-server --bin spaceknife-cli -- snapshot list
 ```
+
+`spaceknife-cli headless [--listen <地址>]` 不开窗口，把界面提供给浏览器。
 
 环境变量 `SPACEKNIFE_HOME` 可以把快照等数据放到指定目录（测试和体验环境用它与真实数据隔离）。
 
-README 的截图用模拟数据离屏生成，不显示窗口、不读真实磁盘（先在 `apps/electron` 里 `pnpm build`；`--home` 用一个中性的空目录）：
+README 的截图用模拟数据离屏生成，不显示窗口、不读真实磁盘（`--home` 用一个中性的空目录）：
 
 ```bash
-uv run python tools/demo/screenshots.py --home <空目录> --out docs/images --lang both
+node tools/demo/screenshots.mjs --home <空目录> --out docs/images --lang both
 ```
 
 演示动画（`docs/images/demo*.gif` / `.mp4`）用同样的方式录制，需要 ffmpeg：
 
 ```bash
-uv run python tools/demo/screenshots.py --home <空目录> --out docs/images --lang both --video
+node tools/demo/screenshots.mjs --home <空目录> --out docs/images --lang both --video
 ```
 
 官网在 `site/`（Astro，推送到 `main` 后由 GitHub Actions 发布到 GitHub Pages）：
@@ -183,23 +209,40 @@ pnpm -C site dev
 提交前的检查（与 CI 一致）：
 
 ```bash
-uv run ruff check . && uv run ruff format --check . && uv run mypy packages/protocol/src packages/backend/src packages/client/src tools/gen_design.py && uv run python tools/gen_design.py --check && uv run pytest
+cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 ```
+
+```bash
+node tools/gen_design.mjs --check && node --test "tools/tests/*.test.mjs"
+```
+
+```bash
+cd apps/desktop && pnpm typecheck && pnpm test
+```
+
+```bash
+cd apps/electron-shell && pnpm typecheck && pnpm test
+```
+
+`cargo test --workspace` 还会回放对等关卡（`tests/parity`）：Rust 后端经协议给出的回答，和 0.3.4 的 Python 后端对同样场景的回答比较。更多见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 许可证
 
-[MIT](LICENSE)。安装包里附带的第三方许可证见 `resources/licenses/`（[docs/packaging.md](docs/packaging.md)）。
+[MIT](LICENSE)。安装包里附带的第三方许可证在随应用一起装好的 `licenses` 文件夹里（Electron 版在 `resources/licenses`；见 [docs/packaging.md](docs/packaging.md)）。
 
 ## 仓库结构
 
 | 路径 | 内容 |
 |---|---|
-| `packages/protocol` | 协议 v1：pydantic 消息模型、二进制帧编解码、JSON Schema |
-| `packages/backend` | 后端：WebSocket 服务、扫描、列式存储与快照、过滤引擎、树图布局、视图、监控、导出、文件操作、命令行 |
-| `packages/native` | Rust 原生扩展（PyO3）：并行目录遍历、MFT 解析 |
-| `packages/client` | Python 前端共享的客户端核心（不依赖任何 GUI 库） |
+| `crates/sk-protocol` | 协议 v1：消息类型、二进制帧编解码、JSON Schema 与生成的 TypeScript（`cargo run -p sk-protocol --bin gen-ts`） |
+| `crates/sk-native` | 原生扫描：并行目录遍历、MFT 解析 |
+| `crates/sk-store` | 列式文件树存储与快照 |
+| `crates/sk-core` | 扫描、过滤引擎、布局、视图、监控、导出、文件操作、设置、更新 |
+| `crates/sk-server` | WebSocket 服务与命令行 `spaceknife-cli`（scan、run、snapshot、serve、headless） |
 | `design/tokens`、`design/icons` | 设计 token 与图标源文件；`design/build` 是生成物 |
-| `apps/electron` | Electron 前端（UI v1）与安装包配置（`electron-builder.yml`） |
-| `packaging` | 冻结后端（PyInstaller spec 与入口）和安装包的冒烟测试 |
+| `apps/desktop` | 桌面应用：Tauri 2（`src-tauri`）加 Nuxt 4 / Vue 3 界面（`app`）；安装包与便携版 |
+| `apps/electron-shell` | Tauri 跑不了的地方用的 Electron 外壳（主进程和 preload；界面就是 `apps/desktop` 的） |
+| `packaging` | 安装包的测试（冒烟、无头模式、更新，包括从 0.3.4 更新）和 Windows 的控制台启动器 `SpaceKnife.com` |
+| `tests/parity` | 对等关卡：同一批协议场景分别跑在 0.3.4 的后端和 Rust 后端上 |
 | `site` | 官网（Astro，GitHub Pages） |
-| `tools` | 代码生成与开发工具（打包：`build_package.py`；图标：`render_app_icons.py`；截图：`demo/screenshots.py`） |
+| `tools` | 代码生成与开发工具（设计 token：`gen_design.mjs`；发布：`release.mjs`；截图：`demo/screenshots.mjs`） |

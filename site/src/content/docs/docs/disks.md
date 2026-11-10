@@ -82,7 +82,7 @@ When the record can't be read, the card says why instead of leaving a gap:
 | The USB bridge doesn't pass on the disk's own record | The bridge chips in drive enclosures, USB sticks and card readers usually don't forward these queries. |
 | This disk didn't answer the query for its health record | Older SATA disks often have no Device Statistics log (they report their health only through each vendor's own SMART attributes, which SpaceKnife doesn't read); some RAID drivers don't pass such queries on either. |
 | The disk's own lifetime read and write totals need administrator rights here | On Linux only root can read the record. **Read with administrator rights…** on the card reads it, see [Reading with administrator rights on Linux](#reading-with-administrator-rights-on-linux); the temperature and the reads and writes since startup still show. |
-| This system has no way to read the disk's own health record | On macOS only NVMe disks give their record (without administrator rights); SATA disks don't. While another app (a disk monitor, say) holds an NVMe disk's interface for this, it can't be read that time either. The reads and writes since startup still show. |
+| This system has no way to read the disk's own health record | On macOS this version reads no disk's own record yet (0.3.4 read NVMe disks' through IOKit; that is planned to come back in the next version). The reads and writes since startup still show. |
 
 ### Reading with administrator rights on Linux
 
@@ -99,7 +99,7 @@ When rights can't be asked for, the card says why:
 |---|---|
 | The user declined to grant administrator rights | You closed the password dialog. The button stays; click it again any time. |
 | No authentication agent can ask for the administrator password (in an SSH session, say, or without a graphical desktop) | Desktop environments come with a polkit authentication agent; SSH sessions and systems without a desktop have none. |
-| The AppImage can't run the helper as administrator; use the deb or rpm package instead | An AppImage runs from a mount only you can read, which root can't. The deb and rpm packages install to `/opt/SpaceKnife`. |
+| The AppImage can't run the helper as administrator; use the deb or rpm package instead | An AppImage runs from a mount only you can read, which root can't. The deb and rpm packages install to `/usr/bin`. |
 | pkexec not found: asking for administrator rights needs polkit | The system has no polkit (`pkexec`). |
 
 ### Volumes and the capacity bar
@@ -138,7 +138,7 @@ SpaceKnife asks the system (including for the disk's own health record, which th
 |---|---|
 | Windows | The storage queries of each disk (model, serial, bus, TRIM, the SATA speeds from the disk's identify data, NVMe identify), the device tree above it (the PCIe link of the NVMe or SATA controller, the USB hub's connection speed) and the disk extents of each volume; the disk's own record is the NVMe SMART / Health log (log page 02h) or the ATA Device Statistics log (04h) passed on by the same storage query, and the reads and writes since startup come from the disk performance counters |
 | Linux | sysfs: `/sys/block`, the PCI device's `current_link_speed` and `current_link_width`, `/sys/class/ata_link/*/sata_spd`, the USB device's `speed` and `version`, and `/dev/disk/by-id`; the reads and writes since startup come from `/sys/block/*/stat`, the temperature from hwmon (the NVMe driver, or `drivetemp` for SATA disks); the disk's own lifetime record is read by the elevated helper (the NVMe admin command `NVME_IOCTL_ADMIN_CMD`, or ATA pass-through through `SG_IO` for SATA) |
-| macOS | `diskutil` and `system_profiler` (NVMe, SATA and USB); the reads and writes since startup come from each disk's statistics in the I/O Registry; an NVMe disk's own record comes from IOKit's NVMe SMART interface |
+| macOS | `diskutil` and `system_profiler` (NVMe, SATA and USB); the reads and writes since startup come from each disk's statistics in the I/O Registry |
 
 What a system doesn't report stays empty, never guessed. In particular:
 

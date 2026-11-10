@@ -1,7 +1,7 @@
 ---
 // The landing page, in either language. Text: src/i18n/content.ts; downloads: the newest GitHub
-// release (src/data/release.ts); screenshots: docs/images (mock data, tools/demo/screenshots.py);
-// the three visualizations: src/assets/visualizations (tools/demo/screenshots.py --views).
+// release (src/data/release.ts); screenshots: docs/images (mock data, tools/demo/screenshots.mjs);
+// the three visualizations: src/assets/visualizations (tools/demo/screenshots.mjs --views).
 import { getImage, Picture } from "astro:assets";
 
 import { icons } from "../../../design/build/icons";
@@ -51,15 +51,15 @@ const docs = `${base}${c.lang === "en" ? "" : "zh/"}docs/`;
 const shotUrls = await Promise.all(
   c.shots.map(async (s) => `${site}${(await getImage({ src: SHOTS[s.id], format: "webp", width: 1440 })).src}`),
 );
-// the hero plays the demo (tools/demo/demo.cjs); its poster is the treemap screenshot
+// the hero plays the demo (tools/demo/screenshots.mjs --video); its poster is the treemap screenshot
 const demo = c.lang === "en" ? demoEn : demoZh;
 const poster = (await getImage({ src: SHOTS.treemap, format: "webp", width: 1440 })).src;
 const jsonLd = structuredData(c, release, pageUrl, shotUrls, `${site}${base}og-${c.lang}.png`);
 
 const icon = (name: string) => (icons as Record<string, string>)[name] ?? "";
 const win = release.assets.windows;
-const kinds: Exclude<AssetKind, "sums">[] = ["windows", "portableWin", "macArm64", "macX64", "deb", "rpm", "appimage", "portableLinux"];
-const kindIcon: Record<string, string> = { windows: "drive", portableWin: "folder", macArm64: "command", macX64: "command", deb: "terminal", rpm: "terminal", appimage: "layers", portableLinux: "folder" };
+const kinds: Exclude<AssetKind, "sums">[] = ["windows", "portableWin", "macArm64", "macX64", "deb", "rpm", "appimage", "portableLinux", "portableLinuxTauri"];
+const kindIcon: Record<string, string> = { windows: "drive", portableWin: "folder", macArm64: "command", macX64: "command", deb: "terminal", rpm: "terminal", appimage: "layers", portableLinux: "folder", portableLinuxTauri: "folder" };
 // macOS dmgs are attached to a release later than the other installers: until then a Mac visitor
 // gets the generic button and the "not yet" note
 const hasMac = Boolean(release.assets.macArm64 || release.assets.macX64);
@@ -247,11 +247,11 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
           <a class="btn ghost" href={REPO_URL} rel="noopener">{c.openCta} →</a>
         </div>
         <pre class="code mono" aria-label="Command line"><span class="c-dim"># {c.lang === "en" ? "scan a folder or a whole drive" : "扫描一个文件夹或整个盘"}</span>
-<span class="c-acc">$</span> spaceknife-backend scan {"D:\\"}
+<span class="c-acc">$</span> spaceknife-cli scan {"D:\\"}
 <span class="c-dim"># {c.lang === "en" ? "the snapshots saved after each scan" : "每次扫描后保存的快照"}</span>
-<span class="c-acc">$</span> spaceknife-backend snapshot list
+<span class="c-acc">$</span> spaceknife-cli snapshot list
 <span class="c-dim"># {c.lang === "en" ? "every option" : "全部选项"}</span>
-<span class="c-acc">$</span> spaceknife-backend --help</pre>
+<span class="c-acc">$</span> spaceknife-cli --help</pre>
       </div>
     </section>
 
