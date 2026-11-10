@@ -1,13 +1,14 @@
 # Porting the interface from React to Vue
 
-`apps/electron/src/renderer/src` (React 19 + zustand, Electron) is being ported to `apps/desktop/app`
-(Nuxt 4 SPA + Vue 3 + Pinia, Tauri 2). Phase 1 (done) moved every framework-free module, the store,
-the host layer and the shell skeleton. This file is the brief for porting the remaining components;
-several people can work on it in parallel, one component (or one row group below) each.
+For 0.3.5 the interface of 0.3.x, `apps/electron/src/renderer/src` (React 19 + zustand, Electron),
+was ported to `apps/desktop/app` (Nuxt 4 SPA + Vue 3 + Pinia, Tauri 2). The port is complete and the
+React app is gone from the tree (it is in the history, tag `v0.3.4`); this file keeps the brief the
+port was done by, since its commands, layout, conventions, host API and bundle notes still describe
+the app.
 
-The Electron app stays in the repository as the reference until the port is complete. Port behaviour
-as it is: same classes (the CSS in `app/styles/*.css` is unchanged and global), same texts (the
-Chinese source text is the i18n key), same ids and `data-*` attributes, same keyboard handling.
+Behaviour was ported as it was: same classes (the CSS in `app/styles/*.css` is unchanged and global),
+same texts (the Chinese source text is the i18n key), same ids and `data-*` attributes, same keyboard
+handling.
 
 ## Commands
 
@@ -88,8 +89,7 @@ need no component; the four already moved are marked done.
 | `pages/ClassesEditor.tsx` | `pages/ClassesEditor.vue` (**done**, reordering with pointer events) | row logic → `lib/classesEditor.ts` (**done**) |
 | `pages/HelpPage.tsx` | `pages/HelpPage.vue` + `pages/HelpContents.vue`; toolbar box `HelpSearch` = `pages/HelpSearch.vue` (**done**) | `openLink`, `helpTitle` (+ `markWords`) → `help/links.ts` (**done**); `pages/HelpPage.test.ts` ported (**done**) |
 
-When a component is done, replace its placeholder / TODO(port) comment in `AppShell.vue`,
-`TitleBar.vue` or its parent.
+Every component above is ported; no `TODO(port)` placeholder is left.
 
 ## State: `@/state/store`
 
@@ -201,9 +201,11 @@ browser tab.
   `spaceknife-cli headless`.
   Kept out of the base config because Tauri's build script requires externalBin / resources to exist
   (plain `cargo build` and `pnpm tauri dev` would fail without them).
-- Release file names: Tauri's (`SpaceKnife_<v>_x64-setup.exe`, `SpaceKnife_<v>_amd64.AppImage`,
-  `SpaceKnife_<v>_amd64.deb`, `SpaceKnife-<v>-1.x86_64.rpm`, `SpaceKnife_<v>_<aarch64|x64>.dmg`) and
-  the portable archives of `scripts/portable.mjs`; `crates/sk-core/src/update` picks by these names.
+- Release file names: 0.3.4's, kept by every release (`SpaceKnife-<v>-Setup-x64.exe`,
+  `spaceknife_<v>_amd64.deb`, `SpaceKnife-<v>-mac-<arch>.dmg`, the portable archives of
+  `scripts/portable.mjs`; the rpm and the AppImage come from `apps/electron-shell`); the workflows
+  rename the Tauri bundler's own names (`SpaceKnife_<v>_x64-setup.exe`, …) to them, and
+  `crates/sk-core/src/update` picks by them (docs/packaging.md §9).
 - Install kind (install.rs): dev (not bundled), portable (`data` next to the program), nsis
   (`uninstall.exe` next to it), dmg (macOS), deb / rpm (under /usr; deb when dpkg lists it),
   appimage (`APPIMAGE`); `SPACEKNIFE_INSTALL_KIND` overrides. No MSI bundle (the protocol has no kind
@@ -216,7 +218,7 @@ browser tab.
   `--ui <folder>` names another).
 - The release workflows (`.github/workflows/portable.yml`, `macos.yml`, `release.yml`) build with
   `pnpm bundle --no-bundle` / `pnpm bundle` and `pnpm bundle:portable`; `tools/release.mjs`
-  assembles the release by Tauri's file names. The packaged app is tested with
+  assembles the release by those file names. The packaged app is tested with
   `packaging/smoke-app.mjs`, `smoke-headless.mjs`, `update-e2e.mjs` and `nsis-e2e.mjs`, and every
   package is checked by `tools/package_checks.mjs` (no build-machine home folder in any file; glibc
   ≤ 2.34 in every ELF file of the Linux packages).

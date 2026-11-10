@@ -101,9 +101,9 @@ export const content: Record<Lang, Content> = {
     lang: "en",
     htmlLang: "en",
     ogLocale: "en_US",
-    title: "SpaceKnife: free, open-source disk usage analyzer for Windows and Linux",
+    title: "SpaceKnife: free, open-source disk usage analyzer for Windows, macOS and Linux",
     description:
-      "SpaceKnife shows what fills your drives as a live treemap. Fast parallel and NTFS MFT scans, snapshot comparison, filters and safe cleanup. Free and open source (MIT) for Windows 10+ and Linux.",
+      "SpaceKnife shows what fills your drives as a live treemap. Fast parallel and NTFS MFT scans, snapshot comparison, filters and safe cleanup. Free and open source (MIT) for Windows 10+, macOS 14+ and Linux.",
     nav: { features: "Features", screenshots: "Screenshots", download: "Download", faq: "FAQ", docs: "Docs", github: "GitHub", switchTo: "中文" },
     hero: {
       badge: "pre-release · free & open source",
@@ -129,7 +129,7 @@ export const content: Record<Lang, Content> = {
     featuresSub: "Built from first principles for today's huge drives: fast to scan, calm on your disk, safe to clean.",
     features: [
       { icon: "layers", title: "Three live visualizations", body: "A nested treemap, a flame graph and a polar flame graph, rendered with WebGL and filled in while the scan runs; switch at any time. Zoom animation, hover details, detail levels, and free and unknown space drawn too." },
-      { icon: "bolt", title: "Fast scans", body: "A native Rust extension walks folders in parallel; on Windows a quick scan reads the NTFS Master File Table directly." },
+      { icon: "bolt", title: "Fast scans", body: "SpaceKnife's own Rust scanner walks folders in parallel; on Windows a quick scan reads the NTFS Master File Table directly." },
       { icon: "gauge", title: "Calm on your disk", body: "Cap the disk load the scan causes (max, balanced, quiet, idle or custom); it backs off when other programs need the disk." },
       { icon: "pulse", title: "Live monitoring", body: "After the scan, changes keep flowing in and changed blocks flash, so the picture never goes stale." },
       { icon: "filter", title: "A real filter language", body: "Filter by name, type, size, dates, attributes and tags, and combine them; compatible with SpaceSniffer-style filters." },
@@ -160,7 +160,7 @@ export const content: Record<Lang, Content> = {
     openPoints: [
       "No account, no telemetry: everything runs locally on your computer.",
       "Rust backend and scanner, Tauri + Vue + WebGL interface on the system's WebView.",
-      "More than a thousand automated tests on Windows and Linux.",
+      "More than a thousand automated tests on Windows, Linux and macOS.",
     ],
     openCta: "Read the source",
     downloadTitle: "Download SpaceKnife",
@@ -191,7 +191,7 @@ export const content: Record<Lang, Content> = {
       { q: "Is it related to SpaceSniffer?", a: "No. SpaceKnife is an independent project inspired by SpaceSniffer; it is not affiliated with SpaceSniffer or its author." },
       { q: "Which systems does it run on?", a: "Windows 10 and 11 (x64), macOS 14+ (Apple Silicon and Intel), and x64 Linux: Ubuntu 22.04+, Debian, RHEL 9+, Fedora, or any distribution through the AppImage." },
       { q: "Why does macOS block it the first time?", a: "The macOS build is not notarized by Apple yet. Open SpaceKnife once, then go to System Settings › Privacy & Security and click Open Anyway; from then on it opens normally. A notarized build is on the way." },
-      { q: "Does it send my data anywhere?", a: "No. SpaceKnife has no account and no telemetry; scans, snapshots and settings stay on your computer. The only request it makes is an update check against this project's GitHub releases, at most once a day and sending nothing about you; you can turn it off in the settings." },
+      { q: "Does it send my data anywhere?", a: "No. SpaceKnife has no account and no telemetry; scans, snapshots and settings stay on your computer. Its only requests go to this project's GitHub releases: an update check at most once a day, sending nothing about you, and, when a newer version is found, the download of that version's file and checksums. Both can be turned off in the settings." },
       { q: "Can it delete the wrong file?", a: "Deleting moves items to the recycle bin by default and can be undone; system and program folders are protected, and permanent deletion asks first." },
       { q: "Why does the quick scan ask for administrator rights?", a: "Reading the NTFS Master File Table needs administrator rights, so a small read-only helper asks once. The regular parallel scan needs no special rights." },
     ],
@@ -206,7 +206,7 @@ export const content: Record<Lang, Content> = {
     featureList: [
       "Live nested treemap of disk usage",
       "Flame graph and polar flame graph views, switchable at any time",
-      "Parallel scanning with a native Rust extension",
+      "Parallel scanning with a native Rust scanner",
       "NTFS Master File Table quick scan on Windows",
       "Configurable disk load limit while scanning",
       "Live file-change monitoring after the scan",
@@ -222,9 +222,9 @@ export const content: Record<Lang, Content> = {
     lang: "zh",
     htmlLang: "zh-CN",
     ogLocale: "zh_CN",
-    title: "SpaceKnife：免费开源的硬盘占用分析工具（Windows / Linux）",
+    title: "SpaceKnife：免费开源的硬盘占用分析工具（Windows / macOS / Linux）",
     description:
-      "SpaceKnife 用实时树图展示磁盘被什么占满：并行扫描与 NTFS MFT 快速扫描、快照对比、过滤语言和安全清理。免费开源（MIT），支持 Windows 10+ 与 Linux。",
+      "SpaceKnife 用实时树图展示磁盘被什么占满：并行扫描与 NTFS MFT 快速扫描、快照对比、过滤语言和安全清理。免费开源（MIT），支持 Windows 10+、macOS 14+ 与 Linux。",
     nav: { features: "功能", screenshots: "截图", download: "下载", faq: "常见问题", docs: "文档", github: "GitHub", switchTo: "English" },
     hero: {
       badge: "预发布 · 免费开源",
@@ -250,7 +250,7 @@ export const content: Record<Lang, Content> = {
     featuresSub: "为今天的大容量磁盘重新设计：扫得快、不拖慢电脑、清理有保障。",
     features: [
       { icon: "layers", title: "三种实时可视化", body: "嵌套树图、火焰图、火焰-极坐标图，WebGL 渲染，边扫边画，扫描中也能随时切换；缩放动画、悬停详情、细节层级，可用空间与未知空间也画出来。" },
-      { icon: "bolt", title: "扫描快", body: "Rust 原生扩展并行遍历目录；Windows 上可直接读取 NTFS 主文件表（MFT）快速扫描。" },
+      { icon: "bolt", title: "扫描快", body: "SpaceKnife 自己的 Rust 扫描器并行遍历目录；Windows 上可直接读取 NTFS 主文件表（MFT）快速扫描。" },
       { icon: "gauge", title: "不拖慢电脑", body: "可以限制扫描自身造成的磁盘负载（极速、均衡、安静、空闲或自定义），别的程序用磁盘时自动让路。" },
       { icon: "pulse", title: "实时监控", body: "扫描完成后继续跟踪文件变化，变化的方块会闪烁，画面不会过时。" },
       { icon: "filter", title: "真正的过滤语言", body: "按名称、类型、大小、时间、属性、标签过滤，可以组合；与 SpaceSniffer 的过滤写法兼容。" },
@@ -281,7 +281,7 @@ export const content: Record<Lang, Content> = {
     openPoints: [
       "不需要账号，没有遥测：一切都在你的电脑上本地运行。",
       "Rust 后端与扫描器，Tauri + Vue + WebGL 界面，用系统自带的 WebView。",
-      "在 Windows 和 Linux 上有上千项自动化测试。",
+      "在 Windows、Linux 和 macOS 上有上千项自动化测试。",
     ],
     openCta: "阅读源码",
     downloadTitle: "下载 SpaceKnife",
@@ -312,7 +312,7 @@ export const content: Record<Lang, Content> = {
       { q: "它和 SpaceSniffer 有关系吗？", a: "没有。SpaceKnife 受 SpaceSniffer 启发，是独立开发的项目，与 SpaceSniffer 及其作者没有任何关联。" },
       { q: "支持哪些系统？", a: "Windows 10 与 11（x64）、macOS 14+（Apple Silicon 与 Intel），以及 x64 Linux：Ubuntu 22.04+、Debian、RHEL 9+、Fedora，其他发行版可以用 AppImage。" },
       { q: "为什么 macOS 第一次会拦下它？", a: "macOS 版还没有经过苹果公证。先打开一次 SpaceKnife，再到「系统设置 › 隐私与安全性」点「仍要打开」，之后就能正常打开。经过公证的版本正在准备。" },
-      { q: "会上传我的数据吗？", a: "不会。SpaceKnife 不需要账号，也没有遥测；扫描结果、快照和设置都留在你的电脑上。它唯一发起的请求是检查本项目在 GitHub 上的新版本，每天最多一次，不发送任何关于你的信息，可以在设置里关掉。" },
+      { q: "会上传我的数据吗？", a: "不会。SpaceKnife 不需要账号，也没有遥测；扫描结果、快照和设置都留在你的电脑上。它发起的请求只去本项目在 GitHub 上的发布：每天最多一次检查新版本，不发送任何关于你的信息；发现新版本后下载它的文件和校验值。两者都可以在设置里关掉。" },
       { q: "会不会误删文件？", a: "删除默认移到回收站，可以撤销；系统和程序目录受保护，永久删除前会再确认。" },
       { q: "为什么快速扫描要管理员权限？", a: "读取 NTFS 主文件表需要管理员权限，所以一个只读的小助手会请求一次。普通的并行扫描不需要特殊权限。" },
     ],
@@ -327,7 +327,7 @@ export const content: Record<Lang, Content> = {
     featureList: [
       "实时嵌套树图显示磁盘占用",
       "火焰图与火焰-极坐标图，随时切换",
-      "Rust 原生扩展并行扫描",
+      "Rust 原生并行扫描",
       "Windows 上的 NTFS 主文件表快速扫描",
       "扫描时可限制磁盘负载",
       "扫描后实时监控文件变化",

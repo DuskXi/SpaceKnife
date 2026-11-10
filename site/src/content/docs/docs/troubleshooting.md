@@ -34,7 +34,7 @@ The installer and the app aren't code-signed yet, so SmartScreen shows a warning
 
 ### Windows: the window doesn't open
 
-SpaceKnife's window is drawn by the Microsoft Edge WebView2 Runtime. Windows 11 includes it and most Windows 10 computers have it; the installer installs it where it is missing, but a portable copy can't. If a portable copy shows no window, install the WebView2 Runtime from Microsoft (it is free) and start SpaceKnife again, or use the installer.
+SpaceKnife's window is drawn by the Microsoft Edge WebView2 Runtime, version 89.0.774.44 or later. Windows 11 includes it and most Windows 10 computers have it; the installer installs or updates it, a portable copy can't. When it is missing or too old, SpaceKnife says so before it opens its window (**SpaceKnife needs the Microsoft Edge WebView2 Runtime, which this computer doesn't have**, or **… needs a newer Microsoft Edge WebView2 Runtime**) and changes nothing: click **Download the WebView2 Runtime**, install it (it is free) and start SpaceKnife again, or use the installer.
 
 ### macOS: "SpaceKnife can't be verified"
 
@@ -126,12 +126,12 @@ Every 15 seconds the backend compares its memory with what the open scans need. 
 
 ### "Can't start the update"
 
-**Seamless update** of a portable copy checks two things before it replaces anything. When either says no, nothing is changed: the copy goes on as it was, and the card says **Can't start the update:** and why.
+**Seamless update** of a portable copy checks two things before it replaces anything. When either says no, nothing is changed: the copy goes on as it was, and SpaceKnife says **Can't start the update:** and why (from 0.3.5 on it stays on the update card; 0.3.4 shows it only for a moment).
 
 - **The folder holds more than SpaceKnife.** The update only ever replaces SpaceKnife's own files, so when the program's folder also holds other things of yours (another app, documents), it doesn't start and names them: *The folder also holds things that are not SpaceKnife's (…)*. Put SpaceKnife and its `data` folder in a folder of their own and try again, or use **Replace it yourself**. Files your system puts in folders (`desktop.ini`, `.DS_Store`) don't count and stay where they are.
 - **The new version can't start on this computer.** The usual reason is a missing web view: the WebView2 Runtime on Windows (then a window of the new version says what is missing and where to get it), or WebKitGTK 4.1 for the small Linux portable (RHEL 9 has none). Install it and try again, or take the other download ([Which file to download](../install/#which-file-to-download)).
 
-If an update was put in place but had to be undone (the new version didn't start), the old version says so on its update card when it opens again: **The update didn't complete: …**. The steps are in `updates/update-<version>.log` in the data folder.
+If an update was put in place but had to be undone (the new version didn't start), the old version, from 0.3.5 on, says so on its update card when it opens again: **The update didn't complete: …**. The steps are in `updates/update-<version>.log` in the data folder.
 
 ### The installer update didn't finish
 

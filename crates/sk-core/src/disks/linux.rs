@@ -593,7 +593,7 @@ pub(crate) mod tests {
         );
         fs.file(
             &format!("{nvme_pci}/nvme/nvme0/serial"),
-            "ZTC84T0AB251751VWB  ",
+            "NVME0000000000000001  ",
         );
         fs.file(&format!("{nvme_pci}/nvme/nvme0/firmware_rev"), "ZTA31003");
         pci(
@@ -624,11 +624,11 @@ pub(crate) mod tests {
         fs.file("/sys/class/ata_link/link5/sata_spd", "6.0 Gbps");
         pci(&mut fs, card, "5.0 GT/s PCIe", "1", "5.0 GT/s PCIe", "1");
         fs.link(
-            "/dev/disk/by-id/ata-CT2000MX500SSD1_2247E688D3C9",
+            "/dev/disk/by-id/ata-CT2000MX500SSD1_0000E0000001",
             "../../sda",
         );
         fs.link(
-            "/dev/disk/by-id/ata-CT2000MX500SSD1_2247E688D3C9-part1",
+            "/dev/disk/by-id/ata-CT2000MX500SSD1_0000E0000001-part1",
             "../../sda1",
         );
         part(&mut fs, &sda, "sda1", 2048, 3907026944);
@@ -745,7 +745,7 @@ pub(crate) mod tests {
                 nvme.serial.as_str(),
                 nvme.firmware.as_str()
             ),
-            ("ZHITAI TiPro9000 4TB", "ZTC84T0AB251751VWB", "ZTA31003")
+            ("ZHITAI TiPro9000 4TB", "NVME0000000000000001", "ZTA31003")
         );
         assert_eq!(
             (
@@ -773,7 +773,7 @@ pub(crate) mod tests {
                 sata.serial.as_str(),
                 sata.media
             ),
-            ("CT2000MX500SSD1", "", "2247E688D3C9", Media::SataSsd)
+            ("CT2000MX500SSD1", "", "0000E0000001", Media::SataSsd)
         );
         assert_eq!(sata.link, Some(rate_link(LinkKind::Sata, Some(6000), None)));
         assert_eq!(

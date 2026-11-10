@@ -80,8 +80,8 @@ if (os === "mac") {
 }
 writeFileSync(
   join(folder, "data", "README.txt"),
-  "SpaceKnife keeps everything it writes in this folder (settings, snapshots, logs).\r\n" +
-    "SpaceKnife 把它写的所有东西（设置、快照、日志）都放在这个文件夹里。\r\n",
+  "SpaceKnife keeps its settings, snapshots, logs and cache in this folder.\r\n" +
+    "SpaceKnife 把它的设置、快照、日志和缓存都放在这个文件夹里。\r\n",
 );
 
 const archive = join(work, os === "linux" ? `${name}.tar.gz` : `${name}.zip`);

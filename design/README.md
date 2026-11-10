@@ -39,5 +39,5 @@ node tools/gen_design.mjs
 
 ## 待办
 
-- 浅色色板需要先经用户评审才算定稿：`themes/light.tokens.json` 现在是暂定稿，评审之前不合进发布。原来用 `tools/preview_design.py` 并排画出两个主题（目前还没有 Node 版本），配合实机截图；要问清当初否决 B「纸本」的理由（TODO.md）。
+- 浅色色板需要先经用户评审才算定稿：`themes/light.tokens.json` 是暂定稿，已随 0.3.4 发布（默认跟随系统）。原来用 `tools/preview_design.py` 并排画出两个主题（Python 版已删，目前还没有 Node 版本），配合实机截图；要问清当初否决 B「纸本」的理由（TODO.md）。
 - 字体文件：M3 之前把 Geist、Geist Mono、Noto Sans SC 的字体文件（均为 OFL 许可）放进 `design/fonts/`，三端打包同一份。（现状：`apps/desktop` 用 `@fontsource-variable/geist`、`geist-mono`、`noto-sans-sc` 包自带的字体文件。）

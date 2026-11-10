@@ -12,7 +12,7 @@ A scan only reads the disk. What SpaceKnife keeps lives in a few per-user folder
 | Data: snapshots, tags, logs | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | Configuration: settings, file classes | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | Cache | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
-| Window files (the window's theme, storage and caches) | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife`; Electron builds: `~/.config/SpaceKnife/electron` | `~/Library/Application Support/io.github.duskxi.spaceknife` |
+| Window files (the window's theme, storage and caches) | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife`; Electron builds: `~/.config/SpaceKnife/electron` | `~/Library/Application Support/io.github.duskxi.spaceknife` (theme); `~/Library/WebKit/io.github.duskxi.spaceknife` (web view storage and caches) |
 
 These are the folders 0.3.x used for the data, configuration and cache, so an upgrade finds everything where it was. On Linux, and on macOS as in 0.3.x, the folders follow `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` when you set them to an absolute path.
 
@@ -77,7 +77,7 @@ Set the environment variable `SPACEKNIFE_HOME` to a folder, and SpaceKnife keeps
 | `SPACEKNIFE_HOME/data` | Snapshots, tags, logs, update state |
 | `SPACEKNIFE_HOME/config` | Settings, file classes |
 | `SPACEKNIFE_HOME/cache` | Cache |
-| `SPACEKNIFE_HOME/desktop` | Window files (the Tauri builds) |
+| `SPACEKNIFE_HOME/desktop` | Window files (the Tauri builds; on macOS the web view's storage and caches stay in `~/Library/WebKit/io.github.duskxi.spaceknife`) |
 | `SPACEKNIFE_HOME/electron` | Window files (the Electron builds) |
 
 Use it for a separate profile (to try settings without touching your own), to keep snapshots on another drive, or for demos and tests. Give an absolute path.
@@ -111,7 +111,7 @@ The [command line](../command-line/) reads the same variable, so `spaceknife-cli
 
 ## Portable mode
 
-The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-mac-<arch>-portable.zip`, and for Linux `SpaceKnife-<version>-linux-<arch>-tauri.tar.gz` and `SpaceKnife-<version>-linux-<arch>-portable.tar.gz`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the window files all stay in it (`data/data`, `data/config`, `data/cache`, and `data/desktop` or `data/electron`), and nothing is written to your user profile.
+The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-mac-<arch>-portable.zip`, and for Linux `SpaceKnife-<version>-linux-<arch>-tauri.tar.gz` and `SpaceKnife-<version>-linux-<arch>-portable.tar.gz`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the window files all stay in it (`data/data`, `data/config`, `data/cache`, and `data/desktop` or `data/electron`), and nothing is written to your user profile. The one exception is macOS: WKWebView takes no other folder, so the web view's own data (page storage and caches) always goes to `~/Library/WebKit/io.github.duskxi.spaceknife`, also for a portable copy and with `SPACEKNIFE_HOME`.
 
 - An explicitly set `SPACEKNIFE_HOME` wins over the `data` folder.
 - Delete or rename `data` and the copy uses the normal per-user folders. Put it back and it is portable again.
@@ -136,4 +136,4 @@ To take your settings into a portable copy (or out of one), export them in one c
 
 ## Removing all data
 
-To start fresh or to remove everything after uninstalling, quit SpaceKnife and delete the folders in the [first table](#where-things-are), or the `SPACEKNIFE_HOME` folder or `data` folder you use. On Windows these are `%LOCALAPPDATA%\SpaceKnife` and `%LOCALAPPDATA%\io.github.duskxi.spaceknife`, and `%APPDATA%\SpaceKnife` if 0.3.x was installed; the Windows uninstaller removes all of them when you tick **Also delete the snapshots, settings and logs** ([Uninstalling](../install/#uninstalling)). **Settings › Advanced › Restore all defaults** resets only the settings and file classes.
+To start fresh or to remove everything after uninstalling, quit SpaceKnife and delete the folders in the [first table](#where-things-are), or the `SPACEKNIFE_HOME` folder or `data` folder you use. On Windows these are `%LOCALAPPDATA%\SpaceKnife` and `%LOCALAPPDATA%\io.github.duskxi.spaceknife`, and `%APPDATA%\SpaceKnife` if 0.3.x was installed; the Windows uninstaller removes all of them when you tick **Also delete the snapshots, settings and logs** ([Uninstalling](../install/#uninstalling)). On macOS, also delete `~/Library/WebKit/io.github.duskxi.spaceknife`. **Settings › Advanced › Restore all defaults** resets only the settings and file classes.

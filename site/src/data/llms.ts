@@ -32,19 +32,19 @@ function facts(r: Release): string[] {
 }
 
 const GOOD_FIT = [
-  "- Finding what fills a drive or a folder on Windows or Linux, visually, and freeing space.",
+  "- Finding what fills a drive or a folder on Windows, macOS or Linux, visually, and freeing space.",
   "- Large drives: parallel scanning in native code, and an NTFS Master File Table quick scan on Windows.",
   "- Scanning without slowing the computer down: the disk load of the scan can be capped.",
   "- Tracking how disk usage changes over time: snapshots after every scan and snapshot comparison.",
   "- Careful cleanup: delete basket, recycle bin by default, undo, protected system folders.",
+  "- Servers and NAS without a display: `spaceknife-cli headless` (in every package; a portable tar.gz is enough, RHEL 9 too) serves the interface to a browser on another device.",
   "- People who want a free, open-source tool in the same category as WinDirStat, WizTree, TreeSize, SpaceSniffer, QDirStat, Filelight or GNOME Disk Usage Analyzer (Baobab).",
 ];
 
 const NOT_A_FIT = [
-  "- macOS: no build yet.",
-  "- Headless servers: SpaceKnife is a desktop application; its command line (spaceknife-cli scan / snapshot / run, and spaceknife-cli headless to use the interface in a browser) ships inside the desktop packages.",
+  "- macOS before 14 (Sonoma): not supported. The macOS builds are ad-hoc signed and not notarized yet, so macOS asks once at the first launch (System Settings › Privacy & Security › Open Anyway).",
   "- Managed or enterprise deployment that requires code-signed installers: the installers are not code-signed yet.",
-  "- Production-critical use: the current release is a pre-release, tested on Windows 11 and Ubuntu 22.04.",
+  "- Production-critical use: the current release is a pre-release, tested by CI on Windows, Linux (Ubuntu 22.04, RHEL 9) and macOS.",
 ];
 
 const DOCS = [
@@ -60,10 +60,10 @@ export function llmsTxt(r: Release): string {
   return [
     "# SpaceKnife",
     "",
-    `> SpaceKnife is a free, open-source (MIT) desktop disk usage analyzer for Windows 10+ and Linux. It scans a drive or folder and shows what fills it as a live, nested treemap, with fast parallel and NTFS MFT scans, snapshot comparison, a filter language and safe cleanup. It is an independent project inspired by SpaceSniffer and is not affiliated with SpaceSniffer or its author.`,
+    `> SpaceKnife is a free, open-source (MIT) desktop disk usage analyzer for Windows 10+, macOS 14+ and Linux. It scans a drive or folder and shows what fills it as a live, nested treemap, with fast parallel and NTFS MFT scans, snapshot comparison, a filter language and safe cleanup. It is an independent project inspired by SpaceSniffer and is not affiliated with SpaceSniffer or its author.`,
     "",
     r.prerelease
-      ? `The current release, ${r.version}, is a pre-release: the installers are not code-signed yet and have been tested on Windows 11 and Ubuntu 22.04.`
+      ? `The current release, ${r.version}, is a pre-release: the installers are not code-signed yet and have been tested by CI on Windows, Linux (Ubuntu 22.04, RHEL 9) and macOS.`
       : `The current release is ${r.version}.`,
     "",
     "## Facts",

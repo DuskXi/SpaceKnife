@@ -60,6 +60,7 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 - 命令行：`spaceknife-cli`（`crates/sk-server/src/bin/spaceknife-cli.rs`，`cli/mod.rs`）装在应用旁边：`scan`、`run`、`snapshot list | show`、`serve`（给界面用的 WebSocket 后端，`--ready-file` 等）、`headless`、`version`；0.3.4 应用自己的写法 `--headless` / `--listen <地址>` 仍然接受，没有命令打头时可以出现在任何位置，其余参数照 0.3.4 跳过（`cli/headless.rs` 的 `is_app_form`）。输出格式与 0.3.4 的 `scan` 逐字逐句相同（`crates/sk-server/src/cli/rich.rs`），外部基准（Disk-Scan-Benchmark）照旧解析；「最大的文件」用部分选择（第 k 大的值，并列时编号小的在前），不对全部文件排序。
 - 安装目录本身是受保护路径（不能在应用里删除或移动它）。
 - **就绪文件**（`SPACEKNIFE_READY_FILE`：端到端测试、演示，以及替换助手确认新版本已启动，第 8 节）：后端开始监听时把地址和 token 写进这个文件（只有当前用户能读；先写一个新建的临时文件——不能是已有的文件或链接，Unix 上另加 O_NOFOLLOW——再改名替换，不跟随链接；Unix 上别的用户的文件夹拒绝写，`cli/serve.rs` 的 `write_ready_file`）。两个外壳启动时就把这个变量从自己的环境里拿掉，只交给第一次启动的后端（Tauri：`main.rs` 在任何线程之前读出并删掉，`backend.rs` 写一次就忘，`crates/sk-server/tests/environment.rs` 只放行这一处改环境；Electron：`index.ts` 一开始 `takeReadyFile(process.env)`，只给第一个后端加 `--ready-file`）：之后启动的后端、更新的助手和安装程序、终端都不会继承一个可能已被别人重建的路径。
+- **最小化启动**（`SPACEKNIFE_START_MINIMIZED=1`：演示和打包测试）：两个外壳的窗口出现在任务栏里、不抢焦点（Tauri：`window.rs`；Electron：`index.ts`）。
 
 ## 3. Tauri 外壳
 
@@ -79,6 +80,7 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 
 - 只有主进程和 preload（`src/main`、`src/preload`，electron-vite 构建到 `out/`），没有自己的界面。窗口从 `app://spaceknife` 提供 `apps/desktop/.output/public`（打包后是 `resources/ui`），页面带 Content-Security-Policy 头，内联脚本的 sha256 按页面计算（`src/main/csp.ts`），指令与 Tauri 的相同。来源和 userData（`<appData>/SpaceKnife/electron`，设了 `SPACEKNIFE_HOME` 或是便携版时是 `<那个目录>/electron`）与 0.3.4 相同，页面的存储和 `theme.json` 都还在。
 - preload 只暴露 `window.skElectron`（版本信息、白名单内的 IPC 通道、拖放文件的路径）；界面的 `app/lib/electronHost.ts` 在它上面实现 `window.sk`，`app/lib/installHost.ts` 依次选：已有的 `window.sk`、Electron、Tauri、浏览器 shim。
+- 开发用的环境变量（`index.ts`、`backend.ts`）：`SPACEKNIFE_DEV_URL` 从 Nuxt 的开发服务器取界面（只在没打包时）；`SPACEKNIFE_CLI` 换后端程序、`SPACEKNIFE_UI` 换界面文件夹、`SPACEKNIFE_REPO` 指定检出目录——这三个打包后也认（`backend.test.ts` 钉住了 `SPACEKNIFE_CLI`），都不影响删除检查。
 - 后端是子进程 `spaceknife-cli serve --token-stdin --log-format plain`（与 0.3.4 的 Python 后端同一个契约：令牌走 stdin，stdout 一行 ready，stdin 关闭即退出，`src/main/backend.ts`）；版本、安装方式、系统语言和 `SPACEKNIFE_SHELL=electron` 经环境变量传；就绪文件只给第一个后端（第 2 节）。
 - Windows 和 Linux 上没有菜单栏（`Menu.setApplicationMenu(null)`，也就没有默认的重载和开发者工具快捷键）；页面申请的权限一律拒绝；导航只限 `app://spaceknife`，新窗口一律不开。
 - 0.3.4 的无头启动方式以原样的参数交给 `spaceknife-cli`（只有 `--help` / `-h` 时前面加 `--headless`，和 `SpaceKnife.com` 的分法一样），以继承终端的方式运行（`src/main/cli.ts`）。`--startup-check`（`src/main/cli.ts` 的 `STARTUP_CHECK`）在任何窗口、配置目录和后端之前回答。
@@ -219,8 +221,8 @@ CI：「Portable build」（[portable.yml](../.github/workflows/portable.yml)）
 
 **发布**（从 0.3.4 起由 CI 发布，文件不经过任何人的电脑）：
 
-1. dev 上改版本号（根目录 `Cargo.toml` 的工作区版本、`apps/desktop/package.json`、`apps/electron-shell/package.json`、`apps/desktop/src-tauri/tauri.conf.json`、`app/shim.ts` 的网页版版本、问题模板的占位符），把 `UNRELEASED.md` 压成 `release-notes/<版本>.md`：先英文后中文，下载表的大小写成 `{{size:文件名}}`，构建运行写成 `{{build_runs}}`，也可以用 `{{version}}`；工作流填进去，写错的占位符或不属于这个发布的文件名会让发布失败（`tools/tests/release.test.mjs` 也按 `expected` 核对仓库里的发布说明）。
-2. PR dev → main，等「CI passed」再合并。
+1. dev 上改版本号（根目录 `Cargo.toml` 的工作区版本、`apps/desktop/package.json`、`apps/electron-shell/package.json`、`apps/desktop/src-tauri/tauri.conf.json`、`app/shim.ts` 的网页版版本、问题模板的占位符），把 `UNRELEASED.md` 压成 `release-notes/<版本>.md`：先英文后中文，下载表的大小写成 `{{size:文件名}}`，构建运行写成 `{{build_runs}}`，也可以用 `{{version}}`；工作流填进去，写错的占位符或不属于这个发布的文件名会让发布失败（`tools/tests/release.test.mjs` 也按 `expected` 核对仓库里的发布说明，并核对问题模板的占位符和 `app/shim.ts` 的网页版版本号）。
+2. PR dev → main，等「CI passed」再合并。合并到 main 会触发网站部署（`pages.yml`，`site/**` 变了时）：网站从这时起就写新版本的用法，下载按钮却仍指向最新的已发布版本，所以合并后尽快打 tag、发布草稿（发布会再触发一次网站构建）。
 3. 在 main 的合并提交上本地签名打 tag（`git tag -s v<版本> <提交> -m "SpaceKnife <版本>"`）并推送。CI 不持有签名的私钥。
 4. tag 推上去就触发 **Release** 工作流（`.github/workflows/release.yml`）：检查 tag 是带签名的附注 tag 且 GitHub 认可签名、文件和 main 完全相同、应用的版本号就是 tag 的版本、`release-notes/<版本>.md` 存在、同名的发布还没有；用 `Portable build`（带 deb）、`macOS build`、`Windows installer build` 和 `Electron shell build` 从 tag 构建全部文件，四者都给每个文件生成构建来源证明（`actions/attest-build-provenance`，可以用 `gh attestation verify <文件> --repo DuskXi/SpaceKnife` 核对），并各自测从真实的 0.3.4 文件更新上来（第 11 节）；`node tools/release.mjs assemble` 核对每份校验和文件、确认正好是这个发布该有的文件、合并 `SHA256SUMS.txt`、填好发布说明（汇总结果也作为运行的产物 `release-<版本>` 留 14 天）；`node tools/compat034.mjs --dir release` 用 0.3.4 自己的更新代码读汇总好的文件；建成预发布的草稿（0.x 和带预发布段的版本都是预发布）。
 5. 在 GitHub 上看一眼草稿，点发布。**Release check** 工作流（`release-check.yml`）在发布时用 `cargo run -p sk-core --example release_check -- <版本>` 按已安装的 SpaceKnife 的方式读这个发布（每种安装方式都按确切的名字找到文件，`--download` 时下载并核对校验和），再用 `tools/compat034.mjs --github` 按已安装的 0.3.4 的方式读一遍；v0.3.5 有了 tag 以后，`compat035` 作业还把 v0.3.5 检出到单独的 worktree，用它自己的 `cargo run -p sk-core --example release_check -- <版本> --download` 按已安装的 0.3.5 的方式读一遍（还没有这个 tag、或发布的就是 0.3.5 及更早的版本时，只留一条 notice，不算失败）。

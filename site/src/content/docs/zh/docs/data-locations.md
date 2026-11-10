@@ -12,7 +12,7 @@ description: SpaceKnife 在各平台把快照、设置、日志和缓存存在�
 | 数据：快照、标签、日志 | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | 配置：设置、文件类别 | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | 缓存 | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
-| 窗口文件（窗口的主题、本地存储与缓存） | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife`；Electron 版：`~/.config/SpaceKnife/electron` | `~/Library/Application Support/io.github.duskxi.spaceknife` |
+| 窗口文件（窗口的主题、本地存储与缓存） | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife`；Electron 版：`~/.config/SpaceKnife/electron` | `~/Library/Application Support/io.github.duskxi.spaceknife`（主题）；`~/Library/WebKit/io.github.duskxi.spaceknife`（网页视图的存储与缓存） |
 
 数据、配置和缓存用的就是 0.3.x 的这些文件夹，所以升级后一切都还在原处。Linux 上，以及和 0.3.x 一样在 macOS 上，设置了 `XDG_DATA_HOME`、`XDG_CONFIG_HOME`、`XDG_CACHE_HOME`（绝对路径）时，这些目录跟着它们走。
 
@@ -77,7 +77,7 @@ SpaceKnife 自己的这些文件夹和它的安装目录都是受保护的：不
 | `SPACEKNIFE_HOME/data` | 快照、标签、日志、更新状态 |
 | `SPACEKNIFE_HOME/config` | 设置、文件类别 |
 | `SPACEKNIFE_HOME/cache` | 缓存 |
-| `SPACEKNIFE_HOME/desktop` | 窗口文件（Tauri 版） |
+| `SPACEKNIFE_HOME/desktop` | 窗口文件（Tauri 版；macOS 上网页视图的存储与缓存仍在 `~/Library/WebKit/io.github.duskxi.spaceknife`） |
 | `SPACEKNIFE_HOME/electron` | 窗口文件（Electron 版） |
 
 适合另开一套配置（试设置而不碰自己的那套）、把快照放到另一块盘上，或者做演示和测试。请用绝对路径。
@@ -111,7 +111,7 @@ SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Conten
 
 ## 便携模式
 
-便携包（`SpaceKnife-<版本>-win-<架构>-portable.zip`、`SpaceKnife-<版本>-mac-<架构>-portable.zip`，Linux 上是 `SpaceKnife-<版本>-linux-<架构>-tauri.tar.gz` 和 `SpaceKnife-<版本>-linux-<架构>-portable.tar.gz`）在程序旁边带一个空的 `data` 文件夹，里面只有一份简短说明。SpaceKnife 每次启动都会找这个文件夹：可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`。快照、设置、日志、缓存和窗口文件都存在里面（`data/data`、`data/config`、`data/cache`，以及 `data/desktop` 或 `data/electron`），不写进你的用户目录。
+便携包（`SpaceKnife-<版本>-win-<架构>-portable.zip`、`SpaceKnife-<版本>-mac-<架构>-portable.zip`，Linux 上是 `SpaceKnife-<版本>-linux-<架构>-tauri.tar.gz` 和 `SpaceKnife-<版本>-linux-<架构>-portable.tar.gz`）在程序旁边带一个空的 `data` 文件夹，里面只有一份简短说明。SpaceKnife 每次启动都会找这个文件夹：可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`。快照、设置、日志、缓存和窗口文件都存在里面（`data/data`、`data/config`、`data/cache`，以及 `data/desktop` 或 `data/electron`），不写进你的用户目录。唯一的例外是 macOS：WKWebView 不接受指定的文件夹，网页视图自己的数据（页面存储与缓存）总在 `~/Library/WebKit/io.github.duskxi.spaceknife`，便携版和设了 `SPACEKNIFE_HOME` 时也一样。
 
 - 手动设置的 `SPACEKNIFE_HOME` 优先于 `data` 文件夹。
 - 删掉或重命名 `data`，这份程序就改用正常的用户目录；放回去又是便携的。
@@ -136,4 +136,4 @@ $env:SPACEKNIFE_HOME = "C:\Users\lenny\Apps\SpaceKnife-portable\data"
 
 ## 删除全部数据
 
-想从头开始，或卸载后清理干净：退出 SpaceKnife，删除[第一张表](#存在哪里)里的文件夹，或者你用的 `SPACEKNIFE_HOME`、`data` 文件夹。Windows 上是 `%LOCALAPPDATA%\SpaceKnife` 和 `%LOCALAPPDATA%\io.github.duskxi.spaceknife`，装过 0.3.x 的还有 `%APPDATA%\SpaceKnife`；卸载时勾上「同时删除快照、设置和日志」，Windows 的卸载程序会把它们都删掉（[卸载](../install/#卸载)）。「设置 › 高级 › 全部恢复默认」只重置设置和文件类别。
+想从头开始，或卸载后清理干净：退出 SpaceKnife，删除[第一张表](#存在哪里)里的文件夹，或者你用的 `SPACEKNIFE_HOME`、`data` 文件夹。Windows 上是 `%LOCALAPPDATA%\SpaceKnife` 和 `%LOCALAPPDATA%\io.github.duskxi.spaceknife`，装过 0.3.x 的还有 `%APPDATA%\SpaceKnife`；卸载时勾上「同时删除快照、设置和日志」，Windows 的卸载程序会把它们都删掉（[卸载](../install/#卸载)）。macOS 上还要删 `~/Library/WebKit/io.github.duskxi.spaceknife`。「设置 › 高级 › 全部恢复默认」只重置设置和文件类别。

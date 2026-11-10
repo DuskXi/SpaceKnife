@@ -4,7 +4,7 @@
     The app icon (chosen 2026-10-18: candidate D, candidates/chamfer.svg). A graphite tile with the
     upper-right corner sliced off along x - y = 544; the cut-off piece (accent.lime) lifts away from
     the cut. Inside, a treemap in graphite tones with one accent block; the block next to the cut
-    follows the cut (inset 96 units). Packaging icons: tools/render_app_icons.py (app mode).
+    follows the cut (inset 96 units). Packaging icons: `pnpm tauri icon` in apps/desktop (design/app-icon/README.md).
   -->
   <defs>
     <clipPath id="body"><path d="M0 0H544L1024 480V1024H0Z"/></clipPath>
