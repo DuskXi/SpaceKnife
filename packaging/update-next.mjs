@@ -28,8 +28,12 @@
 // Then 「无缝更新」, where the card has it:
 // - clicked like a user, where OLD's window has a DevTools port (--click window): the Electron
 //   shell (--remote-debugging-port) and the Tauri app on Windows (WebView2 takes the port from
-//   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS). The test clicks the title bar's badge and the card's
-//   「无缝更新」 (twice when the card asks once more because a scan runs); what happens next is
+//   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, or, where a runtime leaves that aside for the app's own
+//   arguments, from its per-program policy AdditionalBrowserArguments, which the test sets for
+//   SpaceKnife.exe on the runner and takes out again; a window that answers on neither is updated
+//   the test's way below, which the log says in a line of its own). The test clicks the title
+//   bar's badge and the card's 「无缝更新」 (twice when the card asks once more because a scan
+//   runs); what happens next is
 //   OLD's shell's own code: the portable copy's unpacking, plan and swap helper (NEW's program), the
 //   installer started with OLD's arguments, the AppImage put in place;
 // - done by the test where the system's web view has no DevTools port (--click test: the Tauri
@@ -259,8 +263,21 @@ const AWAKE = ["--disable-renderer-backgrounding", "--disable-backgrounding-occl
 /** The Electron shell: its DevTools port (DevToolsActivePort in its userData). */
 const ELECTRON_ARGS = ["--remote-debugging-port=0", ...AWAKE];
 /** WebView2 (the Tauri app on Windows): the port from the environment, which what the app starts
- * inherits (the swap helper, the installer, NEW). */
-const webview2Env = (port) => ({ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: [`--remote-debugging-port=${port}`, ...AWAKE].join(" ") });
+ * inherits (the swap helper, the installer, NEW). Some runtimes (156 on Windows Server 2025 and
+ * Windows 11 on ARM) leave the variable aside for the arguments the app gives (wry's): the same
+ * arguments go into WebView2's own per-program setting as well (webview2Policy). */
+const webview2Args = (port) => [`--remote-debugging-port=${port}`, ...AWAKE].join(" ");
+const webview2Env = (port) => ({ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: webview2Args(port) });
+const WEBVIEW2_POLICY = "HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
+let webview2PolicySet = false;
+
+/** WebView2's AdditionalBrowserArguments for SpaceKnife.exe (the program's name: OLD and NEW alike),
+ * on this CI runner, for this leg: taken out again on the way out. */
+function webview2Policy(port) {
+  const r = spawnSync("reg.exe", ["add", WEBVIEW2_POLICY, "/v", "SpaceKnife.exe", "/t", "REG_SZ", "/d", webview2Args(port), "/f"], { encoding: "utf8" });
+  if (r.status !== 0) console.log(`(could not set ${WEBVIEW2_POLICY}: ${r.stderr?.trim()})`);
+  else webview2PolicySet = true;
+}
 
 async function freePort() {
   const s = net.createServer();
@@ -337,7 +354,7 @@ async function clickSeamless(page) {
   console.log(`card: ${JSON.stringify(await page.evaluate("document.querySelector('.update-card').innerText"))}`);
   await page.evaluate(`${button}.click(), true`).catch(() => {}); // the window goes away while it answers
   await sleep(700);
-  const confirm = await page.evaluate(`!!document.querySelector('.update-card .uc-choice.seamless.confirm')`).catch(() => false);
+  const confirm = await page.evaluate(`!!document.querySelector('.update-card .uc-choice.seamless.confirm')`, { tries: 1 }).catch(() => false);
   if (confirm) {
     console.log("the card asks once more (a scan runs): clicked again");
     await page.evaluate(`${button}.click(), true`).catch(() => {});
@@ -564,7 +581,7 @@ async function portable() {
   const candidate = join(work, "candidate", candTops[0]);
   if (isElectron(candidate) !== electron) throw new Error(`${basename(oldPath)} is ${electron ? "" : "not "}the Electron shell, ${NEW_NAME} is${electron ? " not" : ""}`);
   if (!uiIn(candidate) || !existsSync(programIn(candidate))) throw new Error(`${NEW_NAME} has no program or interface where it belongs`);
-  const click = option("--click") ?? (WIN || electron ? "window" : "test");
+  let click = option("--click") ?? (WIN || electron ? "window" : "test");
   console.log(`${electron ? "the Electron shell" : "the Tauri app"}'s portable copy; 「无缝更新」 ${click === "window" ? `clicked in ${OLD}'s window` : `done by the test as the button does it (${MAC ? "macOS's" : "WebKitGTK's"} web view has no DevTools port)`}`);
 
   const feed = await serveFeed();
@@ -573,6 +590,7 @@ async function portable() {
     const ready = join(work, "ready.json");
     const port = WIN ? await freePort() : null;
     const extra = WIN ? webview2Env(port) : {};
+    if (WIN && click === "window") webview2Policy(port);
     const dirs = [join(data, electron ? "electron" : "desktop")];
     const startedAt = Date.now();
     const app = start(program, electron && click === "window" ? ELECTRON_ARGS : [], appEnv(feed.url, ready, extra));
@@ -594,10 +612,19 @@ async function portable() {
     const systemFile = join(folder, WIN ? "desktop.ini" : MAC ? ".DS_Store" : ".directory");
     let page = null;
     let swap = null; // the test's 「无缝更新」 (--click test)
+    if (click === "window") {
+      try {
+        // up long before: OLD has run for a minute and more by now
+        page = await openWindow(OLD, { port, dirs, since: startedAt, proc: app, timeout: WIN ? 60_000 : 120_000 });
+      } catch (e) {
+        if (!WIN || app.exited) throw e;
+        console.log(`\n!! ${OLD}'s window has no DevTools port the test can reach here (${e.message}): 「无缝更新」 is done by the test as the button does it (install.rs replace_portable), not clicked\n`);
+        click = "test";
+      }
+    }
     const readyNew = click === "test" ? join(work, "ready-new.json") : null;
 
     if (click === "window") {
-      page = await openWindow(OLD, { port, dirs, since: startedAt, proc: app });
       step(`click 「无缝更新」 in ${OLD}'s window, with the user's files next to it`);
       await clickSeamless(page);
       const refusal = await until("the swap to refuse the folder with the user's files", () => {
@@ -646,7 +673,7 @@ async function portable() {
       await until(`${OLD} to quit`, async () => {
         if (app.exited) return true;
         // OLD unpacks again and starts the swap: when it can't, its card says why and it runs on
-        const said = await page.evaluate(CARD_ERROR).catch(() => "");
+        const said = await page.evaluate(CARD_ERROR, { tries: 1 }).catch(() => "");
         if (said && said !== errorBefore) throw new Error(`${OLD}'s second attempt did not start the update: ${said}`);
         return false;
       }, 120_000);
@@ -854,17 +881,35 @@ async function nsis() {
     const ready = join(work, "ready.json");
     const port = await freePort();
     const extra = webview2Env(port);
+    webview2Policy(port);
     const startedAt = Date.now();
     const app = start(program, [], appEnv(feed.url, ready, extra));
     const old = await oldRuns(ready, app, "nsis");
-    await expectFound(old.session, feed);
+    const file = await expectFound(old.session, feed);
     old.session.close();
-    step(`click 「无缝更新」 in ${OLD}'s window`);
-    const page = await openWindow(OLD, { port, dirs: [shellDir], since: startedAt, proc: app });
+    let page = null;
+    try {
+      page = await openWindow(OLD, { port, dirs: [shellDir], since: startedAt, proc: app, timeout: 60_000 });
+    } catch (e) {
+      if (app.exited) throw e;
+      console.log(`\n!! ${OLD}'s window has no DevTools port the test can reach here (${e.message}): 「无缝更新」 is done by the test as the button does it (install.rs), not clicked\n`);
+    }
     const clickedAt = Date.now();
-    await clickSeamless(page);
+    // the test's 「无缝更新」: the ready file goes to the installer, which starts NEW with its environment
+    const readyNew = page ? null : join(work, "ready-new.json");
+    if (page) {
+      step(`click 「无缝更新」 in ${OLD}'s window`);
+      await clickSeamless(page);
+    } else {
+      // install.rs Step::Silent: the downloaded installer with 0.3.4's arguments (nsis_update_args;
+      // the folder is under LOCALAPPDATA), started on its own, then the app quits
+      const argv = ["--updated", "/S", "--force-run", "/currentuser"];
+      step(`「无缝更新」 as ${OLD}'s button does it: ${basename(file)} ${argv.join(" ")}, then ${OLD} quits`);
+      spawn(file, argv, { cwd: dirname(program), detached: true, stdio: "ignore", env: appEnv(feed.url, readyNew, extra) }).unref();
+      stop(app.pid);
+    }
     await until(`${OLD} to quit`, () => app.exited, 90_000);
-    page.close();
+    page?.close();
     console.log(`${OLD} quit: ${JSON.stringify(app.exited)}`);
 
     step(`${NEW}'s installer, started by ${OLD}, then ${NEW}`);
@@ -872,7 +917,12 @@ async function nsis() {
     started.add(main.pid);
     console.log(`${NEW} started by the installer: ${main.pid} ${main.cmd}`);
     await until("the installer to end", () => !processesUnder([updates]).some((p) => /-Setup-/i.test(p.cmd)), 120_000);
-    const back = await newBackend({ feed, main, port, dirs: [shellDir], since: clickedAt, program, extra });
+    let back;
+    if (readyNew) {
+      const info = await readyOf(readyNew, null, `${NEW} to start (the ready file the installer handed it)`, 120_000, [old.info.pid]);
+      started.add(info.pid);
+      back = { info, session: await hello(info.url, info.token), how: "ready file" };
+    } else back = await newBackend({ feed, main, port, dirs: [shellDir], since: clickedAt, program, extra });
 
     step(`${NEW} is installed over ${OLD}`);
     await expectNew(back.session, "nsis");
@@ -929,23 +979,36 @@ async function nsis() {
 
 // ------------------------------------------------------------------ the AppImage
 
-/** The AppImage's app processes started with --updated: the program its AppRun starts (its
- * environment names `target` as its APPIMAGE), not Chromium's --type= processes. */
+/** The AppImage's app started with --updated: the program in its mount (`spaceknife`, not
+ * Chromium's --type= processes) whose parent or child is the AppImage's runtime (the process whose
+ * command line still names `target`, serving the mount), the runtime last. Not by the program's
+ * environment: Chromium writes its process title over it. */
 function appImageApps(target) {
-  const out = [];
+  const all = [];
   for (const d of readdirSync("/proc")) {
     const pid = Number(d);
     if (!pid || pid === process.pid) continue;
     try {
       const cmd = readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim();
-      if (!/(^|\s)--updated(\s|$)/.test(cmd) || /--type=/.test(cmd)) continue;
-      if (readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").includes(`APPIMAGE=${target}`)) out.push({ pid, cmd });
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      all.push({ pid, cmd, ppid: Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]) });
     } catch {
       // another user's, or gone
     }
   }
-  // the program itself before a script that runs it
-  return out.sort((a, b) => (basename(argv0(b.cmd)) === "spaceknife") - (basename(argv0(a.cmd)) === "spaceknife"));
+  const updated = (p) => /(^|\s)--updated(\s|$)/.test(p.cmd) && !/--type=/.test(p.cmd);
+  const runtimes = all.filter((p) => updated(p) && argv0(p.cmd) === target);
+  const parent = new Map(all.map((p) => [p.pid, p.ppid]));
+  const up = (pid) => {
+    const out = [];
+    for (let i = 0; i < 5 && parent.get(pid) > 1; i++) out.push((pid = parent.get(pid)));
+    return out;
+  };
+  // the runtime's ancestors (it may serve the mount as a child of the program) and descendants
+  const above = new Set(runtimes.flatMap((r) => up(r.pid)));
+  const runtime = new Set(runtimes.map((r) => r.pid));
+  const apps = all.filter((p) => updated(p) && basename(argv0(p.cmd)) === "spaceknife" && !runtime.has(p.pid) && (above.has(p.pid) || up(p.pid).some((a) => runtime.has(a))));
+  return [...apps, ...runtimes];
 }
 
 async function appimage() {
@@ -972,7 +1035,7 @@ async function appimage() {
     await clickSeamless(page);
     await until(`${OLD} to quit`, async () => {
       if (app.exited) return true;
-      const said = await page.evaluate(CARD_ERROR).catch(() => "");
+      const said = await page.evaluate(CARD_ERROR, { tries: 1 }).catch(() => "");
       if (said) throw new Error(`${OLD} did not start the update: ${said}`);
       return false;
     }, 120_000);
@@ -1266,6 +1329,7 @@ async function cleanup() {
   if (mode === "appimage") for (const p of appImageApps(join(work, basename(oldPath)))) stop(p.pid, true);
   const left = await stopUnder([...roots]);
   if (left.length) console.log(`ended what still ran from the test's folders: ${left.map((p) => `${p.pid} ${p.cmd}`).join("; ")}`);
+  if (webview2PolicySet) spawnSync("reg.exe", ["delete", WEBVIEW2_POLICY, "/v", "SpaceKnife.exe", "/f"], { stdio: "ignore" });
 }
 
 let leaving = false;
