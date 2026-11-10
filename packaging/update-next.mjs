@@ -639,9 +639,18 @@ async function portable() {
       }, 180_000);
       seen.swapLog = refusal;
       console.log(refusal.trim());
-      await sleep(3000);
-      const said = await page.evaluate(CARD_ERROR).catch(() => "");
-      console.log(`${OLD}'s card says: ${JSON.stringify(said)}`);
+      // OLD says why on its card (「无法启动更新：…」, naming the user's files). It started its
+      // backend again, whose download state is "done" only once it has checked the file again
+      // (its first check, a minute after the start): until then the card shows the download, not
+      // the reason; how long that took is in the log
+      const refusedAt = Date.now();
+      const said = await until(`${OLD}'s card to say why it did not update`, async () => {
+        const text = await page.evaluate(CARD_ERROR).catch(() => "");
+        return text.includes("e2e-notes.txt") && text.includes(basename(foreign[1])) ? text : null;
+      }, 180_000, 1000).catch(async (e) => {
+        throw new Error(`${e.message}: the card says ${JSON.stringify(await page.evaluate("(document.querySelector('.update-card') || {}).innerText || null").catch(() => null))}`);
+      });
+      console.log(`${OLD}'s card says, ${Math.round((Date.now() - refusedAt) / 1000)} s after the refusal: ${JSON.stringify(said)}`);
     } else {
       step(`「无缝更新」 as ${OLD}'s button does it (src-tauri install.rs replace_portable), with the user's files next to it`);
       swap = shellSwap({ app, folder, updates, file, electron, env: appEnv(feed.url, readyNew, extra) });
