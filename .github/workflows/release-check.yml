@@ -61,7 +61,7 @@ jobs:
           pipx install uv==0.8.4
           mkdir -p "$RUNNER_TEMP/v034"
           git archive --format=tar v0.3.4 | tar -x -C "$RUNNER_TEMP/v034"
-          ~/.local/bin/uv sync --project "$RUNNER_TEMP/v034" --frozen --no-default-groups --package spaceknife-backend --python 3.12
+          "$(pipx environment --value PIPX_BIN_DIR)/uv" sync --project "$RUNNER_TEMP/v034" --frozen --no-default-groups --package spaceknife-backend --python 3.12
 
       - name: Every 0.3.4 install finds its file and checksum
         env:
