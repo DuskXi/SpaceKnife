@@ -13,6 +13,8 @@ use sk_protocol::ops::BasketItemStatus as St;
 use sk_store::testing::{Spec, build_with, d, f, find};
 use sk_store::{Col, Flags, NodeId, Store};
 
+mod fs_caps;
+
 const KB4: i64 = 4096;
 
 fn spec() -> Spec {
@@ -912,7 +914,9 @@ fn names_that_are_not_unicode_are_executed_by_their_real_path() {
     let folder = top.join("group");
     std::fs::create_dir_all(&folder).unwrap();
     if std::fs::write(top.join(&single), b"single").is_err() {
-        return; // a file system that refuses the name
+        let why = "names that are not Unicode are refused";
+        fs_caps::skip("names_that_are_not_unicode_are_executed", tmp.path(), why);
+        return;
     }
     std::fs::write(folder.join(&member), b"member").unwrap();
     std::fs::write(folder.join("plain.txt"), b"plain").unwrap();

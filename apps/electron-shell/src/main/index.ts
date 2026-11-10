@@ -9,7 +9,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { constants } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -19,10 +19,12 @@ import { BrowserWindow, Menu, app, clipboard, dialog, ipcMain, nativeTheme, prot
 
 import type { BackendState } from "../../../desktop/app/shared/api";
 import { WINDOW_BG } from "../../../desktop/app/shared/theme";
+import { appImageEnv, nodeFiles as appImageFiles, carriedSwitches, placeAppImage, startupCheck } from "./appimage";
 import { type Backend, type BackendOptions, backendEnv, cliPath, startBackend, takeReadyFile } from "./backend";
 import { headlessArgs, isStartupCheck, startupCheckAnswer } from "./cli";
 import { contentSecurityPolicy, inlineScriptHashes } from "./csp";
 import { fileIn, mimeOf } from "./files";
+import { removeTree } from "./plainfs";
 import { appBundle, portableHome, untranslocate } from "./portable";
 import { terminalCommands } from "./terminal";
 import { type Lang, mt, setLang } from "./text";
@@ -351,10 +353,11 @@ async function restartInto(start: () => Promise<void>): Promise<string> {
   return "";
 }
 
-/** Start a program on its own (it outlives the app); resolves once it runs. */
-function launch(file: string, args: string[]): Promise<void> {
+/** Start a program on its own (it outlives the app); resolves once it runs. `env`: this process's
+ *  when not given. */
+function launch(file: string, args: string[], env?: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((done, fail) => {
-    const child = spawn(file, args, { detached: true, stdio: "ignore", windowsHide: true });
+    const child = spawn(file, args, { detached: true, stdio: "ignore", windowsHide: true, env });
     child.once("error", fail);
     child.once("spawn", () => {
       child.unref();
@@ -363,33 +366,45 @@ function launch(file: string, args: string[]): Promise<void> {
   });
 }
 
-/** An AppImage: the new file takes the old one's place (a rename: the running app keeps the old
- *  file open), then the new one starts. Needs a folder the user can write to. */
+/** An AppImage (appimage.ts): the new file is copied next to $APPIMAGE and has to answer
+ *  --startup-check with the environment and switches its start gets; then it takes the old one's
+ *  place (a rename: the running app keeps the old file open), the old file stays as
+ *  $APPIMAGE.previous, and the new one starts. Needs a folder the user can write to. */
 async function replaceAppImage(file: string): Promise<string> {
   const target = process.env.APPIMAGE;
   if (!target) return mt("updateNoInstall");
-  const next = `${target}.new`;
-  try {
-    await copyFile(file, next);
-    await chmod(next, 0o755);
-    await rename(next, target);
-  } catch (err) {
-    await rm(next, { force: true });
-    return mt("updateReplaceFailed", { error: err instanceof Error ? err.message : String(err) });
+  const env = appImageEnv(process.env);
+  const switches = carriedSwitches(process.argv.slice(1));
+  const placed = await placeAppImage(file, target, appImageFiles, (program) => startupCheck(program, switches, env));
+  if (!placed.ok) {
+    console.warn(`[update] ${basename(file)} does not take the place of ${target}: ${placed.error}`);
+    return mt(placed.key, { error: placed.error });
   }
-  return restartInto(() => launch(target, ["--updated"]));
+  console.info(`[update] ${target} is the new version; the old one is ${placed.previous}`);
+  return restartInto(async () => {
+    try {
+      await launch(target, [...switches, "--updated"], env);
+    } catch (err) {
+      // it could not even be started: the old file goes back (this app goes on, restartInto)
+      await rename(placed.previous, target).catch((e: unknown) => console.warn(`[update] ${placed.previous} stays: ${String(e)}`));
+      throw err;
+    }
+  });
 }
 
 /** A portable copy: unpack the new version next to the backend's downloads, then the new version's
  *  spaceknife-cli swaps the files once the app has quit (sk_core::update::swap) and starts it again.
- *  No script: SpaceKnife's own program does it. The "data" folder stays. */
+ *  No script: SpaceKnife's own program does it. The "data" folder stays. What an earlier attempt
+ *  left in the updates folder (an unpacked Electron shell with its resources/app.asar, an undone
+ *  swap's old files) is removed with plainfs.ts: Electron's own fs can't remove a folder that holds
+ *  an .asar file. */
 async function replacePortable(file: string, updates: string): Promise<string> {
   const version = portableVersion(basename(file));
   const platform = process.platform;
   if (!version || !portable || (platform !== "win32" && platform !== "linux" && platform !== "darwin")) return mt("updateNoInstall");
   const staging = join(updates, `staging-${version}`);
   try {
-    await rm(staging, { recursive: true, force: true });
+    await removeTree(staging);
     await mkdir(staging, { recursive: true });
     await unpack(file, staging);
   } catch (err) {
@@ -423,7 +438,7 @@ async function replacePortable(file: string, updates: string): Promise<string> {
     exe,
     log: join(updates, `update-${version}.log`),
   };
-  await rm(plan.previous, { recursive: true, force: true }); // left by an attempt that was undone
+  await removeTree(plan.previous); // left by an attempt that was undone
   const planFile = join(updates, `update-${version}.json`);
   await writeFile(planFile, swapPlanJson(plan), "utf8");
   console.info(`[update] ${version} unpacked: its spaceknife-cli swaps the files once the app has quit (${planFile})`);

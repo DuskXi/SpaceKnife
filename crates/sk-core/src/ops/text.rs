@@ -59,6 +59,29 @@ pub(crate) fn trash_text(key: &str) -> &'static str {
         "error" => "操作失败：{detail}",
         "partly" => "部分内容未能删除：{detail}",
         "mount_inside" => "其中有另一个卷的挂载点，未进入",
+        "subvolume_inside" => {
+            "其中有一个 Btrfs 子卷（例如快照），未进入；它要用 btrfs subvolume delete 删除"
+        }
+        "not_empty" => {
+            "文件夹没能删除：里面还有东西（可能有程序打开着其中的文件，或删除期间又放进了新内容）"
+        }
+        "pending_inside" => {
+            "里面的内容已删除，但还有程序（如杀毒软件、预览或同步程序）打开着其中的文件，这个文件系统要等它们关闭后才真正删掉，文件夹因此没能删除；稍后再删一次即可"
+        }
+        "new_inside" => "删除期间文件夹里又放进了新内容，文件夹没有删除",
+        "read_only" => "介质是只读的（写保护或以只读方式挂载），不能改动",
+        "disk_full" => "磁盘空间已满，无法完成",
+        "io_error" => "读写磁盘出错（I/O 错误）：设备可能已断开，或这里有坏块",
+        "not_ready" => "设备已断开或还没有就绪",
+        "network" => "与网络位置的连接断开了",
+        "unsupported_fs" => "这个文件系统不支持这个操作",
+        "bad_name_fs" => "名字里有这个文件系统不接受的字符",
+        "name_too_long" => "名字或路径太长，这个文件系统处理不了",
+        "corrupt" => "文件系统有损坏，请先检查磁盘（Windows 用 chkdsk，Linux 用 fsck）",
+        "cloud" => "云同步程序（如 OneDrive）现在不允许改动它：{detail}",
+        "internal" => "内部错误：{detail}",
+        "with_detail" => "{reason}（系统的说法：{detail}）",
+        "no_bin_feature" => "这个卷不支持废纸篓，只能永久删除",
         "bad_name_inside" => "其中有名字里带路径分隔符的项，按路径找不到它，未删除",
         "moved_inside" => "删除过程中其中一项被换成了别的项或链接，未进入、未删除",
         "no_bin_remote" => "网络位置没有回收站，只能永久删除",

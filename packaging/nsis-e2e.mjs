@@ -12,6 +12,10 @@
 //
 //   node packaging/nsis-e2e.mjs <SpaceKnife-<v>-Setup-x64.exe> [--previous <older Setup-x64.exe>]
 //
+// First of all, the wizard as 0.3.4 starts it (its 「安装更新」 without 无缝更新: Node's spawn with
+// windowsHide, which puts SW_HIDE in STARTUPINFO, no arguments) must show a visible window
+// (spaceknife.nsh SkShowIfStartedHidden); it is closed again at once, before anything is installed.
+//
 // --previous installs that one first and upgrades it with this one, as an update does. The update
 // in place checks what an update of a forked installation must do: the same folder, a stale file of
 // the interface that the earlier build's list of files names gone, files the user put there (in
@@ -19,7 +23,7 @@
 // and the installer's environment. It installs into this user's profile, so
 // it refuses to run outside GitHub Actions. Exit status 1 on failure.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -77,6 +81,46 @@ function commandLine(pid) {
   return (r.stdout ?? "").trim();
 }
 
+/** The visible top-level windows of process `pid` that have a button (the wizard; not the small
+ * window NSIS may show while it checks itself): "class 'title'" each; `close`: WM_CLOSE to them. */
+function visibleWindows(pid, close = false) {
+  const script = `
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class SkWindows {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string title);
+  public static List<string> Of(int pid, bool close) {
+    var found = new List<string>();
+    EnumWindows((h, l) => {
+      int p; GetWindowThreadProcessId(h, out p);
+      if (p == pid && IsWindowVisible(h) && FindWindowExW(h, IntPtr.Zero, "Button", null) != IntPtr.Zero) {
+        var c = new StringBuilder(256); GetClassNameW(h, c, 256);
+        var t = new StringBuilder(256); GetWindowTextW(h, t, 256);
+        found.Add(c + " '" + t + "'");
+        if (close) PostMessageW(h, 0x10, IntPtr.Zero, IntPtr.Zero);
+      }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
+}
+'@
+[SkWindows]::Of(${Number(pid)}, $${close ? "true" : "false"}) | ForEach-Object { $_ }`;
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], { encoding: "utf8" });
+  return (r.stdout ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+}
+
 async function installed(what) {
   await until(`${what}: ${exe}`, () => existsSync(exe) && existsSync(uninstaller), 60_000).catch((e) => fail(`${e.message}${log()}`));
   for (const f of ["spaceknife-cli.exe", "SpaceKnife.com", join("ui", "index.html"), join("licenses", "LICENSE.txt")]) {
@@ -88,6 +132,23 @@ async function installed(what) {
   const target = existsSync(startMenu) ? shortcutTarget(startMenu) : "";
   if (resolve(target || ".").toLowerCase() !== exe.toLowerCase()) fail(`${what}: ${startMenu} points at ${target || "(missing)"}`);
   console.log(`${what}: ${readdirSync(dir).join(", ")} (uninstall entry ${entry()})`);
+}
+
+// the wizard as 0.3.4 starts it: windowsHide (SW_HIDE in STARTUPINFO), no arguments, detached
+{
+  const wizard = spawn(setup, [], { detached: true, stdio: "ignore", windowsHide: true });
+  wizard.on("error", (e) => fail(`the wizard did not start: ${e.message}`));
+  const shown = await until("a visible window of the wizard started with windowsHide", () => {
+    const w = visibleWindows(wizard.pid);
+    return w.length ? w : null;
+  }, 60_000).catch((e) => {
+    stop(wizard.pid, true);
+    fail(`${e.message}: started as 0.3.4 starts it, the wizard stays out of sight${log()}`);
+  });
+  console.log(`the wizard started with windowsHide shows: ${shown.join(", ")}`);
+  visibleWindows(wizard.pid, true);
+  await until("the wizard to close", () => !pidAlive(wizard.pid), 20_000).catch(() => stop(wizard.pid, true));
+  await until("the wizard to be gone", () => !pidAlive(wizard.pid), 10_000).catch((e) => fail(e.message));
 }
 
 if (previous) {

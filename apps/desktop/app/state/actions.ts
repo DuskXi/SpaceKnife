@@ -30,7 +30,7 @@ import {
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
 import { moveTo, placeTab, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
-import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
+import { announced, downloading, downloadOf, hasUpdate, rolledBack, seriesName, visibleSurface } from "./updates";
 import type { InstallHow } from "@/shared/install";
 import { isThemeSetting, type ThemeSetting } from "@/shared/theme";
 import { getLang, setLang, t } from "@/lib/i18n";
@@ -856,12 +856,21 @@ export async function refreshLists(): Promise<void> {
 /** Versions whose card was closed here: a status the backend sent before it heard of it stays closed. */
 const closedVersions = new Set<string>();
 
+/** An undone update said in a toast, for want of a card (no newer release known to hang it on). */
+let rollbackToasted = false;
+
 /** A status from the backend (an answer, or update.changed). A download that ends while no update
- * card is on screen says so in a toast; the badge shows the rest. */
+ * card is on screen says so in a toast; the badge shows the rest. An update that was undone shows
+ * on its card (state/updates.ts rolledBack); without a release for the card, in a toast once. */
 function applyUpdateStatus(next: UpdateStatus): void {
-  if (next.latest && !next.dismissed && closedVersions.has(next.latest.version)) next = { ...next, dismissed: true };
+  if (next.latest && closedVersions.has(next.latest.version) && (!next.dismissed || next.rollback)) next = { ...next, dismissed: true, rollback: null };
+  if (next.rollback && !hasUpdate(next) && !rollbackToasted) {
+    rollbackToasted = true;
+    toast(t("更新没有完成：{reason}", { reason: next.rollback.reason }), 8000);
+    void updateCall("update.dismiss", { version: next.rollback.version });
+  }
   const before = downloadOf(get().update);
-  set((s) => ({ update: next, updateOpen: s.updateOpen && announced(next) }));
+  set((s) => ({ update: next, updateOpen: s.updateOpen && (announced(next) || rolledBack(next)) }));
   const after = downloadOf(next);
   if (!downloading(before) || downloading(after) || visibleSurface(next, get().updateOpen) !== "none") return;
   if (after.state === "done") toast(t("SpaceKnife {version} 已下载", { version: after.version ?? "" }));
@@ -909,13 +918,13 @@ export function showUpdate(): Promise<void> {
 }
 
 /** Close the update card or dialog (×, Esc, 「以后再说」): neither opens by itself again for this
- * version; the badge stays. */
+ * version; the badge stays. The note of an undone update it showed goes with it. */
 export function closeUpdate(): void {
   const st = get().update;
-  set({ updateOpen: false });
-  if (!hasUpdate(st) || st.dismissed) return;
+  set({ updateOpen: false, updateInstallError: null });
+  if (!hasUpdate(st) || (st.dismissed && !st.rollback)) return;
   closedVersions.add(st.latest.version);
-  set({ update: { ...st, dismissed: true } }); // closed at once, whatever the backend answers
+  set({ update: { ...st, dismissed: true, rollback: null } }); // closed at once, whatever the backend answers
   void updateCall("update.dismiss", { version: st.latest.version });
 }
 
@@ -938,9 +947,13 @@ export const downloadUpdate = (version: string) => updateCall("update.download",
 export const cancelUpdate = () => updateCall("update.cancel", {});
 
 /** One of the card's two big buttons: 「无缝更新」 or the classic way (shared/install.ts). Main does it
- * (main/index.ts installUpdate); the app quits once that has started, else the reason is shown. Only
- * ever from a click: nothing installs by itself. */
+ * (main/index.ts installUpdate); the app quits once that has started, else the reason is shown: in
+ * a toast, and on the card until the next click or until it is closed. Only ever from a click:
+ * nothing installs by itself. */
 export async function installUpdate(path: string, how: InstallHow): Promise<void> {
+  set({ updateInstallError: null });
   const reason = await window.sk.update.install(path, how);
-  if (reason) toast(reason);
+  if (!reason) return;
+  set({ updateInstallError: reason });
+  toast(reason);
 }

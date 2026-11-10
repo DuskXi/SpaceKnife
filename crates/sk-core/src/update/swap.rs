@@ -5,13 +5,21 @@
 //! executable with `--apply-update <plan>`, detached, just before it quits. That process then
 //! ([`main`]):
 //!
-//! 1. says `{"ok": true}` on stdout once the plan is usable and the new version's program starts
-//!    on this machine ([`startup_check`]: its libraries load, the web view's runtime is there), and
-//!    lets go of its stdio. Otherwise it says `{"ok": false, "error": …}` and nothing is touched:
-//!    the app waits for this line, shows the error (「无法启动更新」) and goes on as it was;
+//! 1. says `{"ok": true}` on stdout once the plan is usable, the app folder holds nothing but
+//!    SpaceKnife's own entries, `data` and the system's files ([`sort_names`]: the names of every
+//!    published portable layout, [`own_names`], and the new version's; a folder with a name others
+//!    use too, such as `resources`, only with SpaceKnife's contents, [`Plan::survey`]), and the new version's
+//!    program starts on this machine ([`startup_check`]: its libraries load, the web view's
+//!    runtime is there), and lets go of its stdio. Otherwise it says `{"ok": false, "error": …}`
+//!    in the user's language and nothing is touched: the app waits for this line, shows the error
+//!    (「无法启动更新」) and goes on as it was. On Windows a new version that can't start explains
+//!    why in a window of its own first ([`STARTUP_PROBLEM`]). Only the `.asar` files of the
+//!    unpacked new version go, before the answer, so that the app can remove it before its next
+//!    attempt ([`leave_removable`]; also whenever the old version stays after the answer);
 //! 2. waits for the app's main process to exit;
-//! 3. moves the app folder's entries, except `data`, to the plan's `old` folder, trying again while
-//!    files are still held (the closing app's own helpers, a virus scanner);
+//! 3. moves SpaceKnife's own entries of the app folder to the plan's `old` folder (never `data`,
+//!    never the system's files or anything else), trying again while files are still held (the
+//!    closing app's own helpers, a virus scanner);
 //! 4. moves the new version's entries into the app folder. This process runs from among them: what
 //!    can't be moved at once (Windows doesn't rename a folder with a running program in it) moves
 //!    piece by piece, and is copied where even that fails;
@@ -24,7 +32,9 @@
 //!    starts, provided the old files are all still there (once the new version runs, it clears
 //!    them from the updates folder). Ending with 0 is the new version's own choice.
 //!
-//! Every step is written to the plan's log. The plan is a contract with every older version: an
+//! Whenever the old version is kept or comes back after the app has quit, a note says so
+//! ([`rollback`]: `rollback-<version>.json` next to the log), which the old version shows when it
+//! starts. Every step is written to the plan's log. The plan is a contract with every older version: an
 //! app hands its plan to the *newer* version, so later helpers keep reading `v: 1`.
 
 use std::collections::BTreeMap;
@@ -35,6 +45,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+
+use super::rollback;
+use crate::i18n::{self, Arg, Language};
 
 pub const PLAN_VERSION: i64 = 1;
 /// The app quits right after starting this.
@@ -161,6 +174,57 @@ impl Plan {
         within(&self.app, &self.exe)
             .map_or_else(|| self.exe.clone(), |inside| self.new.join(inside))
     }
+
+    /// The names that stay where they are: the plan's `keep`, and `data` whatever the plan says.
+    pub fn kept(&self) -> Vec<String> {
+        let mut out = self.keep.clone();
+        if !out.iter().any(|k| name_case(k) == name_case("data")) {
+            out.push("data".to_owned());
+        }
+        out
+    }
+
+    /// The new version's top-level names (the kept ones left out: the archive's own `data` folder
+    /// stays where it was unpacked).
+    pub fn new_names(&self) -> io::Result<Vec<OsString>> {
+        let kept: Vec<String> = self.kept().iter().map(|k| name_case(k)).collect();
+        Ok(names_in(&self.new)?
+            .into_iter()
+            .filter(|n| !kept.contains(&name_case(&n.to_string_lossy())))
+            .collect())
+    }
+
+    /// The app folder sorted out ([`sort_names`]) on this system.
+    pub fn survey(&self) -> io::Result<Folder> {
+        self.survey_on(std::env::consts::OS)
+    }
+
+    /// [`Plan::survey`] with the published layouts of system `os` (tests). A folder named as one
+    /// of SpaceKnife's that other programs and people use too ([`GENERIC_NAMES`]) is SpaceKnife's
+    /// only when it holds what SpaceKnife's does ([`holds_what_spaceknifes_does`]); else it is
+    /// foreign.
+    pub fn survey_on(&self, os: &str) -> io::Result<Folder> {
+        let exe_top = within(&self.app, &self.exe)
+            .and_then(|rel| rel.iter().next().map(std::ffi::OsStr::to_owned));
+        let mut folder = sort_names(
+            &names_in(&self.app)?,
+            &self.kept(),
+            &self.new_names()?,
+            exe_top.as_deref(),
+            os,
+        );
+        let (own, other): (Vec<OsString>, Vec<OsString>) =
+            std::mem::take(&mut folder.own).into_iter().partition(|n| {
+                !generic_name(&n.to_string_lossy(), os)
+                    || holds_what_spaceknifes_does(&self.app.join(n), &self.new.join(n), n, os)
+            });
+        folder.own = own;
+        if !other.is_empty() {
+            folder.foreign.extend(other);
+            folder.foreign.sort();
+        }
+        Ok(folder)
+    }
 }
 
 fn normcase(p: &Path) -> String {
@@ -198,6 +262,294 @@ fn name_case(name: &str) -> String {
     } else {
         name.to_owned()
     }
+}
+
+// ---------------------------------------------------------------- what is SpaceKnife's
+
+/// The top-level names of every portable copy SpaceKnife has published for Windows, read from the
+/// release archives themselves: 0.3.1–0.3.4 (`SpaceKnife-<v>-win-<x64|arm64>-portable.zip`, the
+/// Electron 44 app with its Python backend in `resources`; `SpaceKnife.com` since 0.3.3; 0.3.0 had
+/// no portable copy) and 0.3.5 (the Tauri app, apps/desktop/scripts/portable.mjs). The list only
+/// grows: a later version adds its own names and keeps these, so that it can still replace a copy of
+/// any earlier layout, also one that was unpacked over another by hand.
+pub const WINDOWS_OWN: &[&str] = &[
+    // 0.3.1–0.3.4
+    "chrome_100_percent.pak",
+    "chrome_200_percent.pak",
+    "d3dcompiler_47.dll",
+    "dxcompiler.dll",
+    "dxil.dll",
+    "ffmpeg.dll",
+    "icudtl.dat",
+    "LICENSE.electron.txt",
+    "LICENSES.chromium.html",
+    "locales",
+    "resources",
+    "resources.pak",
+    "snapshot_blob.bin",
+    "SpaceKnife.com",
+    "SpaceKnife.exe",
+    "v8_context_snapshot.bin",
+    "vk_swiftshader.dll",
+    "vk_swiftshader_icd.json",
+    "vulkan-1.dll",
+    // 0.3.5
+    "licenses",
+    "spaceknife-cli.exe",
+    "ui",
+];
+
+/// [`WINDOWS_OWN`] for Linux: 0.3.1–0.3.4 (`SpaceKnife-<v>-linux-<x64|arm64>-portable.tar.gz`, the
+/// same Electron 44 app) and 0.3.5's two copies (the Electron shell's under 0.3.4's name, which adds
+/// `spaceknife-cli`; the Tauri app's `-tauri.tar.gz`).
+pub const LINUX_OWN: &[&str] = &[
+    // 0.3.1–0.3.4
+    "chrome-sandbox",
+    "chrome_100_percent.pak",
+    "chrome_200_percent.pak",
+    "chrome_crashpad_handler",
+    "icudtl.dat",
+    "libffmpeg.so",
+    "libvk_swiftshader.so",
+    "libvulkan.so.1",
+    "LICENSE.electron.txt",
+    "LICENSES.chromium.html",
+    "locales",
+    "resources",
+    "resources.pak",
+    "snapshot_blob.bin",
+    "spaceknife",
+    "v8_context_snapshot.bin",
+    "vk_swiftshader_icd.json",
+    // 0.3.5
+    "licenses",
+    "spaceknife-cli",
+    "ui",
+];
+
+/// [`WINDOWS_OWN`] for macOS: 0.3.4 and 0.3.5 (`SpaceKnife-<v>-mac-<arch>-portable.zip`): the app
+/// bundle next to `data`.
+pub const MACOS_OWN: &[&str] = &["SpaceKnife.app"];
+
+/// The names of SpaceKnife's own portable copies on a system (`std::env::consts::OS`).
+pub fn own_names(os: &str) -> &'static [&'static str] {
+    match os {
+        "windows" => WINDOWS_OWN,
+        "macos" => MACOS_OWN,
+        "linux" => LINUX_OWN,
+        _ => &[],
+    }
+}
+
+/// The names of [`own_names`] that other programs and people use for folders of their own (a
+/// folder of the user's called `resources` or `ui` on the desktop next to the app): an entry so
+/// named is SpaceKnife's only when it holds what SpaceKnife's does ([`holds_what_spaceknifes_does`]).
+pub const GENERIC_NAMES: &[&str] = &["licenses", "locales", "resources", "ui"];
+
+/// What SpaceKnife's `resources` folder held in each published layout, read from the release
+/// archives: 0.3.1–0.3.4 `app.asar`, `backend` (the Python backend), `licenses` and on Windows
+/// `elevate.exe`; 0.3.5's Electron shell `app.asar`, `backend`, `ui`, `licenses`; the Tauri app's
+/// `backend` (the swap helper every 0.3.x copy runs, which every later layout keeps). Only grows.
+const RESOURCES_HELD: &[&str] = &[
+    "app.asar",
+    "app.asar.unpacked",
+    "backend",
+    "elevate.exe",
+    "licenses",
+    "ui",
+];
+/// What the Tauri app's `licenses` folder holds (apps/desktop/scripts/prepare-bundle.mjs). Only
+/// grows.
+const LICENSES_HELD: &[&str] = &["LICENSE.txt", "THIRD-PARTY-rust.txt", "THIRD-PARTY-ui.txt"];
+
+/// Whether `name` is one of [`GENERIC_NAMES`] (on Windows in any case).
+fn generic_name(name: &str, os: &str) -> bool {
+    GENERIC_NAMES.iter().any(|g| {
+        if os == "windows" {
+            g.eq_ignore_ascii_case(name)
+        } else {
+            *g == name
+        }
+    })
+}
+
+/// Whether `entry`, an entry of the app folder named `name` (one of [`GENERIC_NAMES`]), is
+/// SpaceKnife's own: a folder (not a link) that is empty or holds, besides the system's files,
+/// only what SpaceKnife's folder of that name holds — `locales`: Electron's `*.pak` files;
+/// `resources`: [`RESOURCES_HELD`]; `licenses`: [`LICENSES_HELD`]; for those two also whatever the
+/// new version's folder of that name (`new`) holds — and `ui` holds the generated interface
+/// (`index.html` with Nuxt's `_nuxt`, or `index.html` and another entry of the new version's
+/// `ui`). Anything else is the user's: a folder of their own with that name, or SpaceKnife's with
+/// their files merged into it. Only its own entries are looked at, not deeper.
+pub fn holds_what_spaceknifes_does(
+    entry: &Path,
+    new: &Path,
+    name: &std::ffi::OsStr,
+    os: &str,
+) -> bool {
+    let fold = |s: &str| {
+        if os == "windows" {
+            s.to_lowercase()
+        } else {
+            s.to_owned()
+        }
+    };
+    if !std::fs::symlink_metadata(entry).is_ok_and(|m| m.is_dir()) {
+        return false;
+    }
+    let Ok(inside) = names_in(entry) else {
+        return false;
+    };
+    let inside: Vec<(String, bool)> = inside
+        .iter()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !system_file(n))
+        .map(|n| {
+            let file = std::fs::symlink_metadata(entry.join(&n)).is_ok_and(|m| m.is_file());
+            (fold(&n), file)
+        })
+        .collect();
+    if inside.is_empty() {
+        return true; // nothing in it to lose
+    }
+    let theirs: Vec<String> = names_in(new)
+        .unwrap_or_default()
+        .iter()
+        .map(|n| fold(&n.to_string_lossy()))
+        .collect();
+    let held =
+        |list: &[&str], n: &str| list.iter().any(|k| fold(k) == n) || theirs.iter().any(|t| t == n);
+    let has = |n: &str| inside.iter().any(|(i, _)| *i == fold(n));
+    match fold(&name.to_string_lossy()).as_str() {
+        "locales" => inside
+            .iter()
+            .all(|(n, file)| *file && n.to_ascii_lowercase().ends_with(".pak")),
+        "resources" => inside.iter().all(|(n, _)| held(RESOURCES_HELD, n)),
+        "licenses" => inside.iter().all(|(n, _)| held(LICENSES_HELD, n)),
+        "ui" => {
+            has("index.html")
+                && (has("_nuxt")
+                    || inside
+                        .iter()
+                        .any(|(n, _)| *n != fold("index.html") && theirs.contains(n)))
+        }
+        _ => true,
+    }
+}
+
+/// What a system puts into folders by itself (Finder's and Explorer's view settings, thumbnails,
+/// a volume's own folders when the copy is at the top of a drive): never SpaceKnife's, but nothing
+/// a user keeps there either. They stay where they are and don't stand in the way of an update.
+const SYSTEM_FILES: &[&str] = &[
+    ".DS_Store",
+    ".localized",
+    "Icon\r",
+    ".fseventsd",
+    ".Spotlight-V100",
+    ".Trashes",
+    ".TemporaryItems",
+    ".DocumentRevisions-V100",
+    ".VolumeIcon.icns",
+    ".apdisk",
+    ".directory",
+    "lost+found",
+    "desktop.ini",
+    "Thumbs.db",
+    "ehthumbs.db",
+    "System Volume Information",
+    "$RECYCLE.BIN",
+];
+
+/// Whether `name` is one of [`SYSTEM_FILES`] (in any case), a macOS AppleDouble file (`._…`, which
+/// it keeps next to a file on a drive without extended attributes) or a desktop's trash at the top
+/// of a drive (`.Trash-1000`).
+pub fn system_file(name: &str) -> bool {
+    SYSTEM_FILES.iter().any(|s| s.eq_ignore_ascii_case(name))
+        || name.starts_with("._")
+        || name.starts_with(".Trash-")
+}
+
+/// The entries of a portable copy's folder, sorted out ([`sort_names`]); the kept ones (`data`)
+/// are in none of the lists.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Folder {
+    /// SpaceKnife's own: they move out and the new version's come in
+    pub own: Vec<OsString>,
+    /// the system's ([`system_file`]): they stay where they are
+    pub system: Vec<OsString>,
+    /// anything else: the user's. No update moves or deletes them; while there is any, the swap
+    /// does not start
+    pub foreign: Vec<OsString>,
+}
+
+impl Folder {
+    /// The names of `list`, at most `max` of them, for a message ("a, b, c").
+    pub fn names(list: &[OsString], max: usize) -> Vec<String> {
+        list.iter()
+            .take(max)
+            .map(|n| n.to_string_lossy().into_owned())
+            .collect()
+    }
+}
+
+/// Sort out a portable copy's folder by the names of its entries (`names`), on system `os`
+/// (`std::env::consts::OS`; Windows compares names in any case): the kept ones (`keep`, and `data`
+/// always: the user's data never moves) are left out; SpaceKnife's own are the names of its
+/// published layouts ([`own_names`]), the new version's top-level names (`new_names`) and the entry
+/// that holds the app's executable (`exe_top`, a renamed app bundle); then the system's files;
+/// anything else is foreign. Each list keeps the order of `names`.
+pub fn sort_names(
+    names: &[OsString],
+    keep: &[String],
+    new_names: &[OsString],
+    exe_top: Option<&std::ffi::OsStr>,
+    os: &str,
+) -> Folder {
+    let fold = |s: &str| {
+        if os == "windows" {
+            s.to_lowercase()
+        } else {
+            s.to_owned()
+        }
+    };
+    let kept: Vec<String> = keep
+        .iter()
+        .map(String::as_str)
+        .chain(["data"])
+        .map(fold)
+        .collect();
+    let own: Vec<String> = own_names(os)
+        .iter()
+        .map(|n| fold(n))
+        .chain(new_names.iter().map(|n| fold(&n.to_string_lossy())))
+        .chain(exe_top.map(|n| fold(&n.to_string_lossy())))
+        .collect();
+    let mut out = Folder::default();
+    for name in names {
+        let text = name.to_string_lossy();
+        let folded = fold(&text);
+        if kept.contains(&folded) {
+            continue;
+        }
+        if own.contains(&folded) {
+            out.own.push(name.clone());
+        } else if system_file(&text) {
+            out.system.push(name.clone());
+        } else {
+            out.foreign.push(name.clone());
+        }
+    }
+    out
+}
+
+/// The names of a folder's entries, sorted.
+fn names_in(folder: &Path) -> io::Result<Vec<OsString>> {
+    let mut out: Vec<OsString> = std::fs::read_dir(folder)?
+        .filter_map(Result::ok)
+        .map(|e| e.file_name())
+        .collect();
+    out.sort();
+    Ok(out)
 }
 
 /// One timestamped line per step in the plan's log file (never fails).
@@ -330,12 +682,34 @@ pub fn move_out_with(
     timeout: Duration,
     rename: Rename<'_>,
 ) -> io::Result<()> {
+    let names: Vec<OsString> = entries(src, keep)?
+        .iter()
+        .map(|e| e.file_name().unwrap_or_default().to_owned())
+        .collect();
+    move_these_with(src, dst, &names, log, timeout, rename)
+}
+
+/// Move the entries of `src` named `names` (and nothing else) into `dst`, as [`move_out_with`]
+/// does: trying again while one is held, putting back what moved when one can't. A name that is
+/// not there (any more) is skipped.
+pub fn move_these_with(
+    src: &Path,
+    dst: &Path,
+    names: &[OsString],
+    log: &Log,
+    timeout: Duration,
+    rename: Rename<'_>,
+) -> io::Result<()> {
     std::fs::create_dir_all(dst)?;
     let mut moved: Vec<OsString> = Vec::new();
     let deadline = Instant::now() + timeout;
     let result = (|| {
-        for entry in entries(src, keep)? {
-            let name = entry.file_name().unwrap_or_default().to_owned();
+        for name in names {
+            let entry = src.join(name);
+            if std::fs::symlink_metadata(&entry).is_err() {
+                continue;
+            }
+            let name = name.clone();
             let mut said = false;
             loop {
                 match rename(&entry, &dst.join(&name)) {
@@ -415,12 +789,14 @@ pub fn place_with(src: &Path, dst: &Path, rename: Rename<'_>) -> io::Result<()> 
     Ok(())
 }
 
-/// Remove `folder`'s entries except `keep` (taking out new files that only partly arrived).
-pub fn clear(folder: &Path, keep: &[String], log: &Log) {
-    let Ok(list) = entries(folder, keep) else {
-        return;
-    };
-    for entry in list {
+/// Remove `folder`'s entries named `names` (taking out new files that only partly arrived); nothing
+/// else in it is touched.
+pub fn clear(folder: &Path, names: &[OsString], log: &Log) {
+    for name in names {
+        let entry = folder.join(name);
+        if std::fs::symlink_metadata(&entry).is_err() {
+            continue;
+        }
         let is_dir = std::fs::symlink_metadata(&entry).is_ok_and(|m| m.is_dir());
         let r = if is_dir {
             std::fs::remove_dir_all(&entry)
@@ -434,6 +810,220 @@ pub fn clear(folder: &Path, keep: &[String], log: &Log) {
             ));
         }
     }
+}
+
+// ---------------------------------------------------------------- an unpacked version left behind
+
+/// How long taking the `.asar` files out of an unpacked new version may take ([`leave_removable`]).
+/// Before a refusal this is time the app waits for the answer: 0.3.4 gives the helper 30 s for it
+/// (v0.3.4 index.ts startSwap), the startup check up to [`STARTUP_CHECK_TIMEOUT`] of them.
+pub const ASAR_BUDGET: Duration = Duration::from_secs(3);
+/// At most this many entries are looked at (the Electron shell's portable copy has a few hundred).
+const ASAR_ENTRIES: usize = 100_000;
+
+/// What a plan says of where things are, to tell the new version an app unpacked
+/// ([`unpacked_by_the_app`]).
+#[derive(Clone, Copy, Debug)]
+pub struct PlanPlaces<'a> {
+    /// the plan's log
+    pub log: &'a Path,
+    /// the plan itself, when its path is known
+    pub plan: Option<&'a Path>,
+    /// the copy's folder, when known
+    pub app: Option<&'a Path>,
+}
+
+impl<'a> PlanPlaces<'a> {
+    pub fn of(plan: &'a Plan, file: Option<&'a Path>) -> PlanPlaces<'a> {
+        PlanPlaces {
+            log: &plan.log,
+            plan: file,
+            app: Some(&plan.app),
+        }
+    }
+}
+
+/// The new version unpacked by an older app, its top folder: `<updates>/staging-<…>/<folder>`,
+/// `updates` being the folder that holds the plan's log (and the plan itself, when its path is
+/// known), as 0.3.4 and both 0.3.5 shells lay it out. `folder` must be a plain absolute path (no
+/// `.` or `..`), neither the copy's folder nor holding it, and it and its `staging-` folder real
+/// folders (no links, no junctions). Why not, when it isn't.
+pub fn unpacked_by_the_app(folder: &Path, places: PlanPlaces<'_>) -> Result<(), String> {
+    use std::path::Component;
+    let plain = folder.is_absolute()
+        && folder
+            .components()
+            .all(|c| !matches!(c, Component::CurDir | Component::ParentDir));
+    if !plain {
+        return Err(format!("{} is not a plain absolute path", folder.display()));
+    }
+    let staging = folder
+        .parent()
+        .filter(|s| {
+            s.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("staging-"))
+        })
+        .ok_or_else(|| format!("{} is not in a staging- folder", folder.display()))?;
+    let updates = staging
+        .parent()
+        .ok_or_else(|| format!("{} has no parent", staging.display()))?;
+    let beside = |file: &Path| file.parent().is_some_and(|p| same(p, updates));
+    if !beside(places.log) || places.plan.is_some_and(|p| !beside(p)) {
+        return Err(format!(
+            "{} is not the folder of the plan and its log",
+            updates.display()
+        ));
+    }
+    if let Some(app) = places.app
+        && (same(app, folder) || within(folder, app).is_some())
+    {
+        return Err(format!("{} holds the copy's folder", folder.display()));
+    }
+    for dir in [folder, staging] {
+        let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        // a junction is a link here too (FileType::is_symlink on Windows: a name surrogate)
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(format!("{} is not a folder", dir.display()));
+        }
+    }
+    Ok(())
+}
+
+/// What [`take_out_asar`] did.
+#[derive(Debug, Default)]
+pub struct AsarSweep {
+    /// removed, relative to the folder
+    pub removed: Vec<PathBuf>,
+    pub failed: Vec<(PathBuf, io::Error)>,
+    /// every entry was looked at (not stopped by the deadline or the entry limit)
+    pub whole: bool,
+}
+
+/// Whether a name is an asar archive's as Electron sees it: ending in `.asar`, in any case
+/// (Chromium's FilePath::MatchesExtension).
+fn asar_name(name: &std::ffi::OsStr) -> bool {
+    let name = name.as_encoded_bytes();
+    name.len() > b".asar".len() && name[name.len() - 5..].eq_ignore_ascii_case(b".asar")
+}
+
+/// Remove the `.asar` files in `folder`, at any depth, and nothing else: regular files named so
+/// ([`asar_name`]); folders are entered only when they are real ones (no link is followed), a
+/// folder named `….asar` (which Electron leaves alone too) and `app.asar.unpacked` stay. Stops at
+/// `deadline`.
+pub fn take_out_asar(folder: &Path, deadline: Instant) -> AsarSweep {
+    let mut out = AsarSweep::default();
+    let mut todo = vec![folder.to_owned()];
+    let mut seen = 0usize;
+    while let Some(dir) = todo.pop() {
+        let Ok(list) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in list.filter_map(Result::ok) {
+            seen += 1;
+            if seen > ASAR_ENTRIES || Instant::now() >= deadline {
+                return out;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() {
+                todo.push(path);
+            } else if kind.is_file() && asar_name(&entry.file_name()) {
+                let rel = path.strip_prefix(folder).unwrap_or(&path).to_owned();
+                match std::fs::remove_file(&path) {
+                    Ok(()) => out.removed.push(rel),
+                    Err(e) => out.failed.push((rel, e)),
+                }
+            }
+        }
+    }
+    out.whole = true;
+    out
+}
+
+/// Leave an older app a staging folder it can remove: Electron's `fs` takes an `.asar` file for a
+/// folder (the archive inside), so `rm(folder, {recursive: true})` in an Electron app fails on a
+/// folder that holds one (ENOTEMPTY on Linux, EBUSY on Windows). 0.3.4 removes its
+/// `updates/staging-<version>` that way before it unpacks an update again (v0.3.4 index.ts
+/// replacePortable, frozen), and the Electron shell's portable copy holds `resources/app.asar`:
+/// once such a version was unpacked and not put in place, every later attempt failed with
+/// 「解压失败」. So whenever the helper refuses or the old version stays, the `.asar` files of
+/// where the new version was unpacked (`folders`, those that are there) are taken out
+/// ([`take_out_asar`]), each only when it is an app's staging folder next to the plan and its
+/// log ([`unpacked_by_the_app`]); nothing else is removed. The next attempt unpacks the version
+/// anew, every shell does. Before a refusal it runs before the answer (0.3.4 ends the helper as
+/// soon as it has read it), so it is bounded by `budget`. Written to the log when there was
+/// something to do, before the line that says how the helper ended (packaging/lib.mjs
+/// swapEnding reads the last one).
+pub fn leave_removable(folders: &[&Path], places: PlanPlaces<'_>, log: &Log, budget: Duration) {
+    const SHOWN: usize = 20;
+    let deadline = Instant::now() + budget;
+    for folder in folders {
+        if std::fs::symlink_metadata(folder).is_err()
+            || unpacked_by_the_app(folder, places).is_err()
+        {
+            continue; // not there, or not an app's staging folder: left as it is
+        }
+        let mut sweep = take_out_asar(folder, deadline);
+        sweep.removed.sort();
+        if !sweep.removed.is_empty() {
+            let mut names: Vec<String> = sweep
+                .removed
+                .iter()
+                .take(SHOWN)
+                .map(|p| p.display().to_string())
+                .collect();
+            if sweep.removed.len() > SHOWN {
+                names.push(format!("… {} in all", sweep.removed.len()));
+            }
+            log.say(&format!(
+                "took {} out of {} (an Electron app can't remove a folder that holds one)",
+                names.join(", "),
+                folder.display()
+            ));
+        }
+        for (rel, e) in &sweep.failed {
+            log.say(&format!(
+                "could not take {} out of {}: {e}",
+                rel.display(),
+                folder.display()
+            ));
+        }
+        if !sweep.whole {
+            log.say(&format!(
+                "stopped looking for .asar files in {} after {} s",
+                folder.display(),
+                budget.as_secs_f64()
+            ));
+        }
+    }
+}
+
+/// [`leave_removable`] for a plan that could not be used ([`Plan::read`] failed): its `new`,
+/// when it is a version-1 plan that names one.
+fn leave_unread_plan_removable(plan_file: &Path, log: &Log) {
+    let Some(raw) = std::fs::read(plan_file)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
+        return;
+    };
+    if raw.get("v").and_then(Value::as_i64) != Some(PLAN_VERSION) {
+        return;
+    }
+    let Some(new) = raw.get("new").and_then(Value::as_str).map(PathBuf::from) else {
+        return;
+    };
+    let path = |key: &str| raw.get(key).and_then(Value::as_str).map(PathBuf::from);
+    let plan_log = path("log").unwrap_or_else(|| plan_file.with_extension("log"));
+    let app = path("app");
+    let places = PlanPlaces {
+        log: &plan_log,
+        plan: Some(plan_file),
+        app: app.as_deref(),
+    };
+    leave_removable(&[&new], places, log, ASAR_BUDGET);
 }
 
 // ---------------------------------------------------------------- starting the app
@@ -903,8 +1493,11 @@ impl Ready {
         {
             return Ok(Ready::given(Path::new(given)));
         }
+        let temp = std::env::temp_dir();
+        // what a helper that was ended while it waited left behind
+        sweep_ready_dirs(&temp, READY_LEFTOVER_AGE);
         let tag = crate::helper::auth::new_token();
-        let dir = std::env::temp_dir().join(format!("spaceknife-ready-{}", &tag[..32]));
+        let dir = temp.join(format!("{READY_DIR_PREFIX}{}", &tag[..32]));
         #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = std::fs::DirBuilder::new();
         #[cfg(unix)]
@@ -948,6 +1541,71 @@ impl Ready {
             let _ = std::fs::remove_dir_all(dir);
         }
     }
+}
+
+impl Drop for Ready {
+    /// Also when the helper ends otherwise (a panic); a helper that is killed can't, and the next
+    /// one, or the app's start, sweeps its folder away ([`sweep_ready_dirs`]).
+    fn drop(&mut self) {
+        self.done();
+    }
+}
+
+/// The name of a helper's own folder for the ready file, before its 32 hex digits.
+pub const READY_DIR_PREFIX: &str = "spaceknife-ready-";
+/// A ready file's folder this old is a leftover: a helper waits at most [`QUIT_TIMEOUT`],
+/// [`BUSY_TIMEOUT`] and [`READY_TIMEOUT`], a few minutes in all, before it removes its folder.
+pub const READY_LEFTOVER_AGE: Duration = Duration::from_secs(3600);
+
+/// Remove the ready-file folders in `temp` that a helper left when it was ended while it waited
+/// (a killed process removes nothing): only folders named as [`Ready::for_env`] names them, not
+/// links, older than `older_than`, holding nothing but the ready file (and the backend's temporary
+/// file for it); each of them is emptied file by file and removed, never as a whole. Another
+/// user's (a shared /tmp) can't be read and stays. Returns how many went.
+pub fn sweep_ready_dirs(temp: &Path, older_than: Duration) -> usize {
+    let Ok(list) = std::fs::read_dir(temp) else {
+        return 0;
+    };
+    let now = std::time::SystemTime::now();
+    let mut removed = 0;
+    for entry in list.filter_map(Result::ok) {
+        let name = entry.file_name();
+        let Some(tag) = name.to_str().and_then(|n| n.strip_prefix(READY_DIR_PREFIX)) else {
+            continue;
+        };
+        if tag.len() != 32 || !tag.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let dir = entry.path();
+        let Ok(meta) = std::fs::symlink_metadata(&dir) else {
+            continue;
+        };
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age >= older_than);
+        if !meta.is_dir() || !old {
+            continue;
+        }
+        let Ok(inside) = names_in(&dir) else {
+            continue;
+        };
+        let only_ready = inside.iter().all(|n| {
+            (n == "ready.json" || n == "ready.json.tmp")
+                && std::fs::symlink_metadata(dir.join(n)).is_ok_and(|m| m.is_file())
+        });
+        if !only_ready {
+            continue;
+        }
+        let emptied = inside
+            .iter()
+            .all(|n| std::fs::remove_file(dir.join(n)).is_ok());
+        if emptied && std::fs::remove_dir(&dir).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// Start the new version (`exe`, `args`) with [`READY_FILE_VAR`] naming the file given, to watch it.
@@ -1007,28 +1665,98 @@ pub fn run(plan: &Plan, log: &Log) -> i32 {
 pub fn run_with(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
     log.say(&format!("waiting for SpaceKnife ({}) to quit", plan.pid));
     if !(ops.wait)(plan.pid, QUIT_TIMEOUT) {
+        leave_new_removable(plan, log);
         log.say("SpaceKnife did not quit: kept the old version");
+        let detail = format!(
+            "SpaceKnife did not quit within {} s",
+            QUIT_TIMEOUT.as_secs()
+        );
+        note_rollback(plan, log, rollback::WHY_QUIT, &detail);
         return 1;
     }
-    if let Err(e) = move_out(&plan.app, &plan.old, &plan.keep, log, BUSY_TIMEOUT) {
-        log.say(&format!("could not move the old files out: {e}"));
+    // only SpaceKnife's own entries move (sort_names): the system's files, and anything that
+    // turned up since the check, stay where they are
+    let sorted = plan
+        .survey()
+        .and_then(|folder| Ok((folder, plan.new_names()?)));
+    let (folder, new_names) = match sorted {
+        Ok(found) => found,
+        Err(e) => {
+            log.say(&format!("could not read the folders: {e}"));
+            note_rollback(plan, log, rollback::WHY_READ, &e.to_string());
+            return keep_old(plan, log, ops);
+        }
+    };
+    let stay: Vec<OsString> = folder
+        .system
+        .iter()
+        .chain(&folder.foreign)
+        .cloned()
+        .collect();
+    if !stay.is_empty() {
+        log.say(&format!(
+            "left where they are: {}",
+            Folder::names(&stay, usize::MAX).join(", ")
+        ));
+    }
+    // one of them under a name of the new version (it turned up since the check): the new
+    // version can't come in without touching it, so nothing moves
+    let in_the_way: Vec<OsString> = stay
+        .iter()
+        .filter(|s| {
+            let s = name_case(&s.to_string_lossy());
+            new_names
+                .iter()
+                .any(|n| name_case(&n.to_string_lossy()) == s)
+        })
+        .cloned()
+        .collect();
+    if !in_the_way.is_empty() {
+        let detail = format!(
+            "in the way of the new version: {}",
+            Folder::names(&in_the_way, 20).join(", ")
+        );
+        log.say(&detail);
+        note_rollback(plan, log, rollback::WHY_PLACE, &detail);
         return keep_old(plan, log, ops);
     }
+    if let Err(e) = move_these_with(
+        &plan.app,
+        &plan.old,
+        &folder.own,
+        log,
+        BUSY_TIMEOUT,
+        &fs_rename,
+    ) {
+        log.say(&format!("could not move the old files out: {e}"));
+        note_rollback(plan, log, rollback::WHY_BUSY, &e.to_string());
+        return keep_old(plan, log, ops);
+    }
+    // what came in (whole or in part): only that is taken out again when a name can't come in. An
+    // entry already there under a new name stayed (it was not SpaceKnife's, or turned up since the
+    // check): it is in the way, and it is not touched
+    let mut came_in: Vec<OsString> = Vec::new();
     let placed = (|| {
-        for entry in entries(&plan.new, &plan.keep)? {
-            (ops.place)(
-                &entry,
-                &plan.app.join(entry.file_name().unwrap_or_default()),
-            )?;
+        for name in &new_names {
+            let to = plan.app.join(name);
+            if std::fs::symlink_metadata(&to).is_ok() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{} is in the way", name.to_string_lossy()),
+                ));
+            }
+            came_in.push(name.clone());
+            (ops.place)(&plan.new.join(name), &to)?;
         }
         Ok::<(), io::Error>(())
     })();
     if let Err(e) = placed {
         log.say(&format!("could not move the new files in: {e}"));
-        clear(&plan.app, &plan.keep, log);
+        clear(&plan.app, &came_in, log);
         if let Err(back) = move_out(&plan.old, &plan.app, &[], log, BUSY_TIMEOUT) {
             log.say(&format!("could not restore the old files: {back}"));
         }
+        note_rollback(plan, log, rollback::WHY_PLACE, &e.to_string());
         return keep_old(plan, log, ops);
     }
     // what the old version was, to tell afterwards whether it can still come back (the new one
@@ -1041,7 +1769,25 @@ pub fn run_with(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
         return 0;
     };
     log.say(&format!("the new version did not start: {why}"));
-    take_back(plan, log, ops, old_files)
+    take_back(plan, log, ops, old_files, &new_names, &why)
+}
+
+/// Leave the note the old version shows when it starts again ([`rollback`]): the update to the
+/// new version (the version of the plan's log, `update-<v>.log`, else this program's) was undone,
+/// and why. Written before the old version starts.
+fn note_rollback(plan: &Plan, log: &Log, why: &str, detail: &str) {
+    let Some(folder) = plan.log.parent() else {
+        return;
+    };
+    let version = plan
+        .log
+        .file_name()
+        .and_then(|n| super::update_file_version(&n.to_string_lossy()))
+        .map_or_else(|| env!("CARGO_PKG_VERSION").to_owned(), |v| v.to_string());
+    let note = rollback::Rollback::new(&version, why, detail, Some(&plan.log));
+    if let Err(e) = rollback::write(folder, &note) {
+        log.say(&format!("could not leave a note for SpaceKnife: {e}"));
+    }
 }
 
 /// Start the new version and wait until it says it runs (its ready file, within the timeout):
@@ -1124,13 +1870,15 @@ fn take_back(
     log: &Log,
     ops: &Ops<'_>,
     old_files: io::Result<Vec<(PathBuf, Option<u64>)>>,
+    new_names: &[OsString],
+    why: &str,
 ) -> i32 {
     let whole = matches!((&old_files, inventory(&plan.old)), (Ok(a), Ok(b)) if *a == b);
     if !whole {
         log.say("the old version's files are no longer all there: left the new version in place");
         return 1;
     }
-    let back = match room_for_new(plan) {
+    let back = match room_for_new(plan, new_names) {
         Ok(p) => p,
         Err(e) => {
             log.say(&format!(
@@ -1139,7 +1887,8 @@ fn take_back(
             return 1;
         }
     };
-    if let Err(e) = move_out_with(&plan.app, &back, &plan.keep, log, BUSY_TIMEOUT, &move_entry) {
+    // the new version's entries only: what else is in the folder (data, the system's files) stays
+    if let Err(e) = move_these_with(&plan.app, &back, new_names, log, BUSY_TIMEOUT, &move_entry) {
         log.say(&format!(
             "could not take the new files out: {e}: left the new version in place"
         ));
@@ -1147,7 +1896,8 @@ fn take_back(
     }
     if let Err(e) = move_out(&plan.old, &plan.app, &[], log, BUSY_TIMEOUT) {
         log.say(&format!("could not restore the old files: {e}"));
-        if let Err(again) = move_out_with(&back, &plan.app, &[], log, BUSY_TIMEOUT, &move_entry) {
+        let again = move_these_with(&back, &plan.app, new_names, log, BUSY_TIMEOUT, &move_entry);
+        if let Err(again) = again {
             log.say(&format!("could not put the new files back either: {again}"));
         } else {
             log.say("left the new version in place");
@@ -1155,26 +1905,31 @@ fn take_back(
         return 1;
     }
     log.say("took the new version out again");
+    note_rollback(plan, log, rollback::WHY_START, why);
     keep_old(plan, log, ops)
 }
 
 /// Where the new files go when the swap is undone: where they were unpacked (only the kept names,
 /// such as the archive's `data` folder, are left there), or beside it when one of them stayed
 /// there too (copied rather than moved).
-fn room_for_new(plan: &Plan) -> io::Result<PathBuf> {
-    let taken = entries(&plan.app, &plan.keep)?
-        .iter()
-        .any(|e| plan.new.join(e.file_name().unwrap_or_default()).exists());
+fn room_for_new(plan: &Plan, new_names: &[OsString]) -> io::Result<PathBuf> {
+    let taken = new_names.iter().any(|n| plan.new.join(n).exists());
     if !taken {
         return Ok(plan.new.clone());
     }
-    let mut name = plan.new.file_name().unwrap_or_default().to_owned();
-    name.push(".not-started");
-    let beside = plan.new.with_file_name(name);
+    let beside = not_started(plan);
     if beside.exists() {
         std::fs::remove_dir_all(&beside)?;
     }
     Ok(beside)
+}
+
+/// The folder beside the unpacked new version where [`room_for_new`] puts it back when its own
+/// place is taken: `<new>.not-started`.
+fn not_started(plan: &Plan) -> PathBuf {
+    let mut name = plan.new.file_name().unwrap_or_default().to_owned();
+    name.push(".not-started");
+    plan.new.with_file_name(name)
 }
 
 /// Rename `src` to `dst`; a folder that can't be renamed whole (on Windows, one holding a running
@@ -1217,12 +1972,93 @@ fn move_entry_with(src: &Path, dst: &Path, rename: Rename<'_>) -> io::Result<()>
     result
 }
 
+/// The old version stays (or came back): the new one, where it was unpacked, is left so that the
+/// app can remove it before its next attempt ([`leave_removable`]).
+fn leave_new_removable(plan: &Plan, log: &Log) {
+    let beside = not_started(plan);
+    leave_removable(
+        &[&plan.new, &beside],
+        PlanPlaces::of(plan, None),
+        log,
+        ASAR_BUDGET,
+    );
+}
+
 fn keep_old(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
+    leave_new_removable(plan, log);
     log.say("kept the old version");
     if let Err(e) = (ops.start)(&plan.exe, &[]) {
         log.say(&format!("could not start SpaceKnife: {e}"));
     }
     1
+}
+
+// ---------------------------------------------------------------- the answer, in the user's words
+
+/// The language of the copy being updated: its setting 「界面语言」 (`general.language` in
+/// `<home>/config/settings.json`, home being the folder of the plan's log's `data/updates`), else
+/// the system's ([`i18n::resolve`]). Only read: the process's language is not set.
+pub fn helper_language(plan: &Plan) -> Language {
+    let setting = plan
+        .log
+        .ancestors()
+        .nth(3)
+        .map(|home| home.join("config").join("settings.json"))
+        .and_then(|file| std::fs::read(file).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .and_then(|v| {
+            v.get("values")?
+                .get("general.language")?
+                .as_str()
+                .map(str::to_owned)
+        });
+    i18n::resolve(setting.as_deref())
+}
+
+/// `text` (a message id of the catalog) in `lang`, its fields filled in.
+fn msg_in(lang: Language, text: &str, fields: &[(&str, Arg)]) -> String {
+    i18n::format(i18n::t_in(lang, text), fields)
+}
+
+/// The answer when the copy's folder holds what is not SpaceKnife's: the first few names, and
+/// what to do. Short: 0.3.4 shows it in a toast.
+pub fn foreign_message(lang: Language, foreign: &[OsString]) -> String {
+    let shown = Folder::names(foreign, 3);
+    let mut names = shown.join(if lang == Language::En { ", " } else { "、" });
+    if foreign.len() > shown.len() {
+        names = msg_in(
+            lang,
+            "{names} 等 {count} 项",
+            &[("names", names.into()), ("count", foreign.len().into())],
+        );
+    }
+    msg_in(
+        lang,
+        "文件夹里还有不是 SpaceKnife 的东西（{names}），为了不动它们，没有更新。请把 SpaceKnife 和它的 data 文件夹单独放进一个文件夹再更新",
+        &[("names", names.into())],
+    )
+}
+
+/// The answer when the new version can't start on this computer: short (the whole reason is in
+/// the update's log); a missing or old WebView2 Runtime in plain words.
+pub fn start_message(lang: Language, why: &str) -> String {
+    if why.contains("WebView2") {
+        return msg_in(
+            lang,
+            "新版本要用 Microsoft Edge WebView2 Runtime，这台电脑上没有或者版本太旧，没有更新",
+            &[],
+        );
+    }
+    const MAX: usize = 160;
+    let mut reason: String = why.chars().take(MAX).collect();
+    if why.chars().count() > MAX {
+        reason.push('…');
+    }
+    msg_in(
+        lang,
+        "新版本在这台电脑上启动不了，没有更新：{reason}",
+        &[("reason", reason.into())],
+    )
 }
 
 fn say(out: &mut dyn Write, message: &Value) {
@@ -1274,15 +2110,71 @@ pub fn main_with(argv: &[String], out: &mut dyn Write, release: bool) -> i32 {
         let env = app_env(&std::env::vars().collect(), plan);
         startup_check(&plan.new_program(), &env, STARTUP_CHECK_TIMEOUT)
     };
-    main_checked(argv, out, release, &check)
+    main_hooked(argv, out, release, &check, &show_startup_problem)
 }
 
-/// [`main_with`] asking `check` whether the new version's program starts (replaced in tests).
+/// [`main_with`] asking `check` whether the new version's program starts (replaced in tests); no
+/// window explains a refusal.
 pub fn main_checked(
     argv: &[String],
     out: &mut dyn Write,
     release: bool,
     check: &dyn Fn(&Plan) -> Result<String, StartError>,
+) -> i32 {
+    main_hooked(argv, out, release, check, &|_, _| {})
+}
+
+/// The flag of the app's program that explains, in a window of its own, why it can't start on this
+/// computer (the Tauri app's main.rs: it asks itself again what `--startup-check` asks, then says
+/// what is missing and where to get it, in the user's language). No other arguments.
+pub const STARTUP_PROBLEM: &str = "--startup-problem";
+
+/// Windows: the new version's program explains why it can't start here ([`STARTUP_PROBLEM`]), on
+/// its own and without this helper's stdio. Started before the helper answers: 0.3.4 ends the
+/// helper as soon as it has read the answer (v0.3.4 index.ts startSwap), and its toast is gone
+/// within two seconds. Elsewhere the app's own message says it (a missing WebKitGTK is no window
+/// anyway).
+fn show_startup_problem(plan: &Plan, log: &Log) {
+    if !cfg!(windows) {
+        return;
+    }
+    let env = app_env(&std::env::vars().collect(), plan);
+    let program = plan.new_program();
+    // The helper was started by the app the user was clicking in, so it may hand the foreground
+    // on: without this the explanation can end up flashing in the taskbar behind other windows.
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
+        // SAFETY: plain Win32 call without pointers; failing only means no foreground hand-off.
+        unsafe {
+            AllowSetForegroundWindow(ASFW_ANY);
+        }
+    }
+    let started = {
+        let _quiet = ERROR_MODES.quiet();
+        spawn_detached(&program, &[STARTUP_PROBLEM], &env)
+    };
+    match started {
+        Ok(child) => log.say(&format!(
+            "{} {STARTUP_PROBLEM} explains it (pid {})",
+            program.display(),
+            child.id()
+        )),
+        Err(e) => log.say(&format!(
+            "{} {STARTUP_PROBLEM} could not be started: {e}",
+            program.display()
+        )),
+    }
+}
+
+/// [`main_checked`] with `problem` showing why the new version can't start here (on Windows
+/// [`show_startup_problem`]): called before the answer is written.
+pub fn main_hooked(
+    argv: &[String],
+    out: &mut dyn Write,
+    release: bool,
+    check: &dyn Fn(&Plan) -> Result<String, StartError>,
+    problem: &dyn Fn(&Plan, &Log),
 ) -> i32 {
     let [plan_path] = argv else {
         say(
@@ -1292,10 +2184,15 @@ pub fn main_checked(
         return 2;
     };
     let plan_path = Path::new(plan_path);
+    // every refusal below: the app can still remove the new version it unpacked (0.3.4 can't, while
+    // an .asar file is in it: leave_removable), before the answer, after which 0.3.4 ends this
+    // process at once
     let plan = match Plan::read(plan_path) {
         Ok(p) => p,
         Err(e) => {
-            Log::new(&plan_path.with_extension("log")).say(&format!("not started: {e}"));
+            let log = Log::new(&plan_path.with_extension("log"));
+            leave_unread_plan_removable(plan_path, &log);
+            log.say(&format!("not started: {e}"));
             say(
                 out,
                 &serde_json::json!({"ok": false, "error": e.to_string()}),
@@ -1304,19 +2201,67 @@ pub fn main_checked(
         }
     };
     let log = Log::new(&plan.log);
-    // before anything is touched: a version that can't start here is not put in place (no
-    // WebView2, no WebKitGTK 4.1, a missing DLL); the app goes on as it was and says why
+    let refusing = || {
+        leave_removable(
+            &[&plan.new],
+            PlanPlaces::of(&plan, Some(plan_path)),
+            &log,
+            ASAR_BUDGET,
+        );
+    };
+    // the user's language for the answer, which the app shows as it is
+    let lang = helper_language(&plan);
+    // before anything is touched: only SpaceKnife's own files are ever moved, so a folder that
+    // holds the user's things too is not updated at all (the user keeps SpaceKnife in a folder of
+    // its own, or replaces the files by hand)
+    let foreign = match plan.survey() {
+        Ok(folder) => folder.foreign,
+        Err(e) => {
+            refusing();
+            log.say(&format!(
+                "not started: can't read {}: {e}",
+                plan.app.display()
+            ));
+            let error = msg_in(
+                lang,
+                "读不了 SpaceKnife 所在的文件夹（{error}），没有更新",
+                &[("error", e.to_string().into())],
+            );
+            say(out, &serde_json::json!({"ok": false, "error": error}));
+            return 2;
+        }
+    };
+    if !foreign.is_empty() {
+        // a folder such as Downloads may hold thousands: the first ones and how many
+        const SHOWN: usize = 20;
+        let mut names = Folder::names(&foreign, SHOWN).join(", ");
+        if foreign.len() > SHOWN {
+            names.push_str(&format!(" … {} in all", foreign.len()));
+        }
+        refusing();
+        log.say(&format!(
+            "not started: {} holds what is not SpaceKnife's: {names}",
+            plan.app.display()
+        ));
+        let error = foreign_message(lang, &foreign);
+        say(out, &serde_json::json!({"ok": false, "error": error}));
+        return 2;
+    }
+    // a version that can't start here is not put in place (no WebView2, no WebKitGTK 4.1, a
+    // missing DLL); the app goes on as it was and says why
     match check(&plan) {
         Ok(said) => log.say(&format!(
             "the new version starts here ({})",
             if said.is_empty() { "no details" } else { &said }
         )),
         Err(e) => {
+            // before the answer: the app may end this helper as soon as it has read it
+            problem(&plan, &log);
+            refusing();
+            // the log's last line says how it ended (packaging/lib.mjs swapEnding)
             log.say(&format!("not started: {e}"));
-            say(
-                out,
-                &serde_json::json!({"ok": false, "error": e.to_string()}),
-            );
+            let error = start_message(lang, &e.0);
+            say(out, &serde_json::json!({"ok": false, "error": error}));
             return 2;
         }
     }
@@ -1363,7 +2308,6 @@ mod tests {
             );
             std::fs::create_dir_all(folder.join("data")).unwrap();
         }
-        write(&app.join(".hidden"), "old");
         write(&app.join("data/keep.txt"), "mine");
         write(&new.join("data/README.txt"), "the archive's note");
         write(&new.join("E2E_NEW_BUILD.txt"), "0.3.4");
@@ -1482,6 +2426,10 @@ mod tests {
     fn the_new_version_takes_the_place_of_the_old_one() {
         let tmp = tempfile::tempdir().unwrap();
         let plan = tree(tmp.path());
+        // what the system put there, and a file of the user's that turned up after the check:
+        // neither moves
+        write(&plan.app.join("desktop.ini"), "the system's");
+        write(&plan.app.join(".hidden"), "the user's");
         let started = RefCell::new(Vec::<Vec<String>>::new());
         let waited = RefCell::new(Vec::new());
         let wait = |pid: u32, _t: Duration| {
@@ -1524,16 +2472,22 @@ mod tests {
             "0.3.4"
         );
         assert!(plan.app.join("E2E_NEW_BUILD.txt").is_file());
-        assert!(!plan.app.join(".hidden").exists());
+        assert_eq!(read(&plan.app.join(".hidden")), "the user's");
+        assert_eq!(read(&plan.app.join("desktop.ini")), "the system's");
         assert_eq!(names(&plan.app.join("data")), ["data", "keep.txt"]);
-        let mut want = vec![".hidden".to_owned(), EXE.to_owned(), "resources".to_owned()];
+        let mut want = vec![EXE.to_owned(), "resources".to_owned()];
         want.sort();
         assert_eq!(names(&plan.old), want);
         assert_eq!(read(&plan.old.join(EXE)), "0.3.3");
         assert_eq!(
             log_lines(&plan),
-            ["waiting for SpaceKnife (4242) to quit", "updated"]
+            [
+                "waiting for SpaceKnife (4242) to quit",
+                "left where they are: desktop.ini, .hidden",
+                "updated"
+            ]
         );
+        assert!(rollback::read_all(plan.log.parent().unwrap()).is_empty());
     }
 
     #[test]
@@ -1564,6 +2518,15 @@ mod tests {
             log_lines(&plan).last().unwrap(),
             "SpaceKnife did not quit: kept the old version"
         );
+        assert_eq!(noted(&plan), [("0.3.4".to_owned(), "quit".to_owned())]);
+    }
+
+    /// The notes the swap left for the old version: (version, why).
+    fn noted(plan: &Plan) -> Vec<(String, String)> {
+        rollback::read_all(plan.log.parent().unwrap())
+            .into_iter()
+            .map(|(_, n)| (n.version, n.why))
+            .collect()
     }
 
     #[test]
@@ -1597,17 +2560,39 @@ mod tests {
         assert_eq!(*started.borrow(), [0]); // the old version, without --updated
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
         assert_eq!(read(&plan.app.join("resources/app.asar")), "0.3.3");
-        assert!(plan.app.join(".hidden").is_file());
         assert!(!plan.app.join("E2E_NEW_BUILD.txt").exists());
         assert!(plan.app.join("data/keep.txt").is_file());
+        // what did not move in stays where it was unpacked, but for its .asar files: 0.3.4 can
+        // remove the folder before it tries again (leave_removable)
+        assert!(!plan.new.join("resources/app.asar").exists());
+        assert!(
+            plan.new
+                .join("resources/backend/_internal/python312.dll")
+                .is_file()
+        );
         let lines = log_lines(&plan);
         assert_eq!(
-            lines[lines.len() - 2..],
+            lines[lines.len() - 3..],
             [
-                "could not move the new files in: disk full",
-                "kept the old version"
+                "could not move the new files in: disk full".to_owned(),
+                took_asar(&plan.new, &["resources/app.asar"]),
+                "kept the old version".to_owned()
             ]
         );
+        assert_eq!(noted(&plan), [("0.3.4".to_owned(), "place".to_owned())]);
+    }
+
+    /// The log's line for the .asar files [`leave_removable`] took out of `folder`.
+    fn took_asar(folder: &Path, rel: &[&str]) -> String {
+        let names: Vec<String> = rel
+            .iter()
+            .map(|r| r.replace('/', std::path::MAIN_SEPARATOR_STR))
+            .collect();
+        format!(
+            "took {} out of {} (an Electron app can't remove a folder that holds one)",
+            names.join(", "),
+            folder.display()
+        )
     }
 
     #[test]
@@ -1635,12 +2620,7 @@ mod tests {
         );
         assert!(err.is_err());
         assert!(*held.borrow() >= 2); // tried again
-        let mut want = vec![
-            ".hidden".to_owned(),
-            EXE.to_owned(),
-            "data".to_owned(),
-            "resources".to_owned(),
-        ];
+        let mut want = vec![EXE.to_owned(), "data".to_owned(), "resources".to_owned()];
         want.sort();
         assert_eq!(names(&plan.app), want);
         assert!(names(&plan.old).is_empty());
@@ -1830,6 +2810,316 @@ mod tests {
         assert_eq!(main_with(&[], &mut Vec::new(), false), 2);
     }
 
+    // ------------------------------------------------------------ an unpacked version left behind
+
+    /// More of what an unpacked new version may hold: .asar files deeper down and in any case,
+    /// and what only looks like one.
+    fn asar_files(plan: &Plan) {
+        write(
+            &plan.new.join("resources/extra/deep/second.ASAR"),
+            "archive",
+        );
+        write(
+            &plan.new.join("resources/app.asar.unpacked/native.node"),
+            "unpacked",
+        );
+        write(
+            &plan.new.join("resources/folder.asar/inside.txt"),
+            "a folder",
+        );
+        write(&plan.new.join("resources/notes.asar.txt"), "text");
+    }
+
+    /// Only the .asar files are gone from the unpacked new version; the app's folder is as it was.
+    fn assert_only_asar_gone(plan: &Plan) {
+        assert!(!plan.new.join("resources/app.asar").exists());
+        assert!(!plan.new.join("resources/extra/deep/second.ASAR").exists());
+        for kept in [
+            "resources/app.asar.unpacked/native.node",
+            "resources/folder.asar/inside.txt",
+            "resources/notes.asar.txt",
+            "resources/backend/_internal/python312.dll",
+            "E2E_NEW_BUILD.txt",
+            "data/README.txt",
+        ] {
+            assert!(plan.new.join(kept).is_file(), "{kept}");
+        }
+        assert!(plan.new.join("resources/extra/deep").is_dir());
+        assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
+        assert_eq!(read(&plan.app.join("resources/app.asar")), "0.3.3");
+        assert!(!plan.old.exists());
+    }
+
+    /// A writer that notes, as the answer is written, whether `watched` is still there.
+    struct Watching {
+        watched: PathBuf,
+        there: Vec<bool>,
+        bytes: Vec<u8>,
+    }
+
+    impl Write for Watching {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.there.push(self.watched.exists());
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_refusal_leaves_a_staging_folder_the_app_can_remove() {
+        // 0.3.4 removes updates/staging-<v> with Electron's fs before it unpacks an update again,
+        // which can't remove a folder holding an .asar file (the Electron shell's portable copy has
+        // resources/app.asar): every refusal takes those files, and only those, out of the unpacked
+        // new version, before the answer (0.3.4 ends the helper as soon as it has read it)
+        for why in ["the user's files", "can't start", "bad plan"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let plan = tree(tmp.path());
+            asar_files(&plan);
+            match why {
+                "the user's files" => write(&plan.app.join("notes.txt"), "the user's"),
+                "bad plan" => std::fs::remove_file(plan.new.join(EXE)).unwrap(),
+                _ => {}
+            }
+            // where the apps write it: next to its log, in the updates folder
+            let file = write_plan(&plan, &plan.log.with_file_name("update-0.3.4.json"), &[]);
+            let mut out = Watching {
+                watched: plan.new.join("resources/app.asar"),
+                there: Vec::new(),
+                bytes: Vec::new(),
+            };
+            let code = main_hooked(
+                &[file.to_string_lossy().into_owned()],
+                &mut out,
+                false,
+                &|_| Err(StartError("no WebKitGTK 4.1".into())),
+                &|_, _| {},
+            );
+            assert_eq!(code, 2, "{why}");
+            assert!(
+                !out.there.is_empty() && out.there.iter().all(|t| !t),
+                "{why}: the .asar files go before the answer"
+            );
+            let said: Value = serde_json::from_slice(&out.bytes).unwrap();
+            assert_eq!(said["ok"], false, "{why}");
+            assert_only_asar_gone(&plan);
+            let lines = log_lines(&plan);
+            assert_eq!(
+                lines[0],
+                took_asar(
+                    &plan.new,
+                    &["resources/app.asar", "resources/extra/deep/second.ASAR"]
+                ),
+                "{why}"
+            );
+            // the last line still says how it ended (packaging/lib.mjs swapEnding)
+            assert!(
+                lines.len() == 2 && lines[1].starts_with("not started: "),
+                "{why}: {lines:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_app_that_does_not_quit_leaves_a_staging_folder_it_can_remove() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        asar_files(&plan);
+        let code = run_with(
+            &plan,
+            &Log::new(&plan.log),
+            &Ops {
+                wait: &|_, _| false,
+                start: &|_, _| panic!("it still runs"),
+                place: &place,
+                start_new: &not_watched,
+                ready: None,
+                ready_timeout: READY_TIMEOUT,
+            },
+        );
+        assert_eq!(code, 1);
+        assert_only_asar_gone(&plan);
+        let lines = log_lines(&plan);
+        assert_eq!(
+            lines[lines.len() - 2..],
+            [
+                took_asar(
+                    &plan.new,
+                    &["resources/app.asar", "resources/extra/deep/second.ASAR"]
+                ),
+                "SpaceKnife did not quit: kept the old version".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn only_an_apps_staging_folder_loses_its_asar_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let updates = plan.log.parent().unwrap().to_owned();
+        let plan_file = updates.join("update-0.3.4.json");
+        let log = Log::new(&plan.log);
+        let places = PlanPlaces::of(&plan, Some(&plan_file));
+        let gone = |folder: &Path, places: PlanPlaces<'_>| {
+            leave_removable(&[folder], places, &log, ASAR_BUDGET);
+            !folder.join("resources/app.asar").exists()
+        };
+        // not in a staging- folder
+        let other = updates.join("elsewhere").join("SpaceKnife-0.3.4-portable");
+        write(&other.join("resources/app.asar"), "x");
+        assert!(!gone(&other, places));
+        // a staging folder, but in another folder than the plan's and its log's
+        let away = tmp
+            .path()
+            .join("updates")
+            .join("staging-0.3.4")
+            .join("SpaceKnife-0.3.4-portable");
+        write(&away.join("resources/app.asar"), "x");
+        assert!(!gone(&away, places));
+        assert!(!gone(&away, PlanPlaces::of(&plan, None)));
+        // the plan, or the log, elsewhere
+        let elsewhere = tmp.path().join("update-0.3.4.json");
+        let log_elsewhere = elsewhere.with_extension("log");
+        for wrong in [
+            PlanPlaces {
+                plan: Some(&elsewhere),
+                ..places
+            },
+            PlanPlaces {
+                log: &log_elsewhere,
+                ..places
+            },
+        ] {
+            assert!(!gone(&plan.new, wrong));
+        }
+        // the copy's folder is it, or in it
+        for app in [plan.new.clone(), plan.new.join("resources")] {
+            let wrong = PlanPlaces {
+                app: Some(&app),
+                ..places
+            };
+            assert!(unpacked_by_the_app(&plan.new, wrong).is_err());
+            assert!(!gone(&plan.new, wrong));
+        }
+        // not a plain absolute path
+        let dotted = updates
+            .join("staging-0.3.4")
+            .join("..")
+            .join("staging-0.3.4")
+            .join("SpaceKnife-0.3.4-portable");
+        assert!(!gone(&dotted, places));
+        let relative = Path::new("staging-0.3.4").join("SpaceKnife-0.3.4-portable");
+        assert!(unpacked_by_the_app(&relative, places).is_err());
+        // a file, not a folder
+        let file = updates.join("staging-0.3.5").join("SpaceKnife.asar");
+        write(&file, "x");
+        leave_removable(&[&file], places, &log, ASAR_BUDGET);
+        assert!(file.is_file());
+        assert!(
+            !plan.log.exists(),
+            "nothing to say for what is left as it is"
+        );
+        // where it belongs: those files go
+        assert_eq!(unpacked_by_the_app(&plan.new, places), Ok(()));
+        assert!(gone(&plan.new, places));
+        assert_eq!(
+            log_lines(&plan),
+            [took_asar(&plan.new, &["resources/app.asar"])]
+        );
+    }
+
+    /// A link to the folder `target` at `link`: a symbolic link, on Windows a junction (made
+    /// without any privilege).
+    fn link_folder(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            let made = std::process::Command::new("cmd")
+                .arg("/C")
+                .arg("mklink")
+                .arg("/J")
+                .arg(link)
+                .arg(target)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(made.success(), "mklink /J {}", link.display());
+        }
+    }
+
+    #[test]
+    fn no_link_is_taken_for_an_apps_staging_folder_nor_followed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let updates = plan.log.parent().unwrap().to_owned();
+        let staging = plan.new.parent().unwrap().to_owned();
+        let log = Log::new(&plan.log);
+        let places = PlanPlaces::of(&plan, None);
+        // the staging folder a link to the real one, the new version's folder a link
+        let linked = updates.join("staging-linked");
+        link_folder(&staging, &linked);
+        let via = linked.join("SpaceKnife-0.3.4-portable");
+        let new_link = staging.join("SpaceKnife-linked");
+        link_folder(&plan.new, &new_link);
+        for folder in [&via, &new_link] {
+            assert!(unpacked_by_the_app(folder, places).is_err());
+            leave_removable(&[folder], places, &log, ASAR_BUDGET);
+            assert!(plan.new.join("resources/app.asar").is_file());
+        }
+        // a link inside is not followed
+        let outside = tmp.path().join("outside");
+        write(&outside.join("theirs.asar"), "theirs");
+        link_folder(&outside, &plan.new.join("resources").join("outside"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            outside.join("theirs.asar"),
+            plan.new.join("resources/linked.asar"),
+        )
+        .unwrap();
+        leave_removable(&[&plan.new], places, &log, ASAR_BUDGET);
+        assert!(!plan.new.join("resources/app.asar").exists());
+        assert_eq!(read(&outside.join("theirs.asar")), "theirs");
+        #[cfg(unix)]
+        assert!(
+            std::fs::symlink_metadata(plan.new.join("resources/linked.asar")).is_ok(),
+            "a link is no .asar file"
+        );
+        assert_eq!(
+            log_lines(&plan),
+            [took_asar(&plan.new, &["resources/app.asar"])]
+        );
+    }
+
+    #[test]
+    fn taking_out_asar_files_stops_at_its_deadline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let sweep = take_out_asar(&plan.new, Instant::now());
+        assert!(!sweep.whole && sweep.removed.is_empty() && sweep.failed.is_empty());
+        assert!(plan.new.join("resources/app.asar").is_file());
+        leave_removable(
+            &[&plan.new],
+            PlanPlaces::of(&plan, None),
+            &Log::new(&plan.log),
+            Duration::ZERO,
+        );
+        assert_eq!(
+            log_lines(&plan),
+            [format!(
+                "stopped looking for .asar files in {} after 0 s",
+                plan.new.display()
+            )]
+        );
+        let sweep = take_out_asar(&plan.new, Instant::now() + Duration::from_secs(60));
+        assert!(sweep.whole && sweep.failed.is_empty());
+        assert_eq!(sweep.removed, [Path::new("resources").join("app.asar")]);
+        assert!(asar_name("x.Asar".as_ref()) && !asar_name(".asar".as_ref()));
+        assert!(!asar_name("app.asar.unpacked".as_ref()) && !asar_name("asar".as_ref()));
+    }
+
     // ------------------------------------------------------------ after the swap: does it run?
 
     /// The process id of a program that has ended (nothing to wait for).
@@ -1917,16 +3207,33 @@ mod tests {
     }
 
     /// The swap was undone: the old version is back in its folder, the new files where they were
-    /// unpacked, the data folder untouched.
+    /// unpacked but for their .asar files (the app removes that folder before it tries again:
+    /// leave_removable), the data folder untouched.
     fn assert_taken_back(plan: &Plan) {
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
         assert_eq!(read(&plan.app.join("resources/app.asar")), "0.3.3");
-        assert!(plan.app.join(".hidden").is_file());
         assert!(!plan.app.join("E2E_NEW_BUILD.txt").exists());
         assert!(plan.app.join("data/keep.txt").is_file());
         assert!(plan.new.join("E2E_NEW_BUILD.txt").is_file());
-        assert_eq!(read(&plan.new.join("resources/app.asar")), "0.3.4");
+        assert_eq!(
+            read(&plan.new.join("resources/backend/_internal/python312.dll")),
+            "0.3.4"
+        );
+        assert!(!plan.new.join("resources/app.asar").exists());
+        assert!(plan.new.join("resources").is_dir());
         assert_eq!(names(&plan.old), Vec::<String>::new());
+        let lines = log_lines(plan);
+        let at = lines
+            .iter()
+            .position(|l| l == "took the new version out again")
+            .unwrap_or_else(|| panic!("{lines:?}"));
+        assert_eq!(
+            lines[at + 1..at + 3],
+            [
+                took_asar(&plan.new, &["resources/app.asar"]),
+                "kept the old version".to_owned()
+            ]
+        );
     }
 
     #[test]
@@ -1951,14 +3258,36 @@ mod tests {
             .position(|l| l == "updated")
             .expect("the files were in place");
         assert_eq!(
-            lines[at + 1..at + 4],
+            lines[at + 1..at + 3],
             [
                 "the new version did not start: it ended before it was ready, with exit code 1",
                 "took the new version out again",
-                "kept the old version"
             ],
             "{lines:?}"
         );
+        // the note the old version shows as it starts again
+        let notes = rollback::read_all(plan.log.parent().unwrap());
+        let [(file, note)] = notes.as_slice() else {
+            panic!("{notes:?}")
+        };
+        assert_eq!(
+            file.file_name().unwrap().to_string_lossy(),
+            "rollback-0.3.4.json"
+        );
+        assert_eq!(
+            (
+                note.version.as_str(),
+                note.why.as_str(),
+                note.detail.as_str()
+            ),
+            (
+                "0.3.4",
+                "start",
+                "it ended before it was ready, with exit code 1"
+            )
+        );
+        assert_eq!(note.log.as_deref(), Some(&*plan.log.to_string_lossy()));
+        assert!(note.at.is_some());
     }
 
     #[test]
@@ -2009,8 +3338,9 @@ mod tests {
         assert_eq!(code, 1);
         assert!(begun.elapsed() < Duration::from_secs(40));
         assert!(!ready.file.parent().unwrap().exists());
-        // it was ended, and moved back with the new files
-        let pid: u32 = read(&plan.new.join("fake-app-pid.txt")).parse().unwrap();
+        // it was ended, and moved back with the new files; what it wrote next to itself as it ran is
+        // not among them and stays (only the new version's own names move back)
+        let pid: u32 = read(&plan.app.join("fake-app-pid.txt")).parse().unwrap();
         assert!(
             wait_gone(pid, Duration::from_secs(5)),
             "the new version runs on"
@@ -2028,6 +3358,7 @@ mod tests {
             "{:?}",
             log_lines(&plan)
         );
+        assert_eq!(noted(&plan), [("0.3.4".to_owned(), "start".to_owned())]);
     }
 
     #[test]
@@ -2063,6 +3394,7 @@ mod tests {
             log_lines(&plan).last().unwrap(),
             "the old version's files are no longer all there: left the new version in place"
         );
+        assert!(noted(&plan).is_empty(), "the new version stays: no note");
     }
 
     #[test]
@@ -2263,28 +3595,107 @@ mod tests {
         // app then shows 「无法启动更新：…」 and goes on, its copy untouched)
         let tmp = tempfile::tempdir().unwrap();
         let plan = tree(tmp.path());
-        fake_new_program(&plan, "no-webview");
+        let program = fake_new_program(&plan, "no-webview");
         let file = write_plan(&plan, &tmp.path().join("update-0.3.4.json"), &[]);
         let mut out = Vec::new();
         let code = main_with(&[file.to_string_lossy().into_owned()], &mut out, false);
         assert_eq!(code, 2);
         let said: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(said["ok"], false, "{said}");
+        // short, in the user's language: the program's own words are in the log
         let error = said["error"].as_str().unwrap();
-        assert!(
-            error.starts_with("the new version can't start on this computer: ")
-                && error.contains("WebView2 Runtime"),
-            "{error}"
-        );
+        assert_eq!(error, start_message(helper_language(&plan), "WebView2"));
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
-        assert!(plan.app.join(".hidden").is_file());
         assert!(plan.new.join("E2E_NEW_BUILD.txt").is_file());
         assert!(!plan.old.exists());
-        assert_eq!(
-            log_lines(&plan),
-            [format!("not started: {error}")],
-            "the reason is in the update's log"
+        // the last line says how it ended (packaging/lib.mjs swapEnding: "refused")
+        let lines = log_lines(&plan);
+        let last = lines.last().unwrap();
+        assert!(
+            last.starts_with("not started: the new version can't start on this computer: ")
+                && last.contains("WebView2 Runtime"),
+            "the reason is in the update's log: {lines:?}"
         );
+        // Windows: the new version's program explains it in a window of its own
+        let explained = program.with_file_name("fake-app-problem.txt");
+        if cfg!(windows) {
+            let pid: u32 = wait_for(&explained, Duration::from_secs(20))
+                .parse()
+                .unwrap();
+            assert!(wait_gone(pid, Duration::from_secs(10)));
+            assert_eq!(lines.len(), 2, "{lines:?}");
+            assert!(lines[0].ends_with(&format!("--startup-problem explains it (pid {pid})")));
+        } else {
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(!explained.exists());
+            assert_eq!(lines.len(), 1, "{lines:?}");
+        }
+    }
+
+    /// What `file` says once it is there, within `timeout`.
+    fn wait_for(file: &Path, timeout: Duration) -> String {
+        let end = Instant::now() + timeout;
+        loop {
+            if let Ok(text) = std::fs::read_to_string(file)
+                && !text.is_empty()
+            {
+                return text;
+            }
+            assert!(Instant::now() < end, "{} never came", file.display());
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// A writer that notes in `events` when something is written.
+    struct Noting(std::rc::Rc<RefCell<Vec<String>>>);
+
+    impl Write for Noting {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0
+                .borrow_mut()
+                .push(format!("answer {}", String::from_utf8_lossy(buf).trim()));
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_explanation_starts_before_the_answer() {
+        // 0.3.4 ends the helper as soon as it has read the answer: whatever explains the refusal
+        // must be on its way by then
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let file = write_plan(&plan, &tmp.path().join("update-0.3.4.json"), &[]);
+        let events = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let mut out = Noting(events.clone());
+        let code = main_hooked(
+            &[file.to_string_lossy().into_owned()],
+            &mut out,
+            false,
+            &|_| Err(StartError("no WebView2 Runtime".into())),
+            &|p, _| events.borrow_mut().push(format!("problem {}", p.pid)),
+        );
+        assert_eq!(code, 2);
+        let events = events.borrow();
+        assert_eq!(events[0], "problem 4242");
+        assert!(
+            events.len() > 1 && events[1..].iter().all(|e| e.starts_with("answer")),
+            "{events:?}"
+        );
+        // a plan that can't be used, a folder with the user's things in it: not the new version's
+        // problem, no window
+        write(&plan.app.join("notes.txt"), "the user's");
+        let mut out = Vec::new();
+        let code = main_hooked(
+            &[file.to_string_lossy().into_owned()],
+            &mut out,
+            false,
+            &|_| panic!("not asked: the folder is not SpaceKnife's alone"),
+            &|_, _| panic!("no window for this"),
+        );
+        assert_eq!(code, 2);
     }
 
     #[test]
@@ -2309,9 +3720,601 @@ mod tests {
         let said: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(
             said,
-            serde_json::json!({"ok": false, "error": "the new version can't start on this computer: no WebKitGTK 4.1"})
+            serde_json::json!({"ok": false, "error": start_message(helper_language(&plan), "no WebKitGTK 4.1")})
         );
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
+        assert_eq!(
+            log_lines(&plan),
+            ["not started: the new version can't start on this computer: no WebKitGTK 4.1"]
+        );
+    }
+
+    #[test]
+    fn a_folder_that_holds_the_users_things_is_not_updated() {
+        // SpaceKnife.exe and data copied into a folder of tools, a portable app bundle in
+        // ~/Desktop: the swap would move everything else in there out and the new version would
+        // delete it. Nothing moves; the answer says why and what to do.
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        write(&plan.app.join("notes.txt"), "the user's");
+        write(
+            &plan.app.join("Other.app/Contents/Info.plist"),
+            "another app",
+        );
+        write(&plan.app.join("desktop.ini"), "the system's");
+        let file = write_plan(&plan, &tmp.path().join("update-0.3.4.json"), &[]);
+        let mut out = Vec::new();
+        let code = main_checked(
+            &[file.to_string_lossy().into_owned()],
+            &mut out,
+            false,
+            &|_| panic!("the folder is refused first"),
+        );
+        assert_eq!(code, 2);
+        let said: Value = serde_json::from_slice(&out).unwrap();
+        let foreign = [OsString::from("Other.app"), OsString::from("notes.txt")];
+        assert_eq!(
+            said,
+            serde_json::json!({"ok": false, "error": foreign_message(helper_language(&plan), &foreign)})
+        );
+        assert_eq!(
+            log_lines(&plan),
+            [format!(
+                "not started: {} holds what is not SpaceKnife's: Other.app, notes.txt",
+                plan.app.display()
+            )]
+        );
+        // nothing moved
+        assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
+        assert_eq!(read(&plan.app.join("notes.txt")), "the user's");
+        assert!(plan.app.join("Other.app/Contents/Info.plist").is_file());
+        assert!(plan.new.join("E2E_NEW_BUILD.txt").is_file());
+        assert!(!plan.old.exists());
+        // with them gone the update goes ahead; the system's file stays where it is
+        std::fs::remove_file(plan.app.join("notes.txt")).unwrap();
+        std::fs::remove_dir_all(plan.app.join("Other.app")).unwrap();
+        let code = main_checked(
+            &[file.to_string_lossy().into_owned()],
+            &mut Vec::new(),
+            false,
+            &|_| Err(StartError("asked: the folder is SpaceKnife's".into())),
+        );
+        assert_eq!(code, 2);
+        assert!(
+            log_lines(&plan)
+                .last()
+                .unwrap()
+                .contains("asked: the folder")
+        );
+    }
+
+    #[test]
+    fn a_folder_full_of_the_users_things_is_named_in_part() {
+        // SpaceKnife unpacked into Downloads: the log names the first 20 and how many
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        for i in 0..25 {
+            write(&plan.app.join(format!("file-{i:02}.txt")), "the user's");
+        }
+        let file = write_plan(&plan, &tmp.path().join("update-0.3.4.json"), &[]);
+        let code = main_checked(
+            &[file.to_string_lossy().into_owned()],
+            &mut Vec::new(),
+            false,
+            &|_| panic!("the folder is refused first"),
+        );
+        assert_eq!(code, 2);
+        let lines = log_lines(&plan);
+        assert!(
+            lines[0].ends_with("file-18.txt, file-19.txt … 25 in all"),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn the_answers_in_both_languages() {
+        let many: Vec<OsString> = ["a.txt", "b", "c.app", "d"].map(OsString::from).into();
+        assert_eq!(
+            foreign_message(Language::ZhCn, &many[..2]),
+            "文件夹里还有不是 SpaceKnife 的东西（a.txt、b），为了不动它们，没有更新。请把 SpaceKnife 和它的 data 文件夹单独放进一个文件夹再更新"
+        );
+        assert_eq!(
+            foreign_message(Language::En, &many),
+            "The folder also holds things that are not SpaceKnife's (a.txt, b, c.app … 4 in all); to leave them alone, nothing was updated. Put SpaceKnife and its data folder in a folder of their own, then update"
+        );
+        assert_eq!(
+            foreign_message(Language::ZhCn, &many),
+            "文件夹里还有不是 SpaceKnife 的东西（a.txt、b、c.app 等 4 项），为了不动它们，没有更新。请把 SpaceKnife 和它的 data 文件夹单独放进一个文件夹再更新"
+        );
+        let webview = "SpaceKnife needs the Microsoft Edge WebView2 Runtime, which is not installed (error 0x80070002); Microsoft offers it for free: https://developer.microsoft.com/microsoft-edge/webview2/";
+        assert_eq!(
+            start_message(Language::En, webview),
+            "The new version needs the Microsoft Edge WebView2 Runtime, which this computer lacks or has in too old a version; nothing was updated"
+        );
+        assert_eq!(
+            start_message(Language::ZhCn, webview),
+            "新版本要用 Microsoft Edge WebView2 Runtime，这台电脑上没有或者版本太旧，没有更新"
+        );
+        assert_eq!(
+            start_message(Language::En, "spaceknife ended with exit code 127"),
+            "The new version can't start on this computer; nothing was updated: spaceknife ended with exit code 127"
+        );
+        let long = "x".repeat(400);
+        let said = start_message(Language::ZhCn, &long);
+        assert!(said.ends_with(&format!("{}…", "x".repeat(160))), "{said}");
+    }
+
+    #[test]
+    fn the_answer_is_in_the_copys_language() {
+        // its setting 「界面语言」, in the copy's own config folder next to its data
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let config = plan.app.join("data/config/settings.json");
+        write(
+            &config,
+            r#"{"version": 1, "values": {"general.language": "en"}}"#,
+        );
+        if std::env::var("SPACEKNIFE_LANGUAGE").is_err() {
+            assert_eq!(helper_language(&plan), Language::En);
+            write(
+                &config,
+                r#"{"version": 1, "values": {"general.language": "zh-CN"}}"#,
+            );
+            assert_eq!(helper_language(&plan), Language::ZhCn);
+        }
+        // none, or a broken file: the system's
+        write(&config, "{");
+        assert_eq!(helper_language(&plan), i18n::resolve(None));
+    }
+
+    #[test]
+    fn what_is_spaceknifes_in_a_portable_copys_folder() {
+        let os = |names: &[&str], new: &[&str], exe_top: Option<&str>, os: &str| {
+            let names: Vec<OsString> = names.iter().map(OsString::from).collect();
+            let new: Vec<OsString> = new.iter().map(OsString::from).collect();
+            sort_names(
+                &names,
+                &["data".to_owned()],
+                &new,
+                exe_top.map(std::ffi::OsStr::new),
+                os,
+            )
+        };
+        let strs = |v: &[OsString]| -> Vec<String> {
+            v.iter().map(|n| n.to_string_lossy().into_owned()).collect()
+        };
+        // 0.3.4 on Windows, unpacked into a folder of tools (case as the user's system has it)
+        let f = os(
+            &[
+                "chrome_100_percent.pak",
+                "data",
+                "Data",
+                "desktop.ini",
+                "ffmpeg.dll",
+                "locales",
+                "notes.txt",
+                "putty.exe",
+                "resources",
+                "spaceknife.exe",
+                "SpaceKnife.com",
+                "Thumbs.db",
+            ],
+            &["SpaceKnife.exe", "spaceknife-cli.exe", "resources", "ui"],
+            Some("spaceknife.exe"),
+            "windows",
+        );
+        assert_eq!(
+            strs(&f.own),
+            [
+                "chrome_100_percent.pak",
+                "ffmpeg.dll",
+                "locales",
+                "resources",
+                "spaceknife.exe",
+                "SpaceKnife.com"
+            ]
+        );
+        assert_eq!(strs(&f.system), ["desktop.ini", "Thumbs.db"]);
+        assert_eq!(strs(&f.foreign), ["notes.txt", "putty.exe"]);
+        // Linux compares names as they are; the new version's names are its own
+        let f = os(
+            &[
+                "Data",
+                "chrome-sandbox",
+                "data",
+                "Spaceknife",
+                "spaceknife",
+                "NEW_ONLY.txt",
+                ".directory",
+                ".Trash-1000",
+            ],
+            &["NEW_ONLY.txt"],
+            Some("spaceknife"),
+            "linux",
+        );
+        assert_eq!(
+            strs(&f.own),
+            ["chrome-sandbox", "spaceknife", "NEW_ONLY.txt"]
+        );
+        assert_eq!(strs(&f.system), [".directory", ".Trash-1000"]);
+        assert_eq!(strs(&f.foreign), ["Data", "Spaceknife"]);
+        // macOS: the copy in ~/Desktop or /Applications holds other apps; a renamed bundle that
+        // holds the executable is SpaceKnife's
+        let f = os(
+            &[
+                ".DS_Store",
+                "._SpaceKnife.app",
+                "Icon\r",
+                "Other.app",
+                "SpaceKnife 2.app",
+                "SpaceKnife.app",
+                "data",
+                "report.pdf",
+            ],
+            &["SpaceKnife.app"],
+            Some("SpaceKnife 2.app"),
+            "macos",
+        );
+        assert_eq!(strs(&f.own), ["SpaceKnife 2.app", "SpaceKnife.app"]);
+        assert_eq!(strs(&f.system), [".DS_Store", "._SpaceKnife.app", "Icon\r"]);
+        assert_eq!(strs(&f.foreign), ["Other.app", "report.pdf"]);
+        // data is never anything but kept, whatever the plan's keep says
+        let names = [OsString::from("data"), OsString::from("x")];
+        let f = sort_names(&names, &[], &[], None, "linux");
+        assert_eq!(strs(&f.foreign), ["x"]);
+        assert!(f.own.is_empty() && f.system.is_empty());
+    }
+
+    #[test]
+    fn every_published_layout_is_spaceknifes() {
+        // the top-level names of the release archives (docs/packaging.md §8): a copy of each, the
+        // new version being 0.3.5, has nothing foreign
+        let windows_034 = [
+            "LICENSE.electron.txt",
+            "LICENSES.chromium.html",
+            "SpaceKnife.com",
+            "SpaceKnife.exe",
+            "chrome_100_percent.pak",
+            "chrome_200_percent.pak",
+            "d3dcompiler_47.dll",
+            "dxcompiler.dll",
+            "dxil.dll",
+            "ffmpeg.dll",
+            "icudtl.dat",
+            "locales",
+            "resources",
+            "resources.pak",
+            "snapshot_blob.bin",
+            "v8_context_snapshot.bin",
+            "vk_swiftshader.dll",
+            "vk_swiftshader_icd.json",
+            "vulkan-1.dll",
+        ];
+        let linux_034 = [
+            "LICENSE.electron.txt",
+            "LICENSES.chromium.html",
+            "chrome-sandbox",
+            "chrome_100_percent.pak",
+            "chrome_200_percent.pak",
+            "chrome_crashpad_handler",
+            "icudtl.dat",
+            "libffmpeg.so",
+            "libvk_swiftshader.so",
+            "libvulkan.so.1",
+            "locales",
+            "resources",
+            "resources.pak",
+            "snapshot_blob.bin",
+            "spaceknife",
+            "v8_context_snapshot.bin",
+            "vk_swiftshader_icd.json",
+        ];
+        let windows_035 = [
+            "SpaceKnife.exe",
+            "SpaceKnife.com",
+            "spaceknife-cli.exe",
+            "resources",
+            "ui",
+            "licenses",
+        ];
+        let linux_035 = [
+            "spaceknife",
+            "spaceknife-cli",
+            "resources",
+            "ui",
+            "licenses",
+        ];
+        for (os, layout) in [
+            ("windows", &windows_034[..]),
+            ("windows", &windows_035[..]),
+            ("linux", &linux_034[..]),
+            ("linux", &linux_035[..]),
+            ("macos", &["SpaceKnife.app"][..]),
+        ] {
+            let mut names: Vec<OsString> = layout.iter().map(OsString::from).collect();
+            names.push("data".into());
+            let f = sort_names(&names, &["data".to_owned()], &[], None, os);
+            assert!(f.foreign.is_empty(), "{os}: {:?}", f.foreign);
+            assert_eq!(f.own.len(), layout.len(), "{os}");
+        }
+    }
+
+    #[test]
+    fn a_folder_named_like_spaceknifes_is_its_own_only_with_its_contents() {
+        // a folder of the user's that happens to be called `resources` or `ui` next to the app,
+        // or SpaceKnife's with the user's files merged into it, is not SpaceKnife's: the swap
+        // would move it into previous-<version>, which the new version deletes
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let new = tmp.path().join("new");
+        let fresh = |name: &str, files: &[&str], dirs: &[&str]| {
+            let at = app.join(name);
+            let _ = std::fs::remove_dir_all(&at);
+            let _ = std::fs::remove_file(&at);
+            std::fs::create_dir_all(&at).unwrap();
+            for f in files {
+                write(&at.join(f), "x");
+            }
+            for d in dirs {
+                std::fs::create_dir_all(at.join(d)).unwrap();
+            }
+        };
+        let is_own = |name: &str, os: &str| {
+            holds_what_spaceknifes_does(
+                &app.join(name),
+                &new.join(name),
+                std::ffi::OsStr::new(name),
+                os,
+            )
+        };
+        // resources: what every published layout held (0.3.4 on Windows, the Tauri app's)
+        fresh(
+            "resources",
+            &["app.asar", "elevate.exe"],
+            &["backend", "licenses"],
+        );
+        assert!(is_own("resources", "linux"));
+        fresh("resources", &[], &["backend"]);
+        assert!(is_own("resources", "linux"));
+        // the system's files in it don't count; an empty one has nothing to lose
+        fresh("resources", &["desktop.ini", ".DS_Store"], &["backend"]);
+        assert!(is_own("resources", "linux"));
+        fresh("resources", &[], &[]);
+        assert!(is_own("resources", "linux"));
+        // the user's, alone or merged with SpaceKnife's
+        fresh("resources", &["budget.xlsx"], &[]);
+        assert!(!is_own("resources", "linux"));
+        fresh("resources", &["app.asar", "budget.xlsx"], &["backend"]);
+        assert!(!is_own("resources", "linux"));
+        // what the new version's folder of that name holds is SpaceKnife's too
+        write(&new.join("resources/added-later.dat"), "x");
+        fresh("resources", &["added-later.dat"], &["backend"]);
+        assert!(is_own("resources", "linux"));
+        // a file or a link under that name is never SpaceKnife's
+        std::fs::remove_dir_all(app.join("resources")).unwrap();
+        write(&app.join("resources"), "a file");
+        assert!(!is_own("resources", "linux"));
+        std::fs::remove_file(app.join("resources")).unwrap();
+        #[cfg(unix)]
+        {
+            fresh("elsewhere", &[], &["backend"]);
+            std::os::unix::fs::symlink(app.join("elsewhere"), app.join("resources")).unwrap();
+            assert!(!is_own("resources", "linux"));
+            std::fs::remove_file(app.join("resources")).unwrap();
+        }
+        // locales: Electron's .pak files and nothing else
+        fresh("locales", &["en-US.pak", "zh-CN.pak"], &[]);
+        assert!(is_own("locales", "linux"));
+        fresh("locales", &["en-US.pak", "en-US.json"], &[]);
+        assert!(!is_own("locales", "linux"));
+        fresh("locales", &[], &["fr.pak"]);
+        assert!(!is_own("locales", "linux"));
+        // licenses: the Tauri app's three files
+        fresh(
+            "licenses",
+            &["LICENSE.txt", "THIRD-PARTY-rust.txt", "THIRD-PARTY-ui.txt"],
+            &[],
+        );
+        assert!(is_own("licenses", "linux"));
+        fresh("licenses", &["LICENSE.txt", "putty-licence.txt"], &[]);
+        assert!(!is_own("licenses", "linux"));
+        // ui: the generated interface
+        fresh("ui", &["index.html", "200.html"], &["_nuxt"]);
+        assert!(is_own("ui", "linux"));
+        fresh("ui", &["mockup.png", "index.html"], &[]);
+        assert!(!is_own("ui", "linux"));
+        write(&new.join("ui/index.html"), "x");
+        write(&new.join("ui/200.html"), "x");
+        fresh("ui", &["index.html", "200.html"], &[]);
+        assert!(
+            is_own("ui", "linux"),
+            "an interface laid out as the new version's"
+        );
+        fresh("ui", &["mockup.png"], &[]);
+        assert!(!is_own("ui", "linux"));
+        // Windows names them in any case
+        fresh("Resources", &["App.asar"], &["Backend"]);
+        assert!(is_own("Resources", "windows"));
+        assert!(generic_name("Resources", "windows") && !generic_name("Resources", "linux"));
+        // the other names of the layouts are SpaceKnife's by their name alone
+        assert!(!generic_name("chrome_100_percent.pak", "windows"));
+    }
+
+    #[test]
+    fn every_published_layout_holds_what_spaceknifes_does() {
+        // the folders with common names as each release archive has them (read from the archives
+        // and the build scripts): a copy of each, on disk, has nothing foreign
+        let windows_034: &[&str] = &[
+            "SpaceKnife.exe",
+            "SpaceKnife.com",
+            "ffmpeg.dll",
+            "locales/en-US.pak",
+            "locales/zh-CN.pak",
+            "resources/app.asar",
+            "resources/elevate.exe",
+            "resources/backend/spaceknife-backend.exe",
+            "resources/licenses/LICENSE.txt",
+        ];
+        let linux_034: &[&str] = &[
+            "spaceknife",
+            "chrome-sandbox",
+            "locales/en-US.pak",
+            "locales/zh-CN.pak",
+            "resources/app.asar",
+            "resources/backend/spaceknife-backend",
+            "resources/licenses/LICENSE.txt",
+        ];
+        let windows_035: &[&str] = &[
+            "SpaceKnife.exe",
+            "SpaceKnife.com",
+            "spaceknife-cli.exe",
+            "resources/backend/spaceknife-backend.exe",
+            "licenses/LICENSE.txt",
+            "licenses/THIRD-PARTY-rust.txt",
+            "licenses/THIRD-PARTY-ui.txt",
+            "ui/index.html",
+            "ui/200.html",
+            "ui/_nuxt/entry.js",
+        ];
+        let tauri_linux_035: &[&str] = &[
+            "spaceknife",
+            "spaceknife-cli",
+            "resources/backend/spaceknife-backend",
+            "licenses/LICENSE.txt",
+            "licenses/THIRD-PARTY-rust.txt",
+            "licenses/THIRD-PARTY-ui.txt",
+            "ui/index.html",
+            "ui/_nuxt/entry.js",
+        ];
+        let electron_shell_035: &[&str] = &[
+            "spaceknife",
+            "spaceknife-cli",
+            "locales/en-US.pak",
+            "resources/app.asar",
+            "resources/backend/spaceknife-backend",
+            "resources/ui/index.html",
+            "resources/licenses/LICENSE.txt",
+        ];
+        for (os, layout) in [
+            ("windows", windows_034),
+            ("linux", linux_034),
+            ("windows", windows_035),
+            ("linux", tauri_linux_035),
+            ("linux", electron_shell_035),
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let app = tmp.path().join("app");
+            let new = tmp.path().join("new");
+            for f in layout {
+                write(&app.join(f), "x");
+            }
+            write(&app.join("data/keep.txt"), "mine");
+            write(&new.join("NEW_ONLY.txt"), "x");
+            let plan = Plan {
+                pid: 1,
+                exe: app.join(layout[0]),
+                app: app.clone(),
+                new,
+                old: tmp.path().join("old"),
+                log: tmp.path().join("update-0.3.6.log"),
+                keep: vec!["data".into()],
+            };
+            let folder = plan.survey_on(os).unwrap();
+            assert!(folder.foreign.is_empty(), "{os} {layout:?}: {folder:?}");
+        }
+    }
+
+    #[test]
+    fn a_users_folder_named_like_spaceknifes_stops_the_update() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        // the new version has an interface folder `ui`; the user keeps one of their own next to
+        // the app
+        write(&plan.new.join("ui/index.html"), "0.3.4");
+        std::fs::create_dir_all(plan.new.join("ui/_nuxt")).unwrap();
+        write(&plan.app.join("ui/mockup.png"), "the user's");
+        let file = write_plan(&plan, &tmp.path().join("update-0.3.4.json"), &[]);
+        let mut out = Vec::new();
+        let code = main_checked(
+            &[file.to_string_lossy().into_owned()],
+            &mut out,
+            false,
+            &|_| panic!("the folder is refused first"),
+        );
+        assert_eq!(code, 2);
+        let said: Value = serde_json::from_slice(&out).unwrap();
+        let foreign = [OsString::from("ui")];
+        assert_eq!(
+            said["error"],
+            Value::from(foreign_message(helper_language(&plan), &foreign))
+        );
+        assert_eq!(read(&plan.app.join("ui/mockup.png")), "the user's");
+        assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
+        assert!(!plan.old.exists());
+        // turned up after the check, while the app quit: it is in the way of the new version's
+        // `ui`, so nothing moves (taking out what came in would take it with it)
+        let started = RefCell::new(0);
+        let start = |_: &Path, _: &[&str]| {
+            *started.borrow_mut() += 1;
+            Ok(())
+        };
+        let code = run_with(
+            &plan,
+            &Log::new(&plan.log),
+            &Ops {
+                wait: &|_, _| true,
+                start: &start,
+                place: &place,
+                start_new: &not_watched,
+                ready: None,
+                ready_timeout: READY_TIMEOUT,
+            },
+        );
+        assert_eq!(code, 1);
+        assert_eq!(*started.borrow(), 1); // the old version again
+        assert_eq!(read(&plan.app.join("ui/mockup.png")), "the user's");
+        assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
+        assert_eq!(read(&plan.app.join("resources/app.asar")), "0.3.3");
+        assert!(plan.new.join("ui/index.html").is_file());
+        assert!(plan.new.join("E2E_NEW_BUILD.txt").is_file());
+        assert!(!plan.old.exists() || names(&plan.old).is_empty());
+        let lines = log_lines(&plan);
+        assert!(
+            lines.contains(&"in the way of the new version: ui".to_owned()),
+            "{lines:?}"
+        );
+        assert_eq!(noted(&plan), [("0.3.4".to_owned(), "place".to_owned())]);
+    }
+
+    #[test]
+    fn a_ready_folder_left_behind_is_swept_away() {
+        let tmp = tempfile::tempdir().unwrap();
+        let temp = tmp.path();
+        let tag = "0123456789abcdef0123456789abcdef";
+        let left = temp.join(format!("{READY_DIR_PREFIX}{tag}"));
+        write(&left.join("ready.json"), "{}");
+        write(&left.join("ready.json.tmp"), "{");
+        let empty = temp.join(format!("{READY_DIR_PREFIX}{}", "f".repeat(32)));
+        std::fs::create_dir(&empty).unwrap();
+        // not a ready folder, or not only a ready file: stays
+        let other = temp.join(format!("{READY_DIR_PREFIX}{}", "e".repeat(32)));
+        write(&other.join("notes.txt"), "the user's");
+        let short = temp.join(format!("{READY_DIR_PREFIX}abc"));
+        std::fs::create_dir(&short).unwrap();
+        let named = temp.join("spaceknife-other");
+        std::fs::create_dir(&named).unwrap();
+        // too young: a helper may be waiting on it
+        assert_eq!(sweep_ready_dirs(temp, Duration::from_secs(3600)), 0);
+        assert!(left.is_dir() && empty.is_dir());
+        assert_eq!(sweep_ready_dirs(temp, Duration::ZERO), 2);
+        assert!(!left.exists() && !empty.exists());
+        assert!(other.join("notes.txt").is_file() && short.is_dir() && named.is_dir());
+        // a helper's own folder goes when it is done with it, whatever ends it
+        let ready = Ready::for_env(&BTreeMap::new()).unwrap();
+        let dir = ready.file.parent().unwrap().to_owned();
+        assert!(dir.is_dir());
+        drop(ready);
+        assert!(!dir.exists());
     }
 
     #[test]

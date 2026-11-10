@@ -82,6 +82,7 @@
  "平均延迟 {ms} 毫秒": "average latency {ms} ms",
  "并发": "Concurrency",
  "并行硬扫描": "Parallel full scan",
+ "开关已经打开却不起作用（常见于更新之后）：在列表里选中 SpaceKnife，点 − 删掉，再点 + 重新添加；或者把开关关掉再打开。然后重新打开 SpaceKnife。": "If the switch is already on but has no effect (common after an update): select SpaceKnife in the list, remove it with −, then add it again with +; or turn the switch off and on again. Then reopen SpaceKnife.",
  "开启「完全磁盘访问权限」可以一次授权全部：在系统设置的列表里打开 SpaceKnife 的开关（没有就点 + 添加），再按提示重新打开 SpaceKnife。": "Full Disk Access grants them all at once: switch SpaceKnife on in the list in System Settings (if it is not there, add it with +), then reopen SpaceKnife when asked.",
  "开始": "Started",
  "弹出事件时自动打开": "Open automatically on new events",

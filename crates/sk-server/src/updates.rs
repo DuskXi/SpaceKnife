@@ -12,8 +12,13 @@
 //! on or changing the channel checks right away. `update.check` always checks.
 //!
 //! In the real app ([`UpdateService::start`], when `Config::update_checks`) the service also cleans
-//! the `updates` folder once at start, and with 「自动下载更新」 on downloads a newer release's file
-//! by itself. Tests and demos without the scheduler never download by themselves.
+//! the `updates` folder once at start (and the folders a portable copy's swap helper left in the
+//! temp folder when it was ended), and with 「自动下载更新」 on downloads a newer release's file by
+//! itself. Tests and demos without the scheduler never download by themselves.
+//!
+//! A portable copy's update that the swap undid leaves a note in the `updates` folder
+//! ([`sk_core::update::rollback`]); the notes are read at start, and the newest one about a version
+//! newer than this one is `UpdateStatus::rollback`, until `update.dismiss` removes them.
 //!
 //! The network calls are blocking: they run on tokio's blocking threads.
 
@@ -26,12 +31,14 @@ use chrono::{DateTime, Utc};
 use parking_lot::{Mutex, RwLock};
 use sk_core::settings::SettingsStore;
 use sk_core::tr;
-use sk_core::update::{self as update, Asset, Fetched, Release, Shell, UpdateError, UpdateState};
+use sk_core::update::{
+    self as update, Asset, Fetched, Release, Shell, UpdateError, UpdateState, rollback, swap,
+};
 use sk_protocol::CAP_UPDATES;
 use sk_protocol::methods::UpdateChanged;
 use sk_protocol::update::{
     DownloadStateName, InstallKind, UpdateChangedEvent, UpdateChannel, UpdateDownload, UpdateLevel,
-    UpdateReleases, UpdateStatus,
+    UpdateReleases, UpdateRollback, UpdateStatus,
 };
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -89,6 +96,9 @@ struct Inner {
     /// the next scheduler round checks even if not due
     force: bool,
     applied: Option<SettingsKey>,
+    /// the notes of portable updates the swap undid (sk_core::update::rollback), the latest first,
+    /// read at start: shown while their version is newer than this one, until update.dismiss
+    rollbacks: Vec<(PathBuf, rollback::Rollback)>,
 }
 
 /// One per backend (see the module docs); derefs to the shared [`UpdateCore`].
@@ -145,6 +155,7 @@ impl UpdateCore {
             None => update::install_kind(),
         };
         let (done, _) = tokio::sync::watch::channel(0);
+        let updates_dir = update::updates_dir();
         UpdateCore {
             settings: settings.clone(),
             feed,
@@ -152,7 +163,8 @@ impl UpdateCore {
             inner: Mutex::new(Inner {
                 state,
                 file,
-                updates_dir: update::updates_dir(),
+                rollbacks: rollback::read_all(&updates_dir),
+                updates_dir,
                 kind,
                 // SPACEKNIFE_SHELL from the Electron shell; unset in the Tauri app's own process
                 shell: update::shell(),
@@ -234,11 +246,13 @@ impl UpdateCore {
         self.inner.lock().auto = on;
     }
 
-    /// Keep the state in `file` and download to `updates_dir` (the state is read from `file`).
+    /// Keep the state in `file` and download to `updates_dir` (the state is read from `file`, the
+    /// notes of undone updates from `updates_dir`).
     pub fn relocate(&self, file: PathBuf, updates_dir: PathBuf) {
         let mut g = self.inner.lock();
         g.state = update::load_state(&file, &self.feed);
         g.file = file;
+        g.rollbacks = rollback::read_all(&updates_dir);
         g.updates_dir = updates_dir;
     }
 
@@ -372,6 +386,22 @@ impl UpdateCore {
         let series = latest_version
             .as_deref()
             .and_then(|v| update::series(current.as_deref(), Some(v)));
+        // the latest undone update to a version newer than this one (an older note is stale: the
+        // cleaning at start removes it)
+        let rollback = g
+            .rollbacks
+            .iter()
+            .map(|(_, note)| note)
+            .find(|note| {
+                update::level(current.as_deref(), Some(&note.version)) != UpdateLevel::None
+            })
+            .map(|note| UpdateRollback {
+                version: note.version.clone(),
+                reason: note.reason(),
+                detail: note.detail.clone(),
+                at: note.at,
+                log: note.log.clone(),
+            });
         UpdateStatus {
             current: current.clone().unwrap_or_default(),
             install_kind: g.kind,
@@ -393,6 +423,7 @@ impl UpdateCore {
             next_check_at: due
                 .and_then(|d| chrono::TimeDelta::from_std(Duration::from_secs_f64(d)).ok())
                 .map(|d| self.now() + d),
+            rollback,
         }
     }
 
@@ -566,22 +597,43 @@ impl UpdateCore {
         }
     }
 
-    /// The card / dialog of `version` was closed: not shown again for it (the badge stays).
+    /// The card / dialog of `version` was closed: not shown again for it (the badge stays). The
+    /// card said that an update was undone, if one was: those notes are removed.
     pub async fn dismiss(self: &Arc<Self>, version: &str) -> UpdateStatus {
-        let changed = {
+        let (closed_now, notes) = {
             let mut g = self.inner.lock();
+            let notes: Vec<PathBuf> = std::mem::take(&mut g.rollbacks)
+                .into_iter()
+                .map(|(file, _)| file)
+                .collect();
             let closed = &mut g.state.dismissed;
-            if closed.iter().any(|v| v == version) {
+            let closed_now = if closed.iter().any(|v| v == version) {
                 false
             } else {
                 closed.push(version.to_owned());
                 let extra = closed.len().saturating_sub(update::KEEP_DISMISSED);
                 closed.drain(..extra);
                 true
-            }
+            };
+            (closed_now, notes)
         };
-        if changed {
+        let had_notes = !notes.is_empty();
+        if had_notes {
+            let _ = tokio::task::spawn_blocking(move || {
+                for file in notes {
+                    if let Err(e) = std::fs::remove_file(&file)
+                        && e.kind() != std::io::ErrorKind::NotFound
+                    {
+                        tracing::warn!("could not remove {}: {e}", file.display());
+                    }
+                }
+            })
+            .await;
+        }
+        if closed_now {
             self.save().await;
+        }
+        if closed_now || had_notes {
             self.broadcast();
         }
         self.status()
@@ -907,6 +959,14 @@ impl UpdateCore {
         let current = self.current();
         let (d, c) = (dir.clone(), current.clone());
         match tokio::task::spawn_blocking(move || {
+            // what a portable copy's swap helper left in the temp folder when it was ended while
+            // it waited for the new version (its ready file's folder)
+            let swept = swap::sweep_ready_dirs(&std::env::temp_dir(), swap::READY_LEFTOVER_AGE);
+            if swept > 0 {
+                tracing::info!(
+                    "removed {swept} folder(s) an update's helper left in the temp folder"
+                );
+            }
             update::clean_updates_with(&d, c.as_deref(), &update::remove_entry)
         })
         .await

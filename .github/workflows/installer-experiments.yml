@@ -4,11 +4,12 @@ name: Installer experiments
 # GitHub runners, Windows Server 2022 and 2025: 0.3.4's real installer, then the candidate the
 # way 0.3.4's 「无缝更新」 starts it (CreateProcess with --updated /S --force-run and the scope),
 # per user, for all users, with 0.3.4 running and a file held, without WebView2, downgrade and
-# reinstall, both scopes, a folder of the user's, 0.3.4 in the data folder, the console launcher,
-# Microsoft Defender; every assertion goes into a JSON file in the run's artifacts. Runners are
-# administrators with UAC off: what needs UAC on (S0 CreateProcess and the manifest, S2 the
-# elevation of a per-machine update, S4's elevated lock, S7 both scopes) is recorded as skipped
-# there and needs the Hyper-V VM the script describes.
+# reinstall, both scopes, the fork over itself, a folder of the user's, 0.3.4 in the data folder,
+# 0.3.4 whose registry keys are gone, the console launcher, Microsoft Defender; every assertion
+# goes into a JSON file in the run's artifacts. Runners are administrators with UAC off: what
+# needs UAC on (S0 CreateProcess and the manifest, the self-elevation of S2's and S7's per-machine
+# updates, which run elevated from the start here, S4's elevated lock) is recorded as skipped there
+# and needs the Hyper-V VM the script describes.
 # The candidate: built here by the Windows installer build (windows-installer.yml, with all its own
 # tests), or the installer of an earlier run of it (run_id). On every push to an exp/ branch, and
 # by hand.

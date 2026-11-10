@@ -11,7 +11,9 @@
 pub mod basket;
 pub mod locks;
 pub mod names;
+pub mod par;
 pub mod paths;
+pub mod probe;
 mod remove;
 mod text;
 pub mod trash;

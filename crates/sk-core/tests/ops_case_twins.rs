@@ -24,6 +24,7 @@ use sk_store::{NodeId, Store};
 const WIN: bool = cfg!(windows);
 
 mod exit_cleanup;
+mod fs_caps;
 
 /// One SpaceKnife home (and on Linux one XDG data home) for this binary, removed when it exits;
 /// the tests change a process-wide seam, so they run one at a time.
@@ -297,7 +298,12 @@ fn windows_names_ending_in_a_dot_are_never_deleted_by_their_path() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("root");
     std::fs::create_dir(&root).unwrap();
-    let long_root = format!("\\\\?\\{}", s(&root));
+    if !fs_caps::trailing_names(tmp.path()) {
+        let what = "windows_names_ending_in_a_dot_are_never_deleted_by_their_path";
+        fs_caps::skip(what, tmp.path(), "names ending in a dot are refused");
+        return;
+    }
+    let long_root = fs_caps::verbatim(&root);
     for name in ["odd", "odd."] {
         std::fs::create_dir(format!("{long_root}\\{name}")).unwrap();
         std::fs::write(format!("{long_root}\\{name}\\in.txt"), name.as_bytes()).unwrap();
@@ -612,7 +618,12 @@ fn names_that_lost_different_bytes_stay_two_items() {
     let top = tmp.path().join("scan");
     std::fs::create_dir(&top).unwrap();
     if std::fs::write(top.join(&one), b"1").is_err() {
-        return; // a file system that refuses such names
+        fs_caps::skip(
+            "names_that_lost_different_bytes",
+            tmp.path(),
+            "names that are not Unicode are refused",
+        );
+        return;
     }
     std::fs::write(top.join(&two), b"2").unwrap();
     std::fs::write(top.join("keep.txt"), b"k").unwrap();

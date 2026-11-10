@@ -24,7 +24,12 @@
 // backend, a new process, its ready file) and says it is the candidate's version and the same kind
 // of install; the setting changed through 0.3.4's backend and the marker files in the data, config
 // and cache folders are still there, byte for byte; nothing of the update is left in the updates
-// folder. Then per kind: portable (the swap's log says "updated", or the new version came back
+// folder. Then per kind: portable (first with a file and another app of the user's next to 0.3.4:
+// the new version's swap helper refuses the folder, nothing outside the data moves and 0.3.4 runs
+// on, and no .asar file is left in what it unpacked, which 0.3.4's Electron fs could not remove
+// before its next attempt; then without them and with a file the system puts in folders, which
+// stays where it is: 0.3.4 gets to the swap (its second attempt says nothing of a failure), the
+// swap's log says "updated", or the new version came back
 // before it could be read — it removes the log as it starts; the folder holds exactly the
 // candidate's files, byte for byte, and the data folder: nothing of 0.3.4 is left, and whatever the
 // candidate has — SpaceKnife.com on Windows, the Electron shell's own files in its Linux portable
@@ -55,7 +60,7 @@ import http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { MAC, WIN, alternativesGroup, appProcessOf, fail, hello, helperIn, isElectron, notOwned, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, treeOf, uiIn, unpack, until, untilUninstalled, watchSwap } from "./lib.mjs";
+import { MAC, WIN, alternativesGroup, appProcessOf, asarFilesIn, fail, hello, helperIn, isElectron, notOwned, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, treeOf, uiIn, unpack, until, untilUninstalled, watchSwap } from "./lib.mjs";
 
 const OLD = "0.3.4";
 /** Where the deb and the rpm put the program (0.3.4's and the new ones). */
@@ -307,13 +312,22 @@ async function changeSetting(page) {
 }
 
 /** Wait for the update badge (the first automatic check is a minute after the start, the download
- * right after it), then click it and 「无缝更新」 (v0.3.4 packaging/update_e2e.py restart_and_update). */
+ * right after it), then click it and 「无缝更新」 (v0.3.4 packaging/update_e2e.py restart_and_update).
+ * A card still open from an attempt that did not start (0.3.4 restarts its backend then, which
+ * verifies the downloaded file again) gets its button clicked once it is back. */
 async function clickSeamless(page) {
-  await until(`0.3.4's badge for ${NEW_VERSION} to be ready`, () => page.evaluate("!!document.querySelector('.update-badge.ready')"), 300_000, 1000);
-  console.log(`badge: ${JSON.stringify(await page.evaluate("document.querySelector('.update-badge').textContent"))}`);
-  await page.evaluate("document.querySelector('.update-badge').click(), true");
   const button = "document.querySelector('.update-card .uc-choice.seamless')";
-  await until("the update card", () => page.evaluate(`!!${button}`), 30_000);
+  const ready = await until(
+    `0.3.4's badge for ${NEW_VERSION} to be ready`,
+    () => page.evaluate(`${button} ? "button" : document.querySelector('.update-card') ? null : document.querySelector('.update-badge.ready') ? "badge" : null`),
+    300_000,
+    1000,
+  );
+  if (ready === "badge") {
+    console.log(`badge: ${JSON.stringify(await page.evaluate("document.querySelector('.update-badge').textContent"))}`);
+    await page.evaluate("document.querySelector('.update-badge').click(), true");
+    await until("the update card", () => page.evaluate(`!!${button}`), 30_000);
+  }
   console.log(`card: ${JSON.stringify(await page.evaluate("document.querySelector('.update-card').innerText"))}`);
   await page.evaluate(`${button}.click(), true`).catch(() => {}); // the window goes away while it answers
 }
@@ -400,19 +414,68 @@ async function portable() {
 
   const { server, feed } = await serveFeed(newPath);
   try {
-    step(`start 0.3.4 and click 「无缝更新」`);
+    step(`start 0.3.4 and click 「无缝更新」 with the user's files next to it`);
     const ready = join(work, "ready.json");
+    const updates = join(data, "data", "updates");
+    seen.updates = updates;
+    const log = join(updates, `update-${NEW_VERSION}.log`);
+    // a file and another app of the user's next to 0.3.4 (a folder of tools, ~/Desktop): the new
+    // version's swap helper moves only SpaceKnife's own files, so it does not start and nothing
+    // moves; 0.3.4 says why and runs on (sk_core::update::swap sort_names)
+    const foreign = [join(folder, "e2e-notes.txt"), join(folder, MAC ? "Other.app" : "OtherTool")];
+    writeFileSync(foreign[0], "the user's notes\n");
+    mkdirSync(join(foreign[1], "Contents"), { recursive: true });
+    writeFileSync(join(foreign[1], "Contents", "Info.plist"), "another app\n");
+    // everything in the folder but the data (which 0.3.4 writes to as it runs), and the program's bytes
+    const outsideData = () => treeOf(folder).filter((e) => !e.path.startsWith(data)).map((e) => `${e.kind} ${e.path}`);
+    const before = outsideData();
+    const programBefore = sha256(program);
     const app = start(program, ELECTRON_ARGS, appEnv(feed, ready));
     const page = await devtools(join(data, "electron", "DevToolsActivePort"), app);
     await changeSetting(page);
     await clickSeamless(page);
-    await until("0.3.4 to quit", () => app.exited, 90_000);
+    const refusal = await until("the swap to refuse the folder with the user's files", () => {
+      const text = existsSync(log) ? readFileSync(log, "utf8") : "";
+      if (/ updated$/m.test(text)) throw new Error(`the swap went ahead with the user's files next to the app:\n${text}`);
+      return text.includes("holds what is not SpaceKnife's") ? text : null;
+    }, 180_000);
+    console.log(refusal.trim());
+    await sleep(3000);
+    if (app.exited) throw new Error(`0.3.4 quit although the swap did not start: ${JSON.stringify(app.exited)}`);
+    const after = outsideData();
+    const changes = [...before.filter((e) => !after.includes(e)).map((e) => `gone: ${e}`), ...after.filter((e) => !before.includes(e)).map((e) => `new: ${e}`)];
+    if (changes.length || sha256(program) !== programBefore) throw new Error(`the refused swap changed the folder: ${changes.slice(0, 20).join(", ") || basename(program)}`);
+    if (existsSync(join(updates, `previous-${OLD}`))) throw new Error(`previous-${OLD} was made although nothing was to move`);
+    console.log("nothing moved, 0.3.4 runs on");
+    // 0.3.4 removes what it unpacked before it unpacks again, with Electron's fs, which takes an
+    // .asar file for a folder and can't remove one that holds it (the Electron shell's portable
+    // copy has resources/app.asar): the refusal took them out, and only them
+    // (sk_core::update::swap leave_removable), before it answered
+    const staging = join(updates, `staging-${NEW_VERSION}`);
+    const asarLeft = asarFilesIn(staging);
+    if (asarLeft.length) throw new Error(`the refused swap left ${asarLeft.join(", ")}: 0.3.4 can't remove ${staging} to try again`);
+    if (isElectron(candidate)) {
+      if (!refusal.includes("an Electron app can't remove a folder that holds one")) throw new Error(`the swap's log does not say it took the .asar files out of ${staging}`);
+      console.log(`the .asar files are out of ${staging}: 0.3.4 can remove it`);
+    }
+
+    step(`without them: click 「无缝更新」 again; a file the system put there stays`);
+    for (const f of foreign) rmSync(f, { recursive: true, force: true });
+    const systemFile = join(folder, WIN ? "desktop.ini" : MAC ? ".DS_Store" : ".directory");
+    writeFileSync(systemFile, "the system's\n");
+    rmSync(log, { force: true }); // its last line says how the next attempt ends
+    const heard = output.length; // what 0.3.4 says from here on
+    await clickSeamless(page);
+    await until("0.3.4 to quit", () => {
+      // 0.3.4 removes the staging folder, unpacks again and starts the swap: when it can't, it says
+      // so and runs on (v0.3.4 index.ts replacePortable, restartInto); no need to wait for the end
+      const failed = output.slice(heard).find((l) => /\[update\] (could not (unpack|start the update)|\S+ is not one folder with |\S+ has no )/.test(l));
+      if (failed) throw new Error(`0.3.4's second attempt did not get to the swap: ${failed}`);
+      return app.exited;
+    }, 90_000);
     console.log(`0.3.4 quit: ${JSON.stringify(app.exited)}`);
 
     step("the swap");
-    const updates = join(data, "data", "updates");
-    seen.updates = updates;
-    const log = join(updates, `update-${NEW_VERSION}.log`);
     // read often and kept: the new version removes the log with the rest of its update as soon as
     // it starts; its ready file says it came back when the log's last line was missed
     const swap = await watchSwap({ log, ready, oldPids: [app.pid], timeout: 180_000 }).catch((e) => {
@@ -433,9 +496,10 @@ async function portable() {
     const machine = option("--expect-machine");
     if (machine && machineOf(program) !== machine) throw new Error(`${program} is built for ${machineOf(program)}, not ${machine}`);
     console.log(`${basename(program)} is built for ${machineOf(program)}`);
-    // exactly the candidate's files (and the data folder): nothing of 0.3.4 left, and what the
-    // candidate has is the candidate's, byte for byte
-    const diff = treeDiff(candidate, folder, ["data"]);
+    // exactly the candidate's files (and the data folder, and the system's file, which stayed where
+    // it was): nothing of 0.3.4 left, and what the candidate has is the candidate's, byte for byte
+    if (!existsSync(systemFile) || readFileSync(systemFile, "utf8") !== "the system's\n") throw new Error(`${basename(systemFile)} did not stay where it was`);
+    const diff = treeDiff(candidate, folder, ["data", basename(systemFile)]);
     const problems = [
       ...diff.missing.map((f) => `missing: ${f}`),
       ...diff.different.map((f) => `not the candidate's: ${f}`),

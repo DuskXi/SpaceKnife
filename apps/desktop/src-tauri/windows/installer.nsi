@@ -20,9 +20,12 @@
 ;     into place after it (spaceknife.nsh SkMakeStage / SkPlaceAll): once 0.3.4 is gone only
 ;     renames on one drive are left to do, and a full drive fails while 0.3.4 is still whole;
 ;   - WebView2 is also installed in an update when it is missing (0.3.4 did not need it), or
-;     updated when it is older than minimumWebview2Version, before anything of the old
-;     installation is touched; when that fails nothing changes, and a failed silent update starts
-;     the old version again;
+;     updated when it is older than minimumWebview2Version, and the new program is asked whether
+;     it can start (--startup-check), before anything of the old installation is touched; when
+;     that fails nothing changes, and a failed silent update starts the old version again and
+;     tells the user why (a message box: the app that started it has quit);
+;   - 0.3.4 is also found by its files when its registry keys are gone, and the uninstaller
+;     deletes the keys only when they name its own folder;
 ;   - a folder chosen on the directory page without "SpaceKnife" in it gets \SpaceKnife (0.3.4's
 ;     rule), and files go by name only (the list of what was installed, written next to them):
 ;     nothing deletes a folder as a whole;
@@ -105,7 +108,6 @@ Var UpdateMode
 Var NoShortcutMode
 Var OldMainBinaryName
 Var SkRelocated      ; 1: the earlier installation's folder is not safe, a new one is used
-Var SkMutex
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -241,8 +243,10 @@ Function SkPageScopeLeave
   Call SkRestoreContext
   ${If} $SkScope == "machine"
   ${AndIf} $SkIsAdmin <> 1
-    ; the elevated copy shows the remaining pages; this one waits for it, then quits
-    HideWindow
+    ; the elevated copy shows the remaining pages (not the ones before this one: ${SK_WIZARD_FLAG});
+    ; this one waits for it, then quits. The UAC prompt belongs to this window, which goes out of
+    ; sight only once the prompt is answered (SkRunElevated).
+    StrCpy $SkFromWizard 1
     Call SkRunElevated
     ${If} $0 = -1
       BringToFront
@@ -388,6 +392,16 @@ LangString skAnotherInstaller ${LANG_ENGLISH} "Another SpaceKnife installer is r
 LangString skNoSpace ${LANG_ENGLISH} "There is not enough free space for SpaceKnife on this drive. Nothing was changed."
 LangString skStageFailed ${LANG_ENGLISH} "SpaceKnife's new files could not be written (is the drive full?). Nothing was changed."
 LangString skPlaceFailed ${LANG_ENGLISH} "SpaceKnife could not be put in place ($SkPlaceFailed is in use). Close what uses it and run the installer again."
+LangString skAppStillRunning ${LANG_ENGLISH} "SpaceKnife could not be closed (it may run as administrator). Nothing was changed; close SpaceKnife and try again."
+LangString skCantStart ${LANG_ENGLISH} "SpaceKnife ${VERSION} can't start on this computer: $SkCantStart Nothing was changed."
+LangString skCheckTimeout ${LANG_ENGLISH} "it did not answer within ${SK_STARTUP_CHECK_MS} ms."
+LangString skCheckNotRun ${LANG_ENGLISH} "it could not be run."
+LangString skCheckExit ${LANG_ENGLISH} "it ended with exit code $0."
+LangString skUpdateFailed ${LANG_ENGLISH} "SpaceKnife ${VERSION} could not be installed."
+LangString skSeeLog ${LANG_ENGLISH} "What happened is in $TEMP\SpaceKnife-install.log"
+LangString skRunAgain ${LANG_ENGLISH} "The installer: $EXEPATH"
+LangString skBannerWebView2 ${LANG_ENGLISH} "Installing WebView2 for SpaceKnife…"
+LangString skBannerInstalling ${LANG_ENGLISH} "Installing SpaceKnife ${VERSION}…"
 !endif
 !ifdef LANG_SIMPCHINESE
 LangString skDataTitle ${LANG_SIMPCHINESE} "你的数据"
@@ -407,14 +421,37 @@ LangString skAnotherInstaller ${LANG_SIMPCHINESE} "另一个 SpaceKnife 安装�
 LangString skNoSpace ${LANG_SIMPCHINESE} "这个磁盘上的剩余空间不够安装 SpaceKnife。什么都没有改动。"
 LangString skStageFailed ${LANG_SIMPCHINESE} "SpaceKnife 的新文件写不进去（磁盘满了？）。什么都没有改动。"
 LangString skPlaceFailed ${LANG_SIMPCHINESE} "无法把 SpaceKnife 放到位（$SkPlaceFailed 正被占用）。请关闭占用它的程序后重新运行安装程序。"
+LangString skAppStillRunning ${LANG_SIMPCHINESE} "无法关闭 SpaceKnife（它可能以管理员身份运行）。什么都没有改动；请关闭 SpaceKnife 后重试。"
+LangString skCantStart ${LANG_SIMPCHINESE} "SpaceKnife ${VERSION} 在这台电脑上无法启动：$SkCantStart 什么都没有改动。"
+LangString skCheckTimeout ${LANG_SIMPCHINESE} "它在 ${SK_STARTUP_CHECK_MS} 毫秒内没有回应。"
+LangString skCheckNotRun ${LANG_SIMPCHINESE} "它无法运行。"
+LangString skCheckExit ${LANG_SIMPCHINESE} "它以退出码 $0 结束。"
+LangString skUpdateFailed ${LANG_SIMPCHINESE} "SpaceKnife ${VERSION} 没有装上。"
+LangString skSeeLog ${LANG_SIMPCHINESE} "经过写在 $TEMP\SpaceKnife-install.log"
+LangString skRunAgain ${LANG_SIMPCHINESE} "安装程序：$EXEPATH"
+LangString skBannerWebView2 ${LANG_SIMPCHINESE} "正在安装 SpaceKnife 需要的 WebView2…"
+LangString skBannerInstalling ${LANG_SIMPCHINESE} "正在安装 SpaceKnife ${VERSION}…"
 !endif
 
 ; ------------------------------------------------------------------ installer
 
 Function .onInit
+  ; not the folder it was started in: 0.3.4 starts it from its own folder (Program Files\SpaceKnife,
+  ; whose removal a current folder would hold up), and this instance may wait for the elevated copy
+  SetOutPath $TEMP
   Call SkParseFlags
   Call SkIsAdmin
   StrCpy $SkRelocated 0
+  StrCpy $SkMutex 0
+  StrCpy $SkOwnerHwnd ""
+  StrCpy $SkFailText ""
+  ; 0.3.4 starts the wizard with SW_HIDE (Node's windowsHide): it is shown all the same
+  ${IfNot} ${Silent}
+    Call SkShowIfStartedHidden
+    ${If} $0 = 1
+      ${SkLog} "started with SW_HIDE: the wizard is shown all the same"
+    ${EndIf}
+  ${EndIf}
   ; /D= (NSIS has set $INSTDIR from it and taken it out of $CMDLINE)
   StrCpy $SkDirFromCmd ""
   ${If} $INSTDIR != "${PLACEHOLDER_INSTALL_DIR}"
@@ -449,11 +486,22 @@ Function .onInit
   ${SkLog} "SpaceKnife ${VERSION} installer: $CMDLINE (scope $SkScope, admin $SkIsAdmin, update $UpdateMode, run $SkRun)"
 
   ; per machine without admin rights: the elevated copy does the work, this one waits for it and
-  ; afterwards starts the app as this user
+  ; afterwards starts the app as this user. There is no window of this instance yet (a silent run
+  ; has none at all): the UAC prompt belongs to a banner in front, else it may only flash in the
+  ; taskbar; the banner goes once the prompt is answered (SkRunElevated).
   ${If} $SkScope == "machine"
   ${AndIf} $SkIsAdmin <> 1
   ${AndIf} $SkInner <> 1
+    Banner::show "$(skBannerInstalling)"
+    Banner::getWindow
+    Pop $SkOwnerHwnd
     Call SkRunElevated
+    Push $0
+    Push $1
+    Banner::destroy
+    Pop $1
+    Pop $0
+    StrCpy $SkOwnerHwnd ""
     ${SkLog} "elevated copy: exit code $0 (error $1)"
     Push $1
     Push $0
@@ -471,7 +519,8 @@ Function .onInit
       ${AndIfNot} ${Silent}
         MessageBox MB_ICONEXCLAMATION "$(skNeedAdmin)"
       ${EndIf}
-      Call SkRestartPrevious
+      ; started again unless the copy says the earlier version is gone (exit code 3)
+      Call SkAfterElevatedFailed
       ${If} $0 = -1
         StrCpy $0 $1
       ${EndIf}
@@ -546,7 +595,7 @@ Section WebView2
       ${Else}
         DetailPrint "$(webview2DownloadError)"
         ${SkLog} "WebView2 download failed: $0"
-        Abort "$(webview2AbortError)"
+        ${SkAbort} "$(webview2AbortError)"
       ${EndIf}
       StrCpy $6 "$TEMP\MicrosoftEdgeWebview2Setup.exe"
       Goto install_webview2
@@ -569,17 +618,21 @@ Section WebView2
     !endif
 
     ${SkLog} "WebView2 is missing and this installer has no way to install it"
-    Abort "$(webview2AbortError)"
+    ${SkAbort} "$(webview2AbortError)"
 
     install_webview2:
       DetailPrint "$(installingWebview2)"
+      ; the bootstrapper downloads the runtime (about 150 MB) without a window of its own: a silent
+      ; run (the update 0.3.4 starts) shows a banner meanwhile, and says so when it fails (SkFailed)
+      !insertmacro SK_BANNER_SHOW "$(skBannerWebView2)"
       ExecWait "$6 ${WEBVIEW2INSTALLERARGS} /install" $1
+      !insertmacro SK_BANNER_HIDE
       ${SkLog} "WebView2 installer: exit code $1"
       ${If} $1 = 0
         DetailPrint "$(webview2InstallSuccess)"
       ${Else}
         DetailPrint "$(webview2InstallError)"
-        Abort "$(webview2AbortError)"
+        ${SkAbort} "$(webview2AbortError)"
       ${EndIf}
   ${Else}
     ; installed but older than the app needs: updated through EdgeUpdate first; when it stays
@@ -589,7 +642,7 @@ Section WebView2
     ${If} $R0 != ""
       ${SkLog} "WebView2 $R0 is older than ${MINIMUMWEBVIEW2VERSION} and could not be updated: nothing changed"
       DetailPrint "$(webview2InstallError)"
-      Abort "$(webview2AbortError)"
+      ${SkAbort} "$(webview2AbortError)"
     ${EndIf}
   ${EndIf}
   webview2_done:
@@ -611,7 +664,7 @@ Section Install
     IntOp $R2 ${ESTIMATEDSIZE} + 65536
     ${If} $R1 < $R2
       ${SkLog} "only $R1 KB free on $R0, $R2 KB needed: nothing changed"
-      Abort "$(skNoSpace)"
+      ${SkAbort} "$(skNoSpace)"
     ${EndIf}
   ${EndIf}
   ClearErrors
@@ -622,7 +675,7 @@ Section Install
   Call SkMakeStage
   ${If} $SkStage == ""
     ${SkLog} "no staging folder: nothing changed"
-    Abort "$(skStageFailed)"
+    ${SkAbort} "$(skStageFailed)"
   ${EndIf}
   ${SkLog} "staging in $SkStage (renames: $SkStageMove)"
   SetOutPath "$SkStage"
@@ -646,7 +699,19 @@ Section Install
   SetOutPath $PLUGINSDIR
   ${If} $SkStageMissing != ""
     ${SkLog} "the staged files are incomplete ($SkStageMissing): nothing changed"
-    Abort "$(skStageFailed)"
+    ${SkAbort} "$(skStageFailed)"
+  ${EndIf}
+
+  ; 1b. the new program, asked whether it can start on this computer (spaceknife.nsh
+  ;    SkStartupCheck: --startup-check, the WebView2 runtime the window needs, which the registry
+  ;    may claim while it is broken) before anything of the installed version is touched: when it
+  ;    can't, nothing changes and a silent update starts the installed version again
+  StrCpy $R0 "$SkStage\${MAINBINARYNAME}.exe"
+  Call SkStartupCheck
+  ${If} $R0 != ""
+    StrCpy $SkCantStart $R0
+    ${SkLog} "the new version can't start here ($R0): nothing changed"
+    ${SkAbort} "$(skCantStart)"
   ${EndIf}
 
   ; 2. SpaceKnife running from this folder or the earlier installation's (0.3.4 that is quitting or
@@ -664,7 +729,7 @@ Section Install
   ${EndIf}
   ${If} $R0 != ""
     ${SkLog} "SpaceKnife is still running: nothing changed"
-    Abort "$(skAppRunning)"
+    ${SkAbort} "$(skAppStillRunning)"
   ${EndIf}
   ${If} $SkOldKind == "fork"
   ${AndIf} $SkRelocated <> 1
@@ -672,7 +737,7 @@ Section Install
     ${If} $SkHeldFile != ""
       ${SkLog} "another program holds $INSTDIR\$SkHeldFile: nothing changed"
       StrCpy $SkPlaceFailed $SkHeldFile
-      Abort "$(skPlaceFailed)"
+      ${SkAbort} "$(skPlaceFailed)"
     ${EndIf}
   ${EndIf}
 
@@ -683,7 +748,7 @@ Section Install
     Call SkRemoveElectronBuilder
     ${If} $R0 != ""
       ${SkLog} "0.3.4 could not be removed: nothing changed"
-      Abort "$(skOldUninstallFailed)"
+      ${SkAbort} "$(skOldUninstallFailed)"
     ${EndIf}
     StrCpy $SkOldGone 1
     ; its entry in Apps & features goes (its uninstaller is gone); the record of its folder stays
@@ -720,7 +785,7 @@ Section Install
   Call SkPlaceAll
   ${If} $SkPlaceFailed != ""
     ${SkLog} "$SkPlaceFailed could not be put in place"
-    Abort "$(skPlaceFailed)"
+    ${SkAbort} "$(skPlaceFailed)"
   ${EndIf}
   SetOutPath $INSTDIR
 
@@ -786,6 +851,8 @@ Section Install
   Call SkMigrateShortcut
   StrCpy $R0 "$DESKTOP\${PRODUCTNAME}.lnk"
   Call SkMigrateShortcut
+  ; a relocated installation: this user's taskbar and Start pins of the old program too
+  Call SkMigratePins
   ${If} $SkTauriDir != ""
     ${If} $SkTauriBin == ""
       StrCpy $SkTauriBin "${MAINBINARYNAME}.exe"
@@ -795,6 +862,7 @@ Section Install
     Call SkMigrateShortcut
     StrCpy $R0 "$DESKTOP\${PRODUCTNAME}.lnk"
     Call SkMigrateShortcut
+    Call SkMigratePins
   ${EndIf}
   ${If} $UpdateMode <> 1
     ; a new installation, or the wizard over an earlier one: the Start menu entry is there
@@ -838,10 +906,10 @@ Function .onInstSuccess
 FunctionEnd
 
 Function .onInstFailed
-  ; a silent update that failed before the earlier version was removed: SpaceKnife comes back as
-  ; it was; the staged files go
-  Call SkDropStage
-  Call SkRestartPrevious
+  ; the staged files go; a silent update that failed before the earlier version was removed:
+  ; SpaceKnife comes back as it was, and the user is told why; exit code 3 once the earlier
+  ; version is gone (spaceknife.nsh SkFailed)
+  Call SkFailed
 FunctionEnd
 
 ; ------------------------------------------------------------------ uninstaller
@@ -934,8 +1002,21 @@ Section Uninstall
     ${EndIf}
   ${EndIf}
 
-  DeleteRegKey SHCTX "${SK_UNINSTKEY}"
-  DeleteRegKey SHCTX "${SK_INSTKEY}"
+  ; the GUID keys only when they are this installation's (they name no folder, or this one): an
+  ; uninstaller run on another folder (a forked copy elsewhere, one 0.3.4's installer runs) leaves
+  ; the keys of the installation that is there in place (spaceknife.nsh un.SkKeysOurs)
+  ReadRegStr $R0 SHCTX "${SK_INSTKEY}" "InstallLocation"
+  ${If} $R0 == ""
+    ReadRegStr $R0 SHCTX "${SK_UNINSTKEY}" "InstallLocation"
+  ${EndIf}
+  StrCpy $R1 $R0
+  Call un.SkKeysOurs
+  ${If} $R0 = 1
+    DeleteRegKey SHCTX "${SK_UNINSTKEY}"
+    DeleteRegKey SHCTX "${SK_INSTKEY}"
+  ${Else}
+    ${un.SkLog} "the GUID keys name another folder ($R1), not $INSTDIR: kept"
+  ${EndIf}
   ${If} $UpdateMode <> 1
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "${PRODUCTNAME}"
   ${EndIf}
@@ -964,6 +1045,11 @@ FunctionEnd
 Function SkSkipIfPassiveOrUpdate
   ${If} $PassiveMode = 1
   ${OrIf} $UpdateMode = 1
+    Abort
+  ${EndIf}
+  ; the elevated copy the scope page started: the outer instance has shown these pages
+  ${If} $SkInner = 1
+  ${AndIf} $SkFromWizard = 1
     Abort
   ${EndIf}
 FunctionEnd

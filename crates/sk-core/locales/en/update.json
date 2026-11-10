@@ -23,5 +23,16 @@
  "这个版本的发布没有列出这个文件的 SHA-256 校验值，没有下载": "This release lists no SHA-256 checksum for the file, so nothing was downloaded",
  "连不上 GitHub：{reason}": "Can't reach GitHub: {reason}",
  "连接 GitHub 超时": "The connection to GitHub timed out",
- "关于与更新": "About & updates"
+ "关于与更新": "About & updates",
+ "读不了 SpaceKnife 所在的文件夹（{error}），没有更新": "SpaceKnife's folder can't be read ({error}); nothing was updated",
+ "{names} 等 {count} 项": "{names} … {count} in all",
+ "文件夹里还有不是 SpaceKnife 的东西（{names}），为了不动它们，没有更新。请把 SpaceKnife 和它的 data 文件夹单独放进一个文件夹再更新": "The folder also holds things that are not SpaceKnife's ({names}); to leave them alone, nothing was updated. Put SpaceKnife and its data folder in a folder of their own, then update",
+ "新版本要用 Microsoft Edge WebView2 Runtime，这台电脑上没有或者版本太旧，没有更新": "The new version needs the Microsoft Edge WebView2 Runtime, which this computer lacks or has in too old a version; nothing was updated",
+ "新版本在这台电脑上启动不了，没有更新：{reason}": "The new version can't start on this computer; nothing was updated: {reason}",
+ "SpaceKnife 没有及时退出，没有换上 {version}": "SpaceKnife did not quit in time, so {version} was not put in place",
+ "读不了程序所在的文件夹，没有换上 {version}": "The program's folder couldn't be read, so {version} was not put in place",
+ "旧版本的文件一直被占用，没有换上 {version}": "The old version's files stayed in use, so {version} was not put in place",
+ "{version} 的文件放不进程序文件夹，已换回原来的版本": "{version}'s files couldn't be moved into the program's folder; the previous version is back",
+ "{version} 换上之后没能启动，已换回原来的版本": "{version} was put in place but didn't start; the previous version is back",
+ "更新到 {version} 没有完成，已换回原来的版本": "The update to {version} didn't complete; the previous version is back"
 }

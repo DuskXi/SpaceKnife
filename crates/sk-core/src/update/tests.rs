@@ -368,6 +368,30 @@ fn choose_by_channel() {
 }
 
 #[test]
+fn the_stable_channel_updates_during_0_x() {
+    // every 0.x release is a pre-release on GitHub (release.yml): 「只要正式版」 takes those whose
+    // version has no pre-release part, and from 1.0 on GitHub's flag counts again
+    let pre = |t: &str| gh_with(t, |r| r["prerelease"] = json!(true));
+    let list = |items: Vec<Value>| parse_releases(&json!(items), RELEASES_URL).unwrap();
+    let stable = |r: &[Release]| choose(r, UpdateChannel::Stable).map(|r| r.version.clone());
+    let preview = |r: &[Release]| choose(r, UpdateChannel::Preview).map(|r| r.version.clone());
+    // GitHub's list as it is today
+    let today = list(vec![pre("v0.3.5"), pre("v0.3.4"), pre("v0.3.0")]);
+    assert_eq!(stable(&today).as_deref(), Some("0.3.5"));
+    assert_eq!(preview(&today).as_deref(), Some("0.3.5"));
+    assert!(today.iter().all(|r| r.prerelease && !r.preview()));
+    // a pre-release version stays on the preview channel, flag or not
+    let beta = list(vec![pre("v0.4.0-beta.1"), gh("v0.4.0-rc.1"), pre("v0.3.5")]);
+    assert_eq!(stable(&beta).as_deref(), Some("0.3.5"));
+    assert_eq!(preview(&beta).as_deref(), Some("0.4.0-rc.1"));
+    // from 1.0 on, a release GitHub marks as a pre-release is a preview
+    let one = list(vec![pre("v1.1.0"), gh("v1.0.0"), pre("v0.9.0")]);
+    assert_eq!(stable(&one).as_deref(), Some("1.0.0"));
+    assert_eq!(preview(&one).as_deref(), Some("1.1.0"));
+    assert!(one[0].preview() && !one[1].preview() && !one[2].preview());
+}
+
+#[test]
 fn trim_keeps_the_newest_releases() {
     let mut items: Vec<Value> = (0..4)
         .flat_map(|m| (0..12).map(move |p| gh(&format!("v0.{m}.{p}"))))
@@ -1054,7 +1078,12 @@ fn update_file_versions() {
     assert_eq!(f("SpaceKnife_0.4.1_aarch64.dmg").as_deref(), Some("0.4.1"));
     assert_eq!(f("staging-0.3.3").as_deref(), Some("0.3.3"));
     assert_eq!(f("previous-0.3.2").as_deref(), Some("0.3.2"));
-    for n in ["update-0.3.3.ps1", "update-0.3.3.sh", "update-0.3.3.log"] {
+    for n in [
+        "update-0.3.3.ps1",
+        "update-0.3.3.sh",
+        "update-0.3.3.log",
+        "rollback-0.3.3.json",
+    ] {
         assert_eq!(f(n).as_deref(), Some("0.3.3"));
     }
     for other in [
@@ -1084,10 +1113,28 @@ fn clean_updates_folder() {
     ] {
         std::fs::write(folder.join(name), "x").unwrap();
     }
-    for name in ["staging-0.3.2", "previous-0.3.1", "staging-0.3.3"] {
-        std::fs::create_dir_all(folder.join(name).join("sub")).unwrap();
-        std::fs::write(folder.join(name).join("sub/f"), "x").unwrap();
+    // a replaced copy's files: SpaceKnife's own (a name of its layouts on this system), or one that
+    // holds something else (an older swap moved it there), which stays
+    let own = swap::own_names(std::env::consts::OS)[0];
+    for (name, inside) in [
+        ("staging-0.3.2", "sub"),
+        ("previous-0.3.1", own),
+        ("staging-0.3.3", "sub"),
+        ("previous-0.3.0", "notes"),
+    ] {
+        std::fs::create_dir_all(folder.join(name).join(inside)).unwrap();
+        std::fs::write(folder.join(name).join(inside).join("f"), "x").unwrap();
     }
+    std::fs::write(folder.join("previous-0.3.0").join(".DS_Store"), "x").unwrap();
+    std::fs::write(folder.join("previous-0.3.1").join("desktop.ini"), "x").unwrap();
+    assert_eq!(
+        not_spaceknifes(&folder.join("previous-0.3.0"), std::env::consts::OS).as_deref(),
+        Some("notes")
+    );
+    assert_eq!(
+        not_spaceknifes(&folder.join("previous-0.3.1"), std::env::consts::OS),
+        None
+    );
     let mut removed = clean_updates(&folder, Some("0.3.2"));
     removed.sort();
     assert_eq!(
@@ -1112,6 +1159,7 @@ fn clean_updates_folder() {
         [
             "SpaceKnife-0.3.3-Setup-x64.exe",
             "SpaceKnife-0.4.0-beta.1-x86_64.AppImage",
+            "previous-0.3.0",
             "readme.txt",
             "staging-0.3.3"
         ]
@@ -1125,6 +1173,70 @@ fn clean_updates_folder() {
 }
 
 #[test]
+fn the_note_of_an_undone_update() {
+    let _g = crate::i18n::TEST_LOCK.lock();
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("updates");
+    std::fs::create_dir(&folder).unwrap();
+    let log = folder.join("update-0.3.6.log");
+    let note = rollback::Rollback::new(
+        "0.3.6",
+        rollback::WHY_START,
+        "it ended before it was ready, with exit code 1",
+        Some(&log),
+    );
+    let file = rollback::write(&folder, &note).unwrap();
+    assert_eq!(file, folder.join("rollback-0.3.6.json"));
+    // what a later version's swap may write: fields this one doesn't know, a reason word it
+    // doesn't know; a broken note is skipped
+    std::fs::write(
+        folder.join("rollback-0.3.7.json"),
+        r#"{"v": 2, "version": "0.3.7", "why": "gremlins", "at": "2099-12-01T00:00:00Z", "more": [1]}"#,
+    )
+    .unwrap();
+    std::fs::write(folder.join("rollback-0.3.8.json"), "{").unwrap();
+    let all = rollback::read_all(&folder);
+    assert_eq!(
+        all.iter()
+            .map(|(_, n)| n.version.as_str())
+            .collect::<Vec<_>>(),
+        ["0.3.7", "0.3.6"],
+        "the latest first"
+    );
+    assert_eq!(all[1].1, note);
+    crate::i18n::set_language(crate::i18n::Language::En);
+    assert_eq!(
+        all[1].1.reason(),
+        "0.3.6 was put in place but didn't start; the previous version is back"
+    );
+    assert_eq!(
+        all[0].1.reason(),
+        "The update to 0.3.7 didn't complete; the previous version is back"
+    );
+    crate::i18n::set_language(crate::i18n::Language::ZhCn);
+    assert_eq!(
+        all[1].1.reason(),
+        "0.3.6 换上之后没能启动，已换回原来的版本"
+    );
+    for why in [
+        rollback::WHY_QUIT,
+        rollback::WHY_READ,
+        rollback::WHY_BUSY,
+        rollback::WHY_PLACE,
+    ] {
+        let r = rollback::Rollback::new("0.3.6", why, "", None);
+        crate::i18n::set_language(crate::i18n::Language::En);
+        let en = r.reason();
+        crate::i18n::set_language(crate::i18n::Language::ZhCn);
+        assert!(en.contains("0.3.6") && en != r.reason(), "{why}: {en}");
+    }
+    // once that version runs (or a newer one), its note goes with the rest of its update
+    let mut removed = clean_updates(&folder, Some("0.3.6"));
+    removed.sort();
+    assert_eq!(removed, ["rollback-0.3.6.json"]);
+}
+
+#[test]
 fn what_is_still_held_after_an_update_is_removed_later() {
     // a 0.3.4 portable copy updated to 0.3.5: the swap left the Electron app's files in
     // previous-0.3.4, and the new version's first cleaning ran while 0.3.4's last processes still
@@ -1132,8 +1244,10 @@ fn what_is_still_held_after_an_update_is_removed_later() {
     // start; what is left is tried again, and nothing else
     let tmp = tempfile::tempdir().unwrap();
     let folder = tmp.path().join("updates");
-    std::fs::create_dir_all(folder.join("previous-0.3.4").join("locales")).unwrap();
-    std::fs::write(folder.join("previous-0.3.4").join("ffmpeg.dll"), "x").unwrap();
+    // the copy's own files (names of its layouts on this system)
+    let own = swap::own_names(std::env::consts::OS)[0];
+    std::fs::create_dir_all(folder.join("previous-0.3.4").join(own)).unwrap();
+    std::fs::write(folder.join("previous-0.3.4").join(own).join("held"), "x").unwrap();
     std::fs::create_dir_all(
         folder
             .join("staging-0.3.5")

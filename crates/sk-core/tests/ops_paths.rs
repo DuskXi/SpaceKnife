@@ -11,6 +11,7 @@ use sk_core::ops::paths::{
 };
 
 mod exit_cleanup;
+mod fs_caps;
 
 /// One SpaceKnife home for this test binary (set before anything reads it), removed when it exits.
 fn sk_home() -> &'static Path {
@@ -381,21 +382,7 @@ fn protected_reason_on_this_system() {
 }
 
 fn make_dir_link(target: &Path, link: &Path) {
-    #[cfg(windows)]
-    {
-        // a junction needs no privilege
-        let ok = std::process::Command::new("cmd")
-            .args(["/C", "mklink", "/J"])
-            .arg(link)
-            .arg(target)
-            .output()
-            .unwrap()
-            .status
-            .success();
-        assert!(ok, "mklink /J");
-    }
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(target, link).unwrap();
+    assert!(fs_caps::dir_link(target, link), "link {}", link.display());
 }
 
 #[test]
@@ -405,6 +392,14 @@ fn protected_reason_sees_through_links() {
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("snap.sks"), b"x").unwrap();
     let dir = tempfile::tempdir().unwrap();
+    if !fs_caps::links(dir.path()) {
+        fs_caps::skip(
+            "protected_reason_sees_through_links",
+            dir.path(),
+            "no links",
+        );
+        return;
+    }
     let link = dir.path().join("way-in");
     make_dir_link(&data, &link);
     let inside = protected_key(&link.join("snap.sks").to_string_lossy());

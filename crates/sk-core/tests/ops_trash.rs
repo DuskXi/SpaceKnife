@@ -22,6 +22,7 @@ const WIN: bool = cfg!(windows);
 const MAC: bool = cfg!(target_os = "macos");
 
 mod exit_cleanup;
+mod fs_caps;
 
 /// One SpaceKnife home (and on Linux, one XDG data home) for this binary, removed when it exits;
 /// tests that change the process-wide seams run one at a time.
@@ -132,6 +133,46 @@ fn trash_all(paths: &[String]) -> Vec<OpResult> {
     move_to_trash(paths, OpOptions::default())
 }
 
+/// One thread for every operation while it lives (what a test of the order of things
+/// counts on), as many as the device takes again when dropped.
+struct Threads;
+
+impl Threads {
+    fn set(n: usize) -> Threads {
+        sk_core::ops::par::seams::WORKERS.store(n, Ordering::SeqCst);
+        Threads
+    }
+}
+
+impl Drop for Threads {
+    fn drop(&mut self) {
+        sk_core::ops::par::seams::WORKERS.store(0, Ordering::SeqCst);
+    }
+}
+
+/// Whether the volume `dir` is on has no trash (a network share, a removable disk, a volume set
+/// to delete at once …): then moving something there must be refused with the reason the user is
+/// shown, which offers a permanent deletion, and nothing may change; the test that needs a trash
+/// is skipped (said so).
+fn without_trash(dir: &Path, what: &str) -> bool {
+    let Some(reason) = fs_caps::no_trash(dir) else {
+        return false;
+    };
+    let probe = dir.join("no-trash-probe.txt");
+    std::fs::write(&probe, b"p").unwrap();
+    let r = trash_all(&[s(&probe)]).remove(0);
+    assert_eq!(
+        (r.code, r.message.as_str()),
+        (OpCode::NoTrash, reason.as_str()),
+        "{r:?}"
+    );
+    assert!(r.message.contains("永久删除"), "{r:?}");
+    assert_eq!(std::fs::read(&probe).unwrap(), b"p");
+    std::fs::remove_file(&probe).unwrap();
+    fs_caps::skip(what, dir, &format!("no trash here: {reason}"));
+    true
+}
+
 // --------------------------------------------------------------------------- round trips
 
 #[test]
@@ -141,6 +182,9 @@ fn trash_and_restore() {
     }
     let (base, _g) = setup();
     let dir = tempfile::tempdir().unwrap();
+    if without_trash(dir.path(), "trash_and_restore") {
+        return;
+    }
     let (f, d) = make(dir.path());
     let recorded = [shell_name(&f), shell_name(&d)]; // before they leave
     let mut seen: Vec<(usize, usize, OpCode)> = Vec::new();
@@ -173,14 +217,21 @@ fn trash_and_restore() {
                     .to_string_lossy()
                     .starts_with("$I")
             );
-            let bin = info
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .file_name()
-                .unwrap();
-            assert_eq!(bin.to_string_lossy().to_lowercase(), "$recycle.bin");
+            // `$Recycle.Bin\<SID>`, or `$Recycle.Bin` itself on FAT and exFAT (no folder per user)
+            let name_of = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_lowercase());
+            let folder = info.parent().unwrap();
+            let shared = name_of(folder).as_deref() == Some("$recycle.bin");
+            let bin = if shared {
+                folder
+            } else {
+                folder.parent().unwrap()
+            };
+            assert_eq!(name_of(bin).as_deref(), Some("$recycle.bin"), "{info:?}");
+            #[cfg(windows)] // (`if WIN` is decided at run time: the rest compiles everywhere)
+            {
+                let root = sk_core::ops::win::volume_root(&s(&f)).unwrap();
+                assert_eq!(shared, !sk_core::ops::win::per_user_bin(&root));
+            }
             let (got_size, when, path) = parse_recycle_info(&std::fs::read(info).unwrap()).unwrap();
             let short = if size == 5 { s(&f) } else { s(&d) };
             assert!(
@@ -231,6 +282,9 @@ fn restore_never_overwrites() {
     }
     let (_, _g) = setup();
     let dir = tempfile::tempdir().unwrap();
+    if without_trash(dir.path(), "restore_never_overwrites") {
+        return;
+    }
     let f = dir.path().join("gone").join("a.txt");
     std::fs::create_dir(f.parent().unwrap()).unwrap();
     std::fs::write(&f, b"old").unwrap();
@@ -263,14 +317,22 @@ fn prechecks_skip_items() {
     let held = dir.path().join("held.txt");
     std::fs::write(&held, b"x").unwrap();
     let paths = [s(&dir.path().join("nope")), s(&own), s(&held)];
+    // (Windows looks at holders after the bin: without one, that is what the item is told)
+    let bin_first = WIN && fs_caps::no_trash(dir.path()).is_some();
     let handle = held_open(&held);
     let res = trash_all(&paths);
     let _trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
+    let held_code = if bin_first {
+        OpCode::NoTrash
+    } else {
+        OpCode::Locked
+    };
     assert_eq!(
         codes(&res),
-        [OpCode::Missing, OpCode::Protected, OpCode::Locked]
+        [OpCode::Missing, OpCode::Protected, held_code],
+        "{res:?}"
     );
-    assert!(res[2].message.contains("使用"));
+    assert!(bin_first || res[2].message.contains("使用"), "{res:?}");
     let res = delete_permanently(&paths, OpOptions::default());
     assert_eq!(
         codes(&res),
@@ -286,7 +348,11 @@ fn cancel_midway() {
         return;
     }
     let (_, _g) = setup();
+    let _one = Threads::set(1); // one item after the other: the first is done when it stops
     let dir = tempfile::tempdir().unwrap();
+    if without_trash(dir.path(), "cancel_midway") {
+        return;
+    }
     let files: Vec<String> = (0..3)
         .map(|i| {
             let p = dir.path().join(format!("c{i}.txt"));
@@ -330,6 +396,12 @@ fn trash_status_of_a_folder() {
     let (base, _g) = setup();
     let dir = tempfile::tempdir().unwrap();
     let status = trash_status(&s(dir.path()), true);
+    if let Some(reason) = fs_caps::no_trash(dir.path()) {
+        assert!(!status.available && status.reason == reason, "{status:?}");
+        assert!(!reason.is_empty() && !trash_available(&s(dir.path())));
+        fs_caps::skip("trash_status_of_a_folder", dir.path(), &reason);
+        return;
+    }
     assert!(
         status.available && trash_available(&s(dir.path())),
         "{status:?}"
@@ -378,6 +450,9 @@ mod windows {
         let (_, _g) = setup();
         let _seam = Seam;
         let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "no_trash_on_a_volume_that_destroys") {
+            return;
+        }
         let (f, d) = make(dir.path());
         *trash::seams::BIN_SETTINGS.lock() = Some(|_, _| (true, 1 << 40));
         let res = trash_all(&[s(&f), s(&d)]);
@@ -393,6 +468,9 @@ mod windows {
         let (_, _g) = setup();
         let _seam = Seam;
         let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "no_trash_when_too_big_for_the_bin") {
+            return;
+        }
         let big = dir.path().join("big.bin");
         std::fs::write(&big, b"b".repeat(2000)).unwrap();
         let folder = dir.path().join("many");
@@ -418,30 +496,36 @@ mod windows {
         assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 3);
     }
 
-    const LP: &str = "\\\\?\\";
+    /// `p` as a path past MAX_PATH must be given (`\\?\`, `\\?\UNC\`).
+    fn lp(p: &Path) -> PathBuf {
+        PathBuf::from(fs_caps::verbatim(p))
+    }
 
     fn deep_tree(top: &Path) -> PathBuf {
         std::fs::create_dir(top).unwrap();
-        let mut p = s(top);
-        while p.len() < 300 {
-            p = format!("{p}\\{}", "n".repeat(40));
-            std::fs::create_dir(format!("{LP}{p}")).unwrap();
+        let mut p = top.to_path_buf();
+        while s(&p).len() < 300 {
+            p = p.join("n".repeat(40));
+            std::fs::create_dir(lp(&p)).unwrap();
         }
-        let leaf = format!("{p}\\leaf.txt");
-        std::fs::write(format!("{LP}{leaf}"), b"x").unwrap();
-        PathBuf::from(leaf)
+        let leaf = p.join("leaf.txt");
+        std::fs::write(lp(&leaf), b"x").unwrap();
+        leaf
     }
 
     #[test]
     fn no_trash_when_paths_get_too_long() {
         let (_, _g) = setup();
         let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "no_trash_when_paths_get_too_long") {
+            return;
+        }
         let top = dir.path().join("deep");
         let leaf = deep_tree(&top);
         let r = trash_all(&[s(&top)]).remove(0);
         assert_eq!((r.code, r.message), (OpCode::NoTrash, text("too_long")));
-        assert!(Path::new(&format!("{LP}{}", s(&leaf))).exists());
-        std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
+        assert!(lp(&leaf).exists());
+        std::fs::remove_dir_all(lp(&top)).unwrap();
     }
 
     /// A folder whose scanned size is far below the bin's capacity is not measured again, but its
@@ -452,6 +536,9 @@ mod windows {
     fn a_trusted_size_still_checks_path_lengths() {
         let (_, _g) = setup();
         let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "a_trusted_size_still_checks_path_lengths") {
+            return;
+        }
         let top = dir.path().join("deep");
         let leaf = deep_tree(&top);
         let sizes = HashMap::from([(s(&top), 1i64)]); // far below a quarter of any bin
@@ -469,8 +556,8 @@ mod windows {
             (OpCode::NoTrash, text("too_long")),
             "{r:?}"
         );
-        assert!(Path::new(&format!("{LP}{}", s(&leaf))).exists());
-        std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
+        assert!(lp(&leaf).exists());
+        std::fs::remove_dir_all(lp(&top)).unwrap();
         // the scan's longest path decides without a walk: here it says too long
         let plain = dir.path().join("plain");
         std::fs::create_dir(&plain).unwrap();
@@ -503,6 +590,9 @@ mod windows {
         let (_, _g) = setup();
         let _seam = Seam;
         let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "engine_guard_refuses_destruction") {
+            return;
+        }
         let top = dir.path().join("deep");
         let leaf = deep_tree(&top);
         let other = dir.path().join("other.txt");
@@ -524,20 +614,228 @@ mod windows {
             }
             other => panic!("{other:?}: {res:?}"),
         }
-        assert!(Path::new(&format!("{LP}{}", s(&leaf))).exists());
+        assert!(lp(&leaf).exists());
         assert_eq!(
             codes(&restore(std::slice::from_ref(&res[1].trash_ref))),
             [OpCode::Ok]
         );
         trashed.0.clear();
         assert_eq!(std::fs::read(&other).unwrap(), b"o");
-        std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
+        std::fs::remove_dir_all(lp(&top)).unwrap();
+    }
+
+    /// What a rename into the bin would move although something uses it: a file another program
+    /// holds open while sharing its deletion (NTFS renames it), a folder with a running program
+    /// in it (its image is mapped, no handle is open: the folder renames). Both are reported
+    /// held, by the program's name, and stay where they are, as before the bin was written to
+    /// directly (the Restart Manager asked about every item then).
+    #[test]
+    fn items_in_use_that_a_rename_would_move_stay() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "items_in_use_that_a_rename_would_move_stay") {
+            return;
+        }
+        let shared = dir.path().join("log.txt");
+        std::fs::write(&shared, b"l").unwrap();
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x7) // read, write, delete
+            .open(&shared)
+            .unwrap();
+        let app = dir.path().join("app");
+        std::fs::create_dir(&app).unwrap();
+        let exe = app.join("waiter.exe");
+        let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        std::fs::copy(Path::new(&system).join("System32").join("PING.EXE"), &exe).unwrap();
+        std::fs::write(app.join("readme.txt"), b"r").unwrap();
+        let mut running = std::process::Command::new(&exe)
+            .args(["-n", "60", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let res = trash_all(&[s(&shared), s(&app)]);
+        let trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
+        let _ = running.kill();
+        let _ = running.wait();
+        drop(handle);
+        drop(trashed);
+        assert_eq!(codes(&res), [OpCode::Locked, OpCode::Locked], "{res:?}");
+        assert!(res.iter().all(|r| r.message.contains("使用")), "{res:?}");
+        assert!(shared.exists() && exe.exists() && app.join("readme.txt").exists());
+    }
+
+    /// A link goes into the bin of the volume it is on, whatever it points to, and never makes its
+    /// folder's other items look as if they were on its target's volume: a junction to another
+    /// volume (dangling here: nothing there is touched) first, then a file beside it, both go
+    /// into this volume's bin and come back.
+    #[test]
+    fn a_link_to_another_volume_does_not_move_its_neighbours_there() {
+        use sk_core::ops::win;
+        let (_, _g) = setup();
+        let _one = Threads::set(1); // the link is checked first
+        let dir = tempfile::tempdir().unwrap();
+        if without_trash(
+            dir.path(),
+            "a_link_to_another_volume_does_not_move_its_neighbours_there",
+        ) {
+            return;
+        }
+        if !fs_caps::links(dir.path()) {
+            fs_caps::skip("a_link_to_another_volume", dir.path(), "no junctions");
+            return;
+        }
+        let here = win::volume_root(&s(dir.path())).unwrap();
+        if win::own_bin(&here).is_none() {
+            // (a fresh account: the shell makes the bin folder first; a dangling link is its call)
+            eprintln!("skipped: this volume's bin is the shell's to write to");
+            return;
+        }
+        let Some(other) = ('C'..='Z')
+            .map(|c| format!("{c}:\\"))
+            .find(|r| !r.eq_ignore_ascii_case(&here) && win::drive_type(r) == win::DRIVE_FIXED)
+        else {
+            eprintln!("skipped: no other fixed volume");
+            return;
+        };
+        let link = dir.path().join("elsewhere");
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(format!("{other}sk-no-such-folder-{}", std::process::id()))
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "mklink /J");
+        let file = dir.path().join("beside.txt");
+        std::fs::write(&file, b"b").unwrap();
+        let res = trash_all(&[s(&link), s(&file)]);
+        let mut trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
+        assert_eq!(codes(&res), [OpCode::Ok, OpCode::Ok], "{res:?}");
+        for r in &res {
+            assert!(
+                r.trash_ref.to_lowercase().starts_with(&here.to_lowercase()),
+                "{r:?}"
+            );
+        }
+        assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok, OpCode::Ok]);
+        trashed.0.clear();
+        assert!(std::fs::symlink_metadata(&link).is_ok() && file.exists());
+        let _ = std::fs::remove_dir(&link); // the junction only
+    }
+
+    /// Moved into the bin by a rename of its own (the user's own bin folder, room in it): the
+    /// `$I` record is what Windows 10 writes — version 2, the size the scan gave, the original
+    /// path — beside its `$R`, and a restore puts it back.
+    #[test]
+    fn a_folder_goes_into_the_bin_by_a_rename() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "a_folder_goes_into_the_bin_by_a_rename") {
+            return;
+        }
+        let folder = dir.path().join("photos.2024");
+        std::fs::create_dir_all(folder.join("sub")).unwrap();
+        std::fs::write(folder.join("sub").join("a.jpg"), b"jpeg").unwrap();
+        let recorded = shell_name(&folder);
+        let key = s(&folder);
+        let sizes = HashMap::from([(key.clone(), 4096i64)]);
+        let longest = HashMap::from([(key.clone(), 10usize)]);
+        let bytes = HashMap::from([(key.clone(), 4i64)]);
+        let r = move_to_trash(
+            &[s(&folder)],
+            OpOptions {
+                sizes: Some(&sizes),
+                longest: Some(&longest),
+                bytes: Some(&bytes),
+                ..OpOptions::default()
+            },
+        )
+        .remove(0);
+        let mut trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!((r.code, r.message.clone()), (OpCode::Ok, text("trashed")));
+        assert!(!folder.exists());
+        let info = PathBuf::from(&r.trash_ref);
+        let name = info.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("$I") && name.ends_with(".2024"), "{name}");
+        let data = std::fs::read(&info).unwrap();
+        assert_eq!(i64::from_le_bytes(data[..8].try_into().unwrap()), 2);
+        let (size, when, path) = parse_recycle_info(&data).unwrap();
+        assert!(same(&path, &recorded), "{path} / {recorded}");
+        assert_eq!(size, 4); // what the scan measured, not walked again
+        assert!(when > 1.7e9);
+        let payload = info.with_file_name(format!("$R{}", &name[2..]));
+        assert_eq!(
+            std::fs::read(payload.join("sub").join("a.jpg")).unwrap(),
+            b"jpeg"
+        );
+        assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok]);
+        trashed.0.clear();
+        assert_eq!(
+            std::fs::read(folder.join("sub").join("a.jpg")).unwrap(),
+            b"jpeg"
+        );
+    }
+
+    /// What the bin holds is told from its `$I` records: one item more and its bytes after a
+    /// move, as before once it is back.
+    #[test]
+    fn the_bin_is_sized_from_its_records() {
+        let (_, _g) = setup();
+        let _one = Threads::set(1);
+        let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "the_bin_is_sized_from_its_records") {
+            return;
+        }
+        let root = sk_core::ops::win::volume_root(&s(dir.path())).unwrap();
+        let f = dir.path().join("five.bin");
+        std::fs::write(&f, b"12345").unwrap();
+        let before = sk_core::ops::win::bin_usage(&root);
+        assert!(before.0 >= 0 && before.1 >= 0, "{before:?}");
+        let r = trash_all(&[s(&f)]).remove(0);
+        let mut trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(r.code, OpCode::Ok, "{r:?}");
+        let during = sk_core::ops::win::bin_usage(&root);
+        assert_eq!((during.0 - before.0, during.1 - before.1), (5, 1));
+        assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok]);
+        trashed.0.clear();
+        assert_eq!(sk_core::ops::win::bin_usage(&root), before);
+    }
+
+    /// A folder with a file open inside cannot be renamed: it is reported held (by this test
+    /// process, the Restart Manager says) and stays where it is, whole.
+    #[test]
+    fn a_folder_with_an_open_file_stays_whole() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "a_folder_with_an_open_file_stays_whole") {
+            return;
+        }
+        let folder = dir.path().join("busy");
+        std::fs::create_dir(&folder).unwrap();
+        let held = folder.join("doc.docx");
+        std::fs::write(&held, b"d").unwrap();
+        std::fs::write(folder.join("free.txt"), b"f").unwrap();
+        let handle = held_open(&held);
+        let r = trash_all(&[s(&folder)]).remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        drop(handle);
+        assert_eq!(r.code, OpCode::Locked, "{r:?}");
+        assert!(r.message.contains("使用"), "{r:?}");
+        assert!(held.exists() && folder.join("free.txt").exists());
     }
 
     #[test]
     fn engine_reports_a_held_file() {
         let (_, _g) = setup();
         let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "engine_reports_a_held_file") {
+            return;
+        }
         let held = dir.path().join("held.txt");
         std::fs::write(&held, b"h").unwrap();
         let handle = held_open(&held);
@@ -596,7 +894,12 @@ mod windows {
         std::fs::create_dir(&holder).unwrap();
         std::fs::write(holder.join("x.txt"), b"x").unwrap();
         let mnt = holder.join("mnt");
+        if !fs_caps::links(dir.path()) {
+            fs_caps::skip("folder_mount_points", dir.path(), "no junctions");
+            return;
+        }
         let Some(_mounted) = mount_volume_at(&mnt, dir.path()) else {
+            fs_caps::skip("folder_mount_points", dir.path(), "the volume has no GUID");
             return;
         };
         assert!(sk_core::ops::paths::is_mount(&mnt));
@@ -619,20 +922,7 @@ mod windows {
         assert_eq!(sk_core::ops::paths::protected_key(&s(&plain)), None);
     }
 
-    /// The 8.3 short name of an existing path (cmd's `%~sI`), None when the volume has none.
-    fn short_name(p: &Path) -> Option<String> {
-        use std::os::windows::process::CommandExt;
-        // raw: cmd parses its own command line, and Rust's quoting would escape the quotes
-        let out = std::process::Command::new("cmd")
-            .raw_arg(format!(
-                "/d /c for %I in (\"{}\") do @echo %~sI",
-                p.display()
-            ))
-            .output()
-            .ok()?;
-        let short = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        (short.contains('~') && Path::new(&short).exists()).then_some(short)
-    }
+    use fs_caps::short_name;
 
     /// Asked through a short name (CI's temp folder is `C:\Users\RUNNER~1\…`), reported by the
     /// shell under the long one: still matched to the request.
@@ -640,12 +930,16 @@ mod windows {
     fn trash_through_a_short_name() {
         let (_, _g) = setup();
         let dir = tempfile::tempdir().unwrap();
+        if without_trash(dir.path(), "trash_through_a_short_name") {
+            return;
+        }
         let folder = dir.path().join("a folder with a long name");
         std::fs::create_dir(&folder).unwrap();
         let file = folder.join("some long file name.txt");
         std::fs::write(&file, b"x").unwrap();
         let Some(short) = short_name(&file) else {
-            return; // no 8.3 names on this volume
+            fs_caps::skip("trash_through_a_short_name", dir.path(), "no 8.3 names");
+            return;
         };
         let r = move_to_trash(&[short.as_str()], OpOptions::default()).remove(0);
         let _trashed = Trashed(vec![r.trash_ref.clone()]);
@@ -665,10 +959,17 @@ mod windows {
     fn names_that_are_not_unicode_come_back_through_a_short_name() {
         let (_, _g) = setup();
         let dir = tempfile::tempdir().unwrap();
+        if without_trash(
+            dir.path(),
+            "names_that_are_not_unicode_come_back_through_a_short_name",
+        ) {
+            return;
+        }
         let long = dir.path().join("a folder with a long name");
         std::fs::create_dir(&long).unwrap();
         let Some(short) = short_name(&long) else {
-            return; // no 8.3 names on this volume
+            fs_caps::skip("names_through_a_short_name", dir.path(), "no 8.3 names");
+            return;
         };
         super::odd_names_round_trip(Path::new(&short));
     }
@@ -731,6 +1032,23 @@ mod freedesktop {
         let f = vol.join("dir").join("a b.txt");
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
         std::fs::write(&f, b"t").unwrap();
+        // FAT, exFAT: no folder modes (the mount's umask), so no sticky .Trash and no 0700
+        let keeps_modes = {
+            let p = vol.join(".mode-probe");
+            std::fs::create_dir(&p).unwrap();
+            let ok = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700)).is_ok()
+                && std::fs::metadata(&p).unwrap().permissions().mode() & 0o7777 == 0o700;
+            std::fs::remove_dir(&p).unwrap();
+            ok
+        };
+        if admin && !keeps_modes {
+            crate::fs_caps::skip(
+                "freedesktop::topdir_admin_trash",
+                dir.path(),
+                "no folder modes, so no sticky .Trash",
+            );
+            return;
+        }
         if admin {
             std::fs::create_dir(vol.join(".Trash")).unwrap();
             std::fs::set_permissions(vol.join(".Trash"), std::fs::Permissions::from_mode(0o1777))
@@ -752,10 +1070,18 @@ mod freedesktop {
             PathBuf::from(&r.trash_ref),
             root.join("info").join("a b.txt.trashinfo")
         );
-        assert_eq!(
-            std::fs::metadata(&root).unwrap().permissions().mode() & 0o7777,
-            0o700
-        );
+        if keeps_modes {
+            assert_eq!(
+                std::fs::metadata(&root).unwrap().permissions().mode() & 0o7777,
+                0o700
+            );
+        } else {
+            crate::fs_caps::skip(
+                "freedesktop::topdir_trash (its 0700 check)",
+                dir.path(),
+                "no folder modes",
+            );
+        }
         assert!(
             std::fs::read_to_string(&r.trash_ref)
                 .unwrap()
@@ -793,6 +1119,95 @@ mod freedesktop {
         let r = trash_all(&[s(&f)]).remove(0);
         assert_eq!((r.code, r.message), (OpCode::NoTrash, text("no_trash_dir")));
         assert!(f.exists() && !trash_available(&s(&f)));
+    }
+
+    #[test]
+    fn directorysizes_lines() {
+        use trash::fd::{DirSize, format_directorysizes, parse_directorysizes};
+        let entries = vec![
+            DirSize {
+                size: 4096,
+                mtime: 1_290_678_378,
+                name: b"Untitled Folder".to_vec(),
+            },
+            DirSize {
+                size: 12,
+                mtime: 7,
+                name: "报告 %".as_bytes().to_vec(),
+            },
+        ];
+        let text = format_directorysizes(&entries);
+        assert!(text.starts_with(b"4096 1290678378 Untitled%20Folder\n"));
+        assert_eq!(parse_directorysizes(&text), entries);
+        // malformed lines and names with a slash are left out
+        let odd = b"x 1 a\n10 2\n5 6 a%2Fb\n3 4 ok\n";
+        assert_eq!(
+            parse_directorysizes(odd),
+            [DirSize {
+                size: 3,
+                mtime: 4,
+                name: b"ok".to_vec()
+            }]
+        );
+    }
+
+    /// A folder moved to the trash with its scanned size gets its `directorysizes` line; the
+    /// trash's size is told from that line without walking the folder (while the `.trashinfo`
+    /// is unchanged), and from a walk once it is not (the line is written again).
+    #[test]
+    fn trashed_folders_are_sized_from_the_cache() {
+        let (base, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("big folder");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("x.bin"), vec![b'x'; 10_000]).unwrap();
+        let sizes = HashMap::from([(s(&folder), 777_777i64)]);
+        let r = move_to_trash(
+            &[s(&folder)],
+            OpOptions {
+                sizes: Some(&sizes),
+                ..OpOptions::default()
+            },
+        )
+        .remove(0);
+        let mut trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(r.code, OpCode::Ok, "{r:?}");
+        let trash_root = base.join("xdg").join("Trash");
+        let lines = trash::fd::parse_directorysizes(
+            &std::fs::read(trash_root.join("directorysizes")).unwrap(),
+        );
+        let mine = lines
+            .iter()
+            .find(|e| e.name == b"big folder")
+            .expect("a line for the folder");
+        assert_eq!(mine.size, 777_777);
+        let used = trash_status(&s(dir.path()), true).used;
+        assert!(used >= 777_777, "{used}"); // the line's size, not the folder's 10 kB
+        // the .trashinfo changed: walked again, the line rewritten with what is there
+        let info = PathBuf::from(&r.trash_ref);
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&info)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        let used = trash_status(&s(dir.path()), true).used;
+        assert!((10_000..777_777).contains(&used), "{used}");
+        let lines = trash::fd::parse_directorysizes(
+            &std::fs::read(trash_root.join("directorysizes")).unwrap(),
+        );
+        let mine = lines.iter().find(|e| e.name == b"big folder").unwrap();
+        assert!(mine.size < 777_777 && mine.size >= 10_000, "{mine:?}");
+        assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok]);
+        trashed.0.clear();
+        assert!(folder.join("x.bin").exists());
+        // gone from the trash: its line goes too
+        trash_status(&s(dir.path()), true);
+        let lines = trash::fd::parse_directorysizes(
+            &std::fs::read(trash_root.join("directorysizes")).unwrap(),
+        );
+        assert!(!lines.iter().any(|e| e.name == b"big folder"), "{lines:?}");
     }
 }
 
@@ -884,20 +1299,7 @@ fn rename_without_replacing() {
 // --------------------------------------------------------------------------- permanent deletion
 
 fn make_link(target: &Path, link: &Path) {
-    #[cfg(windows)]
-    {
-        let ok = std::process::Command::new("cmd")
-            .args(["/C", "mklink", "/J"])
-            .arg(link)
-            .arg(target)
-            .output()
-            .unwrap()
-            .status
-            .success();
-        assert!(ok);
-    }
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(target, link).unwrap();
+    assert!(fs_caps::dir_link(target, link), "link {}", link.display());
 }
 
 #[test]
@@ -907,31 +1309,48 @@ fn delete_permanently_trees_links_files() {
     let outside = dir.path().join("outside");
     std::fs::create_dir(&outside).unwrap();
     std::fs::write(outside.join("keep.txt"), b"k").unwrap();
+    let links = fs_caps::links(dir.path());
+    if !links {
+        fs_caps::skip("deleting links", dir.path(), "no links");
+    }
     let tree = dir.path().join("tree");
     std::fs::create_dir_all(tree.join("a b").join("深")).unwrap();
     std::fs::write(tree.join("a b").join("深").join("x.txt"), b"x").unwrap();
-    let ro = tree.join("readonly.txt");
-    std::fs::write(&ro, b"r").unwrap();
-    let mut perm = std::fs::metadata(&ro).unwrap().permissions();
-    perm.set_readonly(true);
-    std::fs::set_permissions(&ro, perm).unwrap();
-    make_link(&outside, &tree.join("a b").join("link")); // inside the tree: removed, never followed
+    if fs_caps::read_only_files(dir.path()) {
+        let ro = tree.join("readonly.txt");
+        std::fs::write(&ro, b"r").unwrap();
+        let mut perm = std::fs::metadata(&ro).unwrap().permissions();
+        perm.set_readonly(true);
+        std::fs::set_permissions(&ro, perm).unwrap();
+    } else {
+        fs_caps::skip(
+            "deleting a read-only file",
+            dir.path(),
+            "no read-only files",
+        );
+    }
     let top_link = dir.path().join("top-link");
-    make_link(&outside, &top_link);
+    let mut asked = vec![s(&tree)];
+    if links {
+        make_link(&outside, &tree.join("a b").join("link")); // inside the tree: removed, never followed
+        make_link(&outside, &top_link);
+        asked.push(s(&top_link));
+    }
     let single = dir.path().join("single.bin");
     std::fs::write(&single, b"s").unwrap();
+    asked.push(s(&single));
     let mut seen: Vec<OpCode> = Vec::new();
     let mut progress = |_: usize, _: usize, r: &OpResult| seen.push(r.code);
     let res = delete_permanently(
-        &[s(&tree), s(&top_link), s(&single)],
+        &asked,
         OpOptions {
             progress: Some(&mut progress),
             ..OpOptions::default()
         },
     );
     let got: Vec<(OpCode, String)> = res.iter().map(|r| (r.code, r.message.clone())).collect();
-    assert_eq!(got, vec![(OpCode::Ok, text("deleted")); 3]);
-    assert_eq!(seen, [OpCode::Ok; 3]);
+    assert_eq!(got, vec![(OpCode::Ok, text("deleted")); asked.len()]);
+    assert_eq!(seen, vec![OpCode::Ok; asked.len()]);
     assert!(!tree.exists() && std::fs::symlink_metadata(&top_link).is_err() && !single.exists());
     assert_eq!(std::fs::read(outside.join("keep.txt")).unwrap(), b"k");
 }
@@ -939,6 +1358,7 @@ fn delete_permanently_trees_links_files() {
 #[test]
 fn delete_permanently_cancel() {
     let (_, _g) = setup();
+    let _one = Threads::set(1); // one item after the other: the first is done when it stops
     let dir = tempfile::tempdir().unwrap();
     let files: Vec<String> = (0..3)
         .map(|i| {
@@ -971,6 +1391,7 @@ fn delete_permanently_cancel() {
 #[test]
 fn delete_inside_a_folder_can_be_cancelled() {
     let (_, _g) = setup();
+    let _one = Threads::set(1); // the polls counted below are one thread's
     let dir = tempfile::tempdir().unwrap();
     let tree = dir.path().join("t");
     for i in 0..3 {
@@ -994,6 +1415,165 @@ fn delete_inside_a_folder_can_be_cancelled() {
         (OpCode::Cancelled, text("cancelled_partly"))
     );
     assert!(tree.exists());
+}
+
+// --------------------------------------------------------------------------- several threads
+
+/// `folders` folders of `files` files below `top`, two levels deep.
+fn wide_tree(top: &Path, folders: usize, files: usize) {
+    for a in 0..folders {
+        for b in 0..2 {
+            let d = top.join(format!("a{a}")).join(format!("b{b}"));
+            std::fs::create_dir_all(&d).unwrap();
+            for f in 0..files {
+                std::fs::write(d.join(format!("f{f}.txt")), b"w").unwrap();
+            }
+        }
+        std::fs::write(top.join(format!("a{a}")).join("top.txt"), b"t").unwrap();
+    }
+}
+
+/// Several items and the folders inside them go on several threads at once: all of it, each
+/// item reported once, as itself.
+#[test]
+fn trees_are_deleted_on_several_threads() {
+    let (_, _g) = setup();
+    let _four = Threads::set(4);
+    let dir = tempfile::tempdir().unwrap();
+    let items: Vec<PathBuf> = (0..5)
+        .map(|i| dir.path().join(format!("item{i}")))
+        .collect();
+    for it in &items {
+        wide_tree(it, 12, 15);
+    }
+    let file = dir.path().join("single.txt");
+    std::fs::write(&file, b"s").unwrap();
+    let mut asked: Vec<String> = items.iter().map(|p| s(p)).collect();
+    asked.insert(2, s(&file));
+    let seen = std::sync::Mutex::new(Vec::new());
+    let mut progress = |done: usize, total: usize, r: &OpResult| {
+        seen.lock().unwrap().push((done, total, r.path.clone()));
+    };
+    let res = delete_permanently(
+        &asked,
+        OpOptions {
+            progress: Some(&mut progress),
+            ..OpOptions::default()
+        },
+    );
+    assert_eq!(codes(&res), vec![OpCode::Ok; 6], "{res:?}");
+    assert_eq!(
+        res.iter().map(|r| r.path.clone()).collect::<Vec<_>>(),
+        asked
+    );
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(
+        seen.iter().map(|s| s.0).collect::<Vec<_>>(),
+        (1..=6).collect::<Vec<_>>()
+    );
+    let mut reported: Vec<String> = seen.into_iter().map(|s| s.2).collect();
+    reported.sort();
+    let mut want = asked.clone();
+    want.sort();
+    assert_eq!(reported, want);
+    assert!(items.iter().all(|p| std::fs::symlink_metadata(p).is_err()) && !file.exists());
+}
+
+/// What cannot be deleted (held open on Windows, in a folder without write permission
+/// elsewhere) stays with each folder above it; on several threads the rest of the item goes.
+#[test]
+fn what_cannot_go_stays_with_its_folders_the_rest_goes() {
+    let (_, _g) = setup();
+    let _four = Threads::set(4);
+    let dir = tempfile::tempdir().unwrap();
+    if !WIN && !fs_caps::folder_permissions(dir.path()) {
+        let why = "a read-only folder does not keep this process out (root, or no permissions)";
+        fs_caps::skip("what_cannot_go_stays_with_its_folders", dir.path(), why);
+        return;
+    }
+    let top = dir.path().join("sel");
+    wide_tree(&top, 8, 10);
+    let stuck_dir = top.join("a3").join("b1");
+    let stuck = stuck_dir.join("f4.txt");
+    #[cfg(windows)]
+    let handle = held_open(&stuck);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stuck_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    }
+    let r = delete_permanently(&[s(&top)], no_locks()).remove(0);
+    #[cfg(windows)]
+    drop(handle);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stuck_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    assert_eq!(r.code, OpCode::Error, "{r:?}");
+    assert!(r.message.starts_with("部分内容未能删除"), "{r:?}");
+    assert!(stuck.exists());
+    for a in (0..8).filter(|&a| a != 3) {
+        assert!(!top.join(format!("a{a}")).exists(), "a{a} left");
+    }
+    assert!(!top.join("a3").join("b0").exists() && !top.join("a3").join("top.txt").exists());
+}
+
+/// An item inside another one (never from the basket, but the call allows it) is deleted first,
+/// then the one around it: both are done, nothing is left.
+#[test]
+fn an_item_inside_another_is_deleted_first() {
+    let (_, _g) = setup();
+    let _four = Threads::set(4);
+    let dir = tempfile::tempdir().unwrap();
+    let outer = dir.path().join("outer");
+    wide_tree(&outer, 4, 5);
+    let inner = outer.join("a1");
+    let res = delete_permanently(&[s(&outer), s(&inner)], no_locks());
+    assert_eq!(codes(&res), [OpCode::Ok, OpCode::Ok], "{res:?}");
+    assert!(std::fs::symlink_metadata(&outer).is_err());
+}
+
+/// On several threads a cancel stops what has not started: an item reported done is gone, one
+/// reported cancelled is (partly) still there, and not every item ran.
+#[test]
+fn a_cancel_stops_deleting_on_several_threads() {
+    let (_, _g) = setup();
+    let _four = Threads::set(4);
+    let dir = tempfile::tempdir().unwrap();
+    let items: Vec<PathBuf> = (0..16).map(|i| dir.path().join(format!("c{i}"))).collect();
+    for it in &items {
+        wide_tree(it, 3, 6);
+    }
+    let seen = AtomicUsize::new(0);
+    let mut progress = |_: usize, _: usize, _: &OpResult| {
+        seen.fetch_add(1, Ordering::SeqCst);
+    };
+    let cancel = || seen.load(Ordering::SeqCst) > 0;
+    let asked: Vec<String> = items.iter().map(|p| s(p)).collect();
+    let res = delete_permanently(
+        &asked,
+        OpOptions {
+            progress: Some(&mut progress),
+            cancel: Some(&cancel),
+            check_locks: false,
+            ..OpOptions::default()
+        },
+    );
+    assert_eq!(
+        seen.load(Ordering::SeqCst),
+        16,
+        "every item gets its final result"
+    );
+    let done = res.iter().filter(|r| r.code == OpCode::Ok).count();
+    assert!((1..16).contains(&done), "{done} of 16 done");
+    for (r, p) in res.iter().zip(&items) {
+        match r.code {
+            OpCode::Ok => assert!(!p.exists(), "{r:?}"),
+            OpCode::Cancelled => assert!(p.exists(), "{r:?}"),
+            other => panic!("{other:?}: {r:?}"),
+        }
+    }
 }
 
 #[test]
@@ -1077,6 +1657,14 @@ fn a_folder_swapped_for_a_link_is_not_entered() {
     let (_, _g) = setup();
     let _w = Walk;
     let dir = tempfile::tempdir().unwrap();
+    if !fs_caps::links(dir.path()) {
+        fs_caps::skip(
+            "a_folder_swapped_for_a_link_is_not_entered",
+            dir.path(),
+            "no links",
+        );
+        return;
+    }
     let target = dir.path().join("target");
     std::fs::create_dir(&target).unwrap();
     std::fs::write(target.join("precious.txt"), b"keep").unwrap();
@@ -1106,6 +1694,14 @@ fn a_parent_swapped_for_a_link_is_not_followed() {
     let (_, _g) = setup();
     let _w = Walk;
     let dir = tempfile::tempdir().unwrap();
+    if !fs_caps::links(dir.path()) {
+        fs_caps::skip(
+            "a_parent_swapped_for_a_link_is_not_followed",
+            dir.path(),
+            "no links",
+        );
+        return;
+    }
     let target = dir.path().join("target");
     std::fs::create_dir_all(target.join("deeper")).unwrap();
     std::fs::write(target.join("deeper").join("precious.txt"), b"keep").unwrap();
@@ -1138,6 +1734,14 @@ fn a_parent_swapped_for_a_link_is_not_followed() {
 fn names_with_a_backslash_are_deleted_as_they_are() {
     let (_, _g) = setup();
     let dir = tempfile::tempdir().unwrap();
+    if !fs_caps::backslash_names(dir.path()) {
+        fs_caps::skip(
+            "names_with_a_backslash",
+            dir.path(),
+            "no backslash in names",
+        );
+        return;
+    }
     let outside = dir.path().join("outside");
     std::fs::create_dir(&outside).unwrap();
     std::fs::write(outside.join("important.txt"), b"keep").unwrap();
@@ -1166,22 +1770,30 @@ fn odd_names_inside_a_folder_are_deleted_exactly() {
     let dir = tempfile::tempdir().unwrap();
     let sel = dir.path().join("sel");
     std::fs::create_dir(&sel).unwrap();
-    let long = format!("\\\\?\\{}", s(&sel));
-    std::fs::write(format!("{long}\\odd."), b"dot").unwrap();
-    std::fs::write(format!("{long}\\odd"), b"plain").unwrap();
-    std::fs::create_dir(format!("{long}\\space ")).unwrap();
-    std::fs::write(format!("{long}\\space \\in.txt"), b"in").unwrap();
-    let mut w: Vec<u16> = "lone".encode_utf16().collect();
-    w.push(0xDC00);
-    let lone = sel.join(std::ffi::OsString::from_wide(&w));
-    std::fs::write(&lone, b"lone").unwrap();
-    let mut p = s(&sel.join("deep"));
-    std::fs::create_dir(&p).unwrap();
-    while p.len() < 300 {
-        p = format!("{p}\\{}", "n".repeat(40));
-        std::fs::create_dir(format!("\\\\?\\{p}")).unwrap();
+    let long = fs_caps::verbatim(&sel);
+    if fs_caps::trailing_names(dir.path()) {
+        std::fs::write(format!("{long}\\odd."), b"dot").unwrap();
+        std::fs::write(format!("{long}\\odd"), b"plain").unwrap();
+        std::fs::create_dir(format!("{long}\\space ")).unwrap();
+        std::fs::write(format!("{long}\\space \\in.txt"), b"in").unwrap();
+    } else {
+        fs_caps::skip("names ending in a dot or space", dir.path(), "refused");
     }
-    std::fs::write(format!("\\\\?\\{p}\\leaf.txt"), b"x").unwrap();
+    if fs_caps::odd_names(dir.path()) {
+        let mut w: Vec<u16> = "lone".encode_utf16().collect();
+        w.push(0xDC00);
+        let lone = sel.join(std::ffi::OsString::from_wide(&w));
+        std::fs::write(&lone, b"lone").unwrap();
+    } else {
+        fs_caps::skip("names that are not Unicode", dir.path(), "refused");
+    }
+    let mut p = sel.join("deep");
+    std::fs::create_dir(&p).unwrap();
+    while s(&p).len() < 300 {
+        p = p.join("n".repeat(40));
+        std::fs::create_dir(fs_caps::verbatim(&p)).unwrap();
+    }
+    std::fs::write(fs_caps::verbatim(&p.join("leaf.txt")), b"x").unwrap();
     let r = delete_permanently(&[s(&sel)], no_locks()).remove(0);
     assert_eq!(
         (r.code, r.message.as_str()),
@@ -1518,6 +2130,69 @@ impl BindMount {
             at: at.to_path_buf(),
         })
     }
+
+    /// A small tmpfs (a device of its own, anyone may write to it) mounted at `at`.
+    fn tmpfs(prefix: &[&'static str], at: &Path) -> Option<BindMount> {
+        let mut c = match prefix.split_first() {
+            Some((cmd, rest)) => {
+                let mut c = std::process::Command::new(cmd);
+                c.args(rest).arg("mount");
+                c
+            }
+            None => std::process::Command::new("mount"),
+        };
+        c.args(["-t", "tmpfs", "-o", "size=4m,mode=0777", "tmpfs"])
+            .arg(at);
+        c.output()
+            .is_ok_and(|o| o.status.success())
+            .then(|| BindMount {
+                prefix: prefix.to_vec(),
+                at: at.to_path_buf(),
+            })
+    }
+}
+
+/// Two bind mounts of one file system (one device) are two top directories: an item of each
+/// goes into the `.Trash-$uid` of its own (the trash found for the first is not the second's: a
+/// rename into it would cross mounts and fail). Needs root, as above.
+#[cfg(target_os = "linux")]
+#[test]
+fn two_mounts_of_one_device_have_a_trash_each() {
+    let (_, _g) = setup();
+    let Some(root) = privileged() else {
+        eprintln!("skipped: mount needs root or passwordless sudo");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let fs = dir.path().join("fs");
+    std::fs::create_dir(&fs).unwrap();
+    let Some(_tmpfs) = BindMount::tmpfs(&root, &fs) else {
+        eprintln!("skipped: mount -t tmpfs failed (no CAP_SYS_ADMIN here)");
+        return;
+    };
+    let (a, b) = (fs.join("a"), fs.join("b"));
+    let (m1, m2) = (dir.path().join("m1"), dir.path().join("m2"));
+    for d in [&a, &b, &m1, &m2] {
+        std::fs::create_dir(d).unwrap();
+    }
+    let (Some(_m1), Some(_m2)) = (
+        BindMount::new(&root, &a, &m1),
+        BindMount::new(&root, &b, &m2),
+    ) else {
+        eprintln!("skipped: mount --bind failed");
+        return;
+    };
+    let (x, y) = (m1.join("x.txt"), m2.join("y.txt"));
+    std::fs::write(&x, b"x").unwrap();
+    std::fs::write(&y, b"y").unwrap();
+    let res = trash_all(&[s(&x), s(&y)]);
+    let mut trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
+    assert_eq!(codes(&res), [OpCode::Ok, OpCode::Ok], "{res:?}");
+    assert!(res[0].trash_ref.starts_with(&s(&m1)), "{res:?}");
+    assert!(res[1].trash_ref.starts_with(&s(&m2)), "{res:?}");
+    assert_eq!(codes(&restore(&trashed.0)), [OpCode::Ok, OpCode::Ok]);
+    trashed.0.clear();
+    assert!(x.exists() && y.exists());
 }
 
 #[cfg(target_os = "linux")]
@@ -1576,7 +2251,12 @@ fn names_that_are_not_unicode_come_back_as_they_were() {
 fn odd_names_round_trip(dir: &Path) {
     let folder = dir.join(odd_os_name("folder", ""));
     if std::fs::create_dir(&folder).is_err() {
-        return; // a file system that refuses such names
+        fs_caps::skip("names that are not Unicode", dir, "refused");
+        return;
+    }
+    if without_trash(dir, "names that are not Unicode in the trash") {
+        let _ = std::fs::remove_dir(&folder);
+        return;
     }
     // the second one has it in its extension too, which the item keeps in the trash
     let ext = odd_os_name(".b", "");

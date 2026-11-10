@@ -89,7 +89,8 @@ fn text(key: TextKey, lang: Lang) -> &'static str {
 
 static LANG: RwLock<Option<Lang>> = RwLock::new(None);
 
-fn system_lang() -> Lang {
+/// The system's UI language (Windows: the user's preferred UI languages, not the formats' locale).
+pub fn system_lang() -> Lang {
     Lang::from_locale(&sys_locale::get_locale().unwrap_or_default())
 }
 

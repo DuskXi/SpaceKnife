@@ -39,7 +39,10 @@
 !define SK_DATA "SpaceKnife"
 !define SK_EB_UNINSTALLER "Uninstall SpaceKnife.exe"
 !define SK_INNER_FLAG "--sk-elevated"
+; the elevated copy the scope page started (the outer instance showed the pages before that one)
+!define SK_WIZARD_FLAG "--sk-wizard"
 !define SK_UPDATED_ARG "--updated"
+!define SK_LOG_FILE "$TEMP\SpaceKnife-install.log"
 ; what this installer put in $INSTDIR, one path per line (folders end with \), for the next
 ; update and the uninstaller (SkWriteManifest, SkRemoveListed)
 !define SK_MANIFEST "installed-files.txt"
@@ -61,8 +64,12 @@ Var SkOldUninst      ; its uninstaller (path, unquoted)
 Var SkTauriDir       ; a stock Tauri test build's install folder in this scope
 Var SkTauriUninst
 Var SkTauriBin       ; its MainBinaryName
-Var SkLogFile        ; the log file's handle (silent runs write what they did)
 Var SkDirFromCmd     ; the folder /D= gave (NSIS takes /D= out of $CMDLINE)
+Var SkMutex          ; the one-installer-at-a-time mutex this instance holds (0: none)
+Var SkFromWizard     ; 1: ${SK_WIZARD_FLAG} (this elevated copy was started from the scope page)
+Var SkOwnerHwnd      ; SkRunElevated: the window the UAC prompt belongs to ("" : $HWNDPARENT)
+Var SkFailText       ; why the installation stopped (SK_ABORT), for SkFailed's message
+Var SkCantStart      ; SkStartupCheck's answer for the message (skCantStart)
 Var SkStage          ; the new files before they go into $INSTDIR ("" when there is none)
 Var SkStageMove      ; 1: $SkStage is beside $INSTDIR (renames), 0: elsewhere (copies)
 Var SkStageMissing   ; the first file the staging lacks ("" when it has them all)
@@ -75,6 +82,8 @@ Var SkProcPids       ; " pid pid … "
 Var SkProcInfo       ; "name (pid), …" (the log)
 Var SkProcStuck      ; "name (pid): error N, …": what could not be ended
 Var SkHeldFile       ; SkCheckReplaceable: the first file another program keeps from being replaced
+Var SkWv2Seen        ; un.SkEndWebView2In: the WebView2 processes it last set out to end (the log)
+Var SkWv2Stuck       ; un.SkEndWebView2In: the WebView2 processes it could not end, as last logged
 
 ; ------------------------------------------------------------------ small helpers (both sides)
 
@@ -218,6 +227,7 @@ Function ${UN}SkParseFlags
   StrCpy $SkScopeFlag ""
   StrCpy $SkScopeForced 0
   StrCpy $SkInner 0
+  StrCpy $SkFromWizard 0
   StrCpy $SkKeepShortcuts 0
   StrCpy $SkDeleteData 0
   StrCpy $SkDeleteAppData 0
@@ -280,6 +290,11 @@ Function ${UN}SkParseFlags
     StrCpy $SkInner 1
   ${EndIf}
   ClearErrors
+  ${GetOptions} $R9 "${SK_WIZARD_FLAG}" $R8
+  ${IfNot} ${Errors}
+    StrCpy $SkFromWizard 1
+  ${EndIf}
+  ClearErrors
   ${GetOptions} $R9 "--keep-shortcuts" $R8
   ${IfNot} ${Errors}
     StrCpy $SkKeepShortcuts 1
@@ -310,8 +325,9 @@ Function ${UN}SkParseFlags
   ClearErrors
 FunctionEnd
 
-; The elevated copy's arguments: these ones plus ${SK_INNER_FLAG} and the scope, put before /D= or
-; _?= (NSIS reads those only as the last argument). -> $R9
+; The elevated copy's arguments: these ones plus ${SK_INNER_FLAG} and the scope (and
+; ${SK_WIZARD_FLAG} when the scope page starts it), put before /D= or _?= (NSIS reads those only as
+; the last argument). -> $R9
 Function ${UN}SkElevatedParams
   ${GetParameters} $R9
   StrCpy $R9 " $R9"
@@ -328,6 +344,13 @@ Function ${UN}SkElevatedParams
   ${EndIf}
   ClearErrors
   StrCpy $R9 "$R9 ${SK_INNER_FLAG} $SkScopeFlag"
+  ${If} $SkFromWizard = 1
+    ${WordFind} "$R9" "${SK_WIZARD_FLAG}" "E*" $R7
+    ${If} ${Errors}
+      StrCpy $R9 "$R9 ${SK_WIZARD_FLAG}"
+    ${EndIf}
+    ClearErrors
+  ${EndIf}
   !if "${UN}" == "un."
     StrCpy $R9 "$R9 _?=$INSTDIR"
   !else
@@ -343,18 +366,40 @@ Function ${UN}SkElevatedParams
 FunctionEnd
 
 ; Start this program elevated (SkElevatedParams) and wait for it. $0 = its exit code, or -1 when
-; it could not start ($1 = the Windows error: 1223 when the user said no to UAC).
+; it could not start ($1 = the Windows error: 1223 when the user said no to UAC). The UAC prompt
+; belongs to $SkOwnerHwnd (a banner: a silent run, or one without its window yet) or the wizard
+; ($HWNDPARENT), brought to the front first: a prompt of a program without a window in front only
+; flashes in the taskbar. That window goes out of sight once the prompt is answered (the elevated
+; copy shows what follows), never before. The log is closed between lines (SkLogLine): the
+; elevated copy writes to it too.
 Function ${UN}SkRunElevated
+  Push $5
   Call ${UN}SkElevatedParams
+  StrCpy $5 $SkOwnerHwnd
+  ${If} $5 == ""
+    StrCpy $5 $HWNDPARENT
+  ${EndIf}
+  ${If} $5 == ""
+    StrCpy $5 0
+  ${EndIf}
+  ${If} $5 <> 0
+    System::Call 'user32::SetForegroundWindow(p r5)'
+  ${EndIf}
   ; SHELLEXECUTEINFOW, all 15 members (&l4: its size); SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC
-  System::Call '*(&l4, i 0x140, p $HWNDPARENT, w "runas", w "$EXEPATH", w "$R9", p 0, i 1, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .r2'
+  System::Call '*(&l4, i 0x140, p r5, w "runas", w "$EXEPATH", w "$R9", p 0, i 1, p 0, p 0, p 0, p 0, i 0, p 0, p 0) p .r2'
   System::Call 'shell32::ShellExecuteExW(p r2) i .r3 ?e'
   Pop $1
   ${If} $3 = 0
     System::Free $2
     StrCpy $0 -1
+    Pop $5
     Return
   ${EndIf}
+  ${If} $5 <> 0
+    ; SW_HIDE
+    System::Call 'user32::ShowWindow(p r5, i 0)'
+  ${EndIf}
+  Pop $5
   System::Call '*$2(i, i, p, p, p, p, p, i, p, p, p, p, i, p, p .r4)'
   System::Free $2
   System::Call 'kernel32::WaitForSingleObject(p r4, i -1)'
@@ -841,16 +886,41 @@ Function ${UN}SkRemoveListed
   Pop $R1
 FunctionEnd
 
-; A line in the log (silent runs): %TEMP%\SpaceKnife-install.log
+; A line in the log (silent runs too): %TEMP%\SpaceKnife-install.log. Opened, written and closed for
+; each line, so that no instance keeps it from another one (the elevated copy, an uninstaller this
+; one runs): a few tries when another one has it open that moment. The error flag is kept.
 Function ${UN}SkLogLine
   Exch $R0
-  ${If} $SkLogFile == ""
-    FileOpen $SkLogFile "$TEMP\SpaceKnife-install.log" a
-    FileSeek $SkLogFile 0 END
+  Push $R1
+  Push $R2
+  Push $R3
+  StrCpy $R3 0
+  ${If} ${Errors}
+    StrCpy $R3 1
   ${EndIf}
-  ${If} $SkLogFile != ""
-    FileWriteUTF16LE $SkLogFile "$R0$\r$\n"
+  StrCpy $R2 0
+  sk_log_again:
+  ClearErrors
+  FileOpen $R1 "${SK_LOG_FILE}" a
+  ${If} ${Errors}
+  ${OrIf} $R1 == ""
+    IntOp $R2 $R2 + 1
+    ${If} $R2 < 5
+      Sleep 20
+      Goto sk_log_again
+    ${EndIf}
+  ${Else}
+    FileSeek $R1 0 END
+    FileWriteUTF16LE $R1 "$R0$\r$\n"
+    FileClose $R1
   ${EndIf}
+  ClearErrors
+  ${If} $R3 = 1
+    SetErrors
+  ${EndIf}
+  Pop $R3
+  Pop $R2
+  Pop $R1
   Pop $R0
 FunctionEnd
 
@@ -906,8 +976,23 @@ FunctionEnd
 
 ; ------------------------------------------------------------------ installer only
 
+; Where SkDetectScope and SkFindPrevious look for a 0.3.4 without its keys: the scope's default
+; folder (SkDefaultDirOf; the logic test puts a folder of its sandbox in)
+!ifndef SK_DEFAULT_DIR_OF
+  !define SK_DEFAULT_DIR_OF SkDefaultDirOf
+!endif
+
+; Stop the installation with TEXT (the wizard shows it); a silent update shows it too (SkFailed)
+!macro SK_ABORT TEXT
+  StrCpy $SkFailText "${TEXT}"
+  Abort "${TEXT}"
+!macroend
+!define SkAbort '!insertmacro SK_ABORT'
+
 ; The scope when no flag says it: the one with an installation (per user wins when both have one,
-; as with electron-builder), else per user.
+; as with electron-builder), else per user. With no key in either hive, a 0.3.4 whose keys are gone
+; is looked for by its files (SkIsEbFolder): in the per-user default folder, then in the per-machine
+; one.
 Function SkDetectScope
   ${If} $SkScopeForced = 1
     Goto sk_scope_flag
@@ -926,7 +1011,20 @@ Function SkDetectScope
   ${ElseIf} "$2$3$5" != ""
     StrCpy $SkScope "machine"
   ${Else}
+    Push $R0
     StrCpy $SkScope "user"
+    StrCpy $R0 "user"
+    Call ${SK_DEFAULT_DIR_OF}
+    Call SkIsEbFolder
+    ${If} $R0 <> 1
+      StrCpy $R0 "machine"
+      Call ${SK_DEFAULT_DIR_OF}
+      Call SkIsEbFolder
+      ${If} $R0 = 1
+        StrCpy $SkScope "machine"
+      ${EndIf}
+    ${EndIf}
+    Pop $R0
   ${EndIf}
   sk_scope_flag:
   ${If} $SkScope == "machine"
@@ -981,6 +1079,15 @@ Function SkFindPrevious
     ${Else}
       StrCpy $SkOldKind "fork"
     ${EndIf}
+  ${Else}
+    ; no key in this scope: a 0.3.4 whose keys are gone (its files are all there is), in the folder
+    ; /D= gives or the scope's default one. Left there, its uninstaller would later take this
+    ; version with its RMDir /r.
+    Push $R0
+    StrCpy $R0 $SkScope
+    Call ${SK_DEFAULT_DIR_OF}
+    Call SkFindByFiles
+    Pop $R0
   ${EndIf}
   ; a stock Tauri installer (test builds): Software\DuskXi\SpaceKnife "" = its folder
   ReadRegStr $SkTauriDir SHCTX "${SK_TAURI_PRODUCTKEY}" ""
@@ -992,6 +1099,85 @@ Function SkFindPrevious
   ${AndIf} $SkTauriUninst != ""
     ${GetParent} $SkTauriUninst $SkTauriDir
   ${EndIf}
+FunctionEnd
+
+; $R0 = a folder -> $R0 = 1 when SpaceKnife 0.3.4 (electron-builder) is installed there by its files
+; (its uninstaller and resources\app.asar), else 0. Registers but $R0 are kept.
+Function SkIsEbFolder
+  ${If} $R0 != ""
+  ${AndIf} ${FileExists} "$R0\${SK_EB_UNINSTALLER}"
+  ${AndIf} ${FileExists} "$R0\resources\app.asar"
+    StrCpy $R0 1
+  ${Else}
+    StrCpy $R0 0
+  ${EndIf}
+FunctionEnd
+
+; A 0.3.4 installation without its registry keys (they can be gone while its files stay: an
+; uninstaller run on another folder took them), by its files (SkIsEbFolder): in the folder /D= gave
+; ($SkDirFromCmd), else in $R0 (the scope's default folder). Found: $SkOldDir, $SkOldKind "eb",
+; $SkOldUninst (its uninstaller) and $SkOldVersion (its program's file version, "0.3.4"; "" when it
+; can't be read), as SkFindPrevious would have read them from its keys. Registers are kept.
+Function SkFindByFiles
+  Push $R0
+  Push $R1
+  Push $R2
+  StrCpy $R2 $R0
+  StrCpy $R1 ""
+  ${If} $SkDirFromCmd != ""
+    StrCpy $R0 $SkDirFromCmd
+    Call SkIsEbFolder
+    ${If} $R0 = 1
+      StrCpy $R1 $SkDirFromCmd
+    ${EndIf}
+  ${EndIf}
+  ${If} $R1 == ""
+  ${AndIf} $R2 != ""
+    StrCpy $R0 $R2
+    Call SkIsEbFolder
+    ${If} $R0 = 1
+      StrCpy $R1 $R2
+    ${EndIf}
+  ${EndIf}
+  ${If} $R1 != ""
+    StrCpy $SkOldDir $R1
+    StrCpy $SkOldKind "eb"
+    StrCpy $SkOldUninst "$R1\${SK_EB_UNINSTALLER}"
+    StrCpy $SkOldVersion ""
+    ClearErrors
+    ${GetFileVersion} "$R1\SpaceKnife.exe" $R0
+    ${IfNot} ${Errors}
+      ; a.b.c.d -> a.b.c
+      ${WordFind} "$R0" "." "E-1{" $R0
+      ${IfNot} ${Errors}
+        StrCpy $SkOldVersion $R0
+      ${EndIf}
+    ${EndIf}
+    ClearErrors
+    ${SkLog} "no registry key, but 0.3.4's files in $R1 ($SkOldVersion): taken over as its installation"
+  ${EndIf}
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+; $R0 = a scope ("user" | "machine") -> $R0 = its default folder (SkDefaultDir); $INSTDIR, $SkScope
+; and the other registers are kept.
+Function SkDefaultDirOf
+  Push $SkScope
+  Push $INSTDIR
+  Push $0
+  Push $1
+  Push $2
+  StrCpy $SkScope $R0
+  Call SkDefaultDir
+  StrCpy $R0 $INSTDIR
+  Pop $2
+  Pop $1
+  Pop $0
+  Pop $INSTDIR
+  Pop $SkScope
+  Call SkRestoreContext
 FunctionEnd
 
 ; The folder for a new installation: electron-builder's (FOLDERID_UserProgramFiles, which is
@@ -1470,6 +1656,8 @@ Function SkMigrateShortcut
   ${EndIf}
   ${If} $0 = 1
     !insertmacro SetLnkAppUserModelId "$R0"
+    ; (which leaves its IShellLink pointer in $0): $0 = 1, it points here
+    StrCpy $0 1
   ${EndIf}
 FunctionEnd
 
@@ -1489,11 +1677,27 @@ Function SkWebView2Version
   ${EndIf}
 FunctionEnd
 
+; A small window while a silent run does something long (the WebView2 download): nothing else is on
+; the screen then. Not in a run with the wizard (its own page says it).
+!macro SK_BANNER_SHOW TEXT
+  ${If} ${Silent}
+    Banner::show "${TEXT}"
+  ${EndIf}
+!macroend
+!macro SK_BANNER_HIDE
+  ${If} ${Silent}
+    Banner::destroy
+  ${EndIf}
+!macroend
+
 ; Ask WebView2's own updater (EdgeUpdate, per machine or per user) to update the runtime, and
-; wait for it (the stock template's way). Registers are kept.
+; wait for it (the stock template's way). needsadmin only when this installer runs as an
+; administrator: from an installation for this user, EdgeUpdate must not ask for rights it has no
+; use for. A silent run shows a banner meanwhile (a download, minutes perhaps). Registers are kept.
 Function SkWebView2Update
   Push $R1
   Push $1
+  Push $2
   ${If} ${RunningX64}
     ReadRegStr $R1 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate" "path"
   ${Else}
@@ -1506,10 +1710,18 @@ Function SkWebView2Update
     ${SkLog} "no EdgeUpdate to update WebView2 with"
   ${Else}
     DetailPrint "$(installingWebview2)"
-    ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
-    ${SkLog} "EdgeUpdate: exit code $1"
+    ${If} $SkIsAdmin = 1
+      StrCpy $2 "true"
+    ${Else}
+      StrCpy $2 "false"
+    ${EndIf}
+    !insertmacro SK_BANNER_SHOW "$(skBannerWebView2)"
+    ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=$2` $1
+    !insertmacro SK_BANNER_HIDE
+    ${SkLog} "EdgeUpdate (needsadmin=$2): exit code $1"
   ${EndIf}
   ClearErrors
+  Pop $2
   Pop $1
   Pop $R1
 FunctionEnd
@@ -1585,9 +1797,14 @@ Function SkStartApp
   Push $0
   Call SkElevationType
   ${If} $0 = 2
+    ; 0 when it started, 1 when not (no shell to take the user's token from, or the start failed)
     nsis_tauri_utils::RunAsUser "$R0" "$R1"
     Pop $0
-    ${SkLog} "started $R0 $R1 as the desktop user: $0"
+    ${If} $0 == "0"
+      ${SkLog} "started $R0 $R1 as the desktop user"
+    ${Else}
+      ${SkLog} "could not start $R0 $R1 as the desktop user (RunAsUser: $0)"
+    ${EndIf}
   ${Else}
     ClearErrors
     ExecShell "open" '"$R0"' "$R1"
@@ -1635,9 +1852,340 @@ Function SkRestartPrevious
   ${EndIf}
 FunctionEnd
 
+; The exit code of a run that failed: 3 once the earlier version's files are gone (the new version
+; is not whole, and there is nothing to start again: the outer instance of an elevated copy reads it
+; so, SkAfterElevatedFailed), else NSIS's own (2: stopped by the script).
+Function SkFailureLevel
+  ${If} $SkOldGone = 1
+    SetErrorLevel 3
+  ${EndIf}
+FunctionEnd
+
+; .onInstFailed: the installation stopped (SK_ABORT put why in $SkFailText). The staged files go; a
+; silent update starts the installed version again (SkRestartPrevious: not from the elevated copy,
+; whose outer instance does it, nor once that version is gone); the exit code says whether the
+; earlier version is gone (SkFailureLevel); and a silent update tells the user, as nothing else
+; would (the app that started it has quit): a message box on top, once the mutex is free for
+; another try (the elevated copy holds none: its outer instance does, and starts the installed
+; version again only once the copy, and so its box, is done). A silent installation that is no
+; update (/S of an administrator's script) shows nothing.
+Function SkFailed
+  Push $0
+  Call SkDropStage
+  Call SkRestartPrevious
+  Call SkFailureLevel
+  ${If} ${Silent}
+  ${AndIf} $UpdateMode = 1
+    ${If} $SkMutex != ""
+    ${AndIf} $SkMutex <> 0
+      System::Call 'kernel32::ReleaseMutex(p $SkMutex)'
+      System::Call 'kernel32::CloseHandle(p $SkMutex)'
+      StrCpy $SkMutex 0
+    ${EndIf}
+    StrCpy $0 "$(skUpdateFailed)"
+    ${If} $SkFailText != ""
+      StrCpy $0 "$0$\r$\n$\r$\n$SkFailText"
+    ${EndIf}
+    StrCpy $0 "$0$\r$\n$\r$\n$(skSeeLog)"
+    ${If} $SkOldGone = 1
+      StrCpy $0 "$0$\r$\n$(skRunAgain)"
+    ${EndIf}
+    ${SkLog} "telling the user: $SkFailText"
+    MessageBox MB_OK|MB_ICONEXCLAMATION|MB_TOPMOST|MB_SETFOREGROUND "$0"
+  ${EndIf}
+  Pop $0
+FunctionEnd
+
+; The outer instance, after its elevated copy failed ($0: its exit code; -1 when it never started,
+; $1 then the Windows error, 1223 when the user said no): a silent update starts the installed
+; version again (SkRestartPrevious), unless the copy exited with 3 (SkFailureLevel: the earlier
+; version is gone and the new one is not whole, which is not started). Registers are kept.
+Function SkAfterElevatedFailed
+  ${If} $0 = 3
+    ${SkLog} "the elevated copy stopped after the earlier version was removed: nothing to start again"
+  ${Else}
+    Call SkRestartPrevious
+  ${EndIf}
+FunctionEnd
+
+; How long (ms) the program of this version has to answer --startup-check (the portable swap's
+; helper gives it 20 s too; the logic test sets its own)
+!define /ifndef SK_STARTUP_CHECK_MS 20000
+
+; $R0 = the program of this version (the staged SpaceKnife.exe) -> $R0 = "" when it says it can
+; start on this computer (`--startup-check`, apps/desktop/src-tauri/src/startup_check.rs: exit 0
+; and {"ok":true,…}; what it asks is the WebView2 runtime the window needs, which the registry may
+; claim while it is missing or broken), else why not: its own words (the "error" of its answer), or
+; what happened (its exit code, "timeout", "error": it could not be run). Asked before anything of
+; the installed version is touched. It runs without the system's error boxes, as the portable
+; swap's check runs it (sk_core update::swap startup_check): a missing DLL or a crash fails at once
+; with its status, never a box in the middle of a silent update that waits out the time limit
+; (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX, which the program inherits; this process's own
+; mode comes back afterwards). Registers but $R0 are kept.
+Function SkStartupCheck
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  System::Call 'kernel32::SetErrorMode(i 3) i .r3'
+  IntOp $2 $3 | 3
+  System::Call 'kernel32::SetErrorMode(i r2)'
+  nsExec::ExecToStack /TIMEOUT=${SK_STARTUP_CHECK_MS} '"$R0" --startup-check'
+  Pop $0
+  Pop $1
+  System::Call 'kernel32::SetErrorMode(i r3)'
+  ${SkLog} "$R0 --startup-check: $0 $1"
+  StrCpy $2 0
+  ${If} $0 == "0"
+    Push $1
+    Push '"ok":true'
+    Call SkHas
+    Pop $2
+  ${EndIf}
+  ${If} $2 = 1
+    StrCpy $R0 ""
+  ${Else}
+    StrCpy $R0 ""
+    ClearErrors
+    ${WordFind} "$1" '"error":"' "E+1}" $2
+    ${IfNot} ${Errors}
+      ${WordFind} "$2" '"' "E+1{" $2
+      ${IfNot} ${Errors}
+        StrCpy $R0 $2
+      ${EndIf}
+    ${EndIf}
+    ClearErrors
+    ${If} $R0 == ""
+      ; in the installer's language (skCantStart shows it); skCheckExit names $0, the exit code
+      ${If} $0 == "timeout"
+        StrCpy $R0 "$(skCheckTimeout)"
+      ${ElseIf} $0 == "error"
+        StrCpy $R0 "$(skCheckNotRun)"
+      ${Else}
+        StrCpy $R0 "$(skCheckExit)"
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; Started with SW_HIDE in STARTUPINFO (0.3.4 starts the installer with Node's windowsHide, the
+; wizard of 「安装更新」 too): Windows hands that to the first ShowWindow(SW_SHOWDEFAULT) of the
+; process, which is the wizard's (NSIS shows its window so), and it would stay out of sight: the
+; user sees nothing, and the next try waits for this one's mutex. A window that is never shown (a
+; tool window, no size) takes that SW_HIDE first; Windows uses the startup's show command once.
+; Not in a silent run (it has no wizard). $0 = 1 when it did, else 0. Registers but $0 are kept.
+Function SkShowIfStartedHidden
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $0 0
+  ; STARTUPINFOW; dwFlags and wShowWindow
+  System::Call '*(&l4, p 0, p 0, p 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0, i 0, &i2 0, &i2 0, p 0, p 0, p 0, p 0) p .r1'
+  System::Call 'kernel32::GetStartupInfoW(p r1)'
+  System::Call '*$1(i, p, p, p, i, i, i, i, i, i, i, i .r2, &i2 .r3)'
+  System::Free $1
+  ; STARTF_USESHOWWINDOW, SW_HIDE
+  IntOp $2 $2 & 1
+  ${If} $2 = 1
+  ${AndIf} $3 = 0
+    ; WS_EX_TOOLWINDOW, WS_POPUP
+    System::Call 'user32::CreateWindowExW(i 0x80, w "STATIC", w "", i 0x80000000, i 0, i 0, i 0, i 0, p 0, p 0, p 0, p 0) p .r1'
+    ${If} $1 P<> 0
+      ; SW_SHOWDEFAULT: here SW_HIDE, and the startup's show command is used up
+      System::Call 'user32::ShowWindow(p r1, i 10)'
+      System::Call 'user32::DestroyWindow(p r1)'
+      StrCpy $0 1
+    ${EndIf}
+  ${EndIf}
+  Pop $3
+  Pop $2
+  Pop $1
+FunctionEnd
+
+; Every shortcut (.lnk) in the folder $R2 that points at the program $R1 of an earlier folder
+; points at this installation's program now, the same file with the AppUserModelID
+; (SkMigrateShortcut); the shell is told of each one it changed; others are left as they are. Only
+; the folder it is given: the caller names the pins' folders (SkMigratePins), the logic test its
+; own. Registers are kept.
+Function SkMigrateShortcutsIn
+  Push $R0
+  Push $R3
+  Push $R4
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  ${If} $R2 != ""
+  ${AndIf} $R1 != ""
+    ClearErrors
+    FindFirst $R3 $R4 "$R2\*.lnk"
+    ${DoWhile} $R4 != ""
+      StrCpy $R0 "$R2\$R4"
+      Push $R1
+      Push $R2
+      Push $R3
+      Push $R4
+      Call SkMigrateShortcut
+      Pop $R4
+      Pop $R3
+      Pop $R2
+      Pop $R1
+      StrCpy $R0 "$R2\$R4"
+      ${If} $0 = 1
+        ; SHCNE_UPDATEITEM, SHCNF_PATHW
+        System::Call 'shell32::SHChangeNotify(i 0x2000, i 0x5, w R0, p 0)'
+      ${EndIf}
+      ClearErrors
+      FindNext $R3 $R4
+    ${Loop}
+    ${If} $R3 != ""
+      FindClose $R3
+    ${EndIf}
+    ClearErrors
+  ${EndIf}
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+  Pop $R4
+  Pop $R3
+  Pop $R0
+FunctionEnd
+
+; A relocated installation ($R1: the program of the earlier folder, not this one's): this user's
+; taskbar and Start menu pins (User Pinned\TaskBar and \StartMenu, .lnk files the shell keeps)
+; that point at it point here now, as the Start menu and desktop shortcuts do. In this user's
+; context, also in a per-machine installation (pins are per user). Registers are kept.
+Function SkMigratePins
+  Push $R2
+  ${If} $R1 != ""
+  ${AndIf} $R1 != "$INSTDIR\${MAINBINARYNAME}.exe"
+    SetShellVarContext current
+    StrCpy $R2 "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
+    Call SkMigrateShortcutsIn
+    StrCpy $R2 "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\StartMenu"
+    Call SkMigrateShortcutsIn
+    Call SkRestoreContext
+  ${EndIf}
+  Pop $R2
+FunctionEnd
+
 ; ------------------------------------------------------------------ uninstaller only
 
-; The uninstaller's scope: a flag, else which hive's GUID key points at this folder.
+; $R0 = a folder -> $R0 = 1 when it is this uninstaller's folder ($INSTDIR; both full and long, in
+; any case, with or without a \ at the end), else 0. Registers but $R0 are kept.
+Function un.SkIsInstDir
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  Push $R5
+  Push $R6
+  Push $R7
+  Call un.SkNormalize
+  Push $R0
+  Call un.SkLongPath
+  Pop $R2
+  StrCpy $R0 $INSTDIR
+  Call un.SkNormalize
+  Push $R0
+  Call un.SkLongPath
+  Pop $R3
+  Call un.SkRelation
+  ${If} $R4 == "same"
+    StrCpy $R0 1
+  ${Else}
+    StrCpy $R0 0
+  ${EndIf}
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+FunctionEnd
+
+; $R0 = the folder a GUID key names (Software\{GUID} InstallLocation) -> $R0 = 1 when the keys are
+; this installation's to delete: they name no folder, or this one; else 0: they are another
+; installation's (0.3.4 or a fork in another folder, in the same hive), whose keys an uninstaller
+; run on this folder must leave alone. Registers but $R0 are kept.
+Function un.SkKeysOurs
+  ${WordReplace} $R0 '"' "" "+" $R0
+  ClearErrors
+  ${If} $R0 == ""
+    StrCpy $R0 1
+  ${Else}
+    Call un.SkIsInstDir
+  ${EndIf}
+FunctionEnd
+
+; $R0 = the folder HKLM's GUID key names, $R1 = HKCU's -> $SkScope: "machine" when HKLM's is this
+; folder, "user" when HKCU's is; when neither is (the keys are gone, or another installation's),
+; by where the folder is: "machine" inside Program Files, else "user". Registers are kept ($R1
+; too: un.SkNormalize writes it).
+Function un.SkScopeFor
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  Push $R5
+  Push $R6
+  Push $R7
+  StrCpy $SkScope ""
+  ${If} $R0 != ""
+    Call un.SkKeysOurs
+    ${If} $R0 = 1
+      StrCpy $SkScope "machine"
+    ${EndIf}
+  ${EndIf}
+  ${If} $SkScope == ""
+  ${AndIf} $R1 != ""
+    StrCpy $R0 $R1
+    Call un.SkKeysOurs
+    ${If} $R0 = 1
+      StrCpy $SkScope "user"
+    ${EndIf}
+  ${EndIf}
+  ${If} $SkScope == ""
+    StrCpy $SkScope "user"
+    StrCpy $R0 $INSTDIR
+    Call un.SkNormalize
+    StrCpy $R2 $R0
+    StrCpy $R0 $PROGRAMFILES64
+    Call un.SkNormalize
+    StrCpy $R3 $R0
+    Call un.SkRelation
+    ${If} $R4 != "inside"
+      StrCpy $R0 $PROGRAMFILES
+      Call un.SkNormalize
+      StrCpy $R3 $R0
+      Call un.SkRelation
+    ${EndIf}
+    ${If} $R4 == "inside"
+      StrCpy $SkScope "machine"
+    ${EndIf}
+  ${EndIf}
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+; The uninstaller's scope: a flag, else which hive's GUID key points at this folder (un.SkScopeFor).
 Function un.SkDetectScope
   ${If} $SkScopeForced = 1
     Goto sk_unscope_flag
@@ -1645,20 +2193,13 @@ Function un.SkDetectScope
   ${If} ${RunningX64}
     SetRegView 64
   ${EndIf}
-  StrCpy $SkScope "user"
-  ReadRegStr $0 HKLM "${SK_INSTKEY}" "InstallLocation"
-  ${If} $0 != ""
-    StrCpy $R0 $0
-    Call un.SkNormalize
-    StrCpy $R2 $R0
-    StrCpy $R0 $INSTDIR
-    Call un.SkNormalize
-    StrCpy $R3 $R0
-    Call un.SkRelation
-    ${If} $R4 == "same"
-      StrCpy $SkScope "machine"
-    ${EndIf}
-  ${EndIf}
+  Push $R0
+  Push $R1
+  ReadRegStr $R0 HKLM "${SK_INSTKEY}" "InstallLocation"
+  ReadRegStr $R1 HKCU "${SK_INSTKEY}" "InstallLocation"
+  Call un.SkScopeFor
+  Pop $R1
+  Pop $R0
   sk_unscope_flag:
   ${If} $SkScope == "machine"
     StrCpy $SkScopeFlag "/allusers"
@@ -1678,24 +2219,163 @@ FunctionEnd
   !define SK_APPDATA "$APPDATA"
 !endif
 
+; WebView2 keeps the window's profile in the shell's folder (window.rs data_directory:
+; <folder>\webview, EBWebView in it). Its processes outlive the window a while, or are still
+; starting when the app was ended right after it started, and write the profile meanwhile (Local
+; State, lockfile, Variations…), also into a folder that was just deleted: un.SkRemoveData lets
+; them go first. How long they may take to go by themselves before they are ended: rounds of 250 ms
+; (10 s; the logic test waits less); then how often the folder is tried, 500 ms apart.
+!ifndef SK_WEBVIEW2_POLLS
+  !define SK_WEBVIEW2_POLLS 40
+!endif
+!ifndef SK_REMOVE_TRIES
+  !define SK_REMOVE_TRIES 10
+!endif
+; How un.SkEndWebView2In lists and ends them: the system's processes (un.SkWebView2In), or the logic
+; test's list of stand-ins (no process of the system's is looked at)
+!ifndef SK_WEBVIEW2_SCAN
+  !define SK_WEBVIEW2_SCAN un.SkWebView2In
+!endif
+
+; $R5 = a command line, or the part of one from just before its --user-data-dir= on -> $R5 = the
+; folder that switch names, "" when it has none. The switch starts an argument: at the start, after
+; a space or a tab, or after a quote (the whole argument quoted, "--user-data-dir=<folder>", as a
+; child process may get a folder with a space in it). Its value is quoted (--user-data-dir="<folder>",
+; as WebView2's own processes get it), else it runs to the next space or tab. Only the first one
+; counts. Registers but $R5 are kept.
+Function un.SkUserDataDir
+  Push $0
+  Push $1
+  Push $2
+  Push $3
+  StrLen $1 $R5
+  StrCpy $0 0
+  StrCpy $3 ""
+  ${DoWhile} $0 < $1
+    StrCpy $2 $R5 16 $0
+    ${If} $2 == "--user-data-dir="
+      ${If} $0 = 0
+        StrCpy $3 " "
+      ${Else}
+        IntOp $2 $0 - 1
+        StrCpy $2 $R5 1 $2
+        ${If} $2 == '"'
+          StrCpy $3 '"'
+        ${ElseIf} $2 == " "
+        ${OrIf} $2 == "$\t"
+          StrCpy $3 " "
+        ${EndIf}
+      ${EndIf}
+      ${If} $3 != ""
+        ${ExitDo}
+      ${EndIf}
+    ${EndIf}
+    IntOp $0 $0 + 1
+  ${Loop}
+  ${If} $3 == ""
+    StrCpy $R5 ""
+  ${Else}
+    IntOp $0 $0 + 16
+    StrCpy $R5 $R5 "" $0
+    StrCpy $2 $R5 1
+    ${If} $3 == " "
+    ${AndIf} $2 == '"'
+      StrCpy $3 '"'
+      StrCpy $R5 $R5 "" 1
+    ${EndIf}
+    ; up to the closing quote, or the next space or tab
+    StrLen $1 $R5
+    StrCpy $0 0
+    ${DoWhile} $0 < $1
+      StrCpy $2 $R5 1 $0
+      ${If} $2 == $3
+        ${ExitDo}
+      ${EndIf}
+      ${If} $3 == " "
+      ${AndIf} $2 == "$\t"
+        ${ExitDo}
+      ${EndIf}
+      IntOp $0 $0 + 1
+    ${Loop}
+    StrCpy $R5 $R5 $0
+  ${EndIf}
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; $R0 = a folder, $R5 = a process's file name, $R6 = its command line (or the part of it from just
+; before its --user-data-dir= on) -> $R4 = 1 when it is a WebView2 process (msedgewebview2.exe)
+; whose profile (--user-data-dir, un.SkUserDataDir) is that folder or one in it, else 0; $R5 = the
+; folder its --user-data-dir names ("" when none). Another program's WebView2 keeps its profile in
+; a folder of its own, and a folder whose name only begins like this one is another folder. Both
+; full and long, in any case. Registers but $R4 and $R5 are kept.
+Function un.SkWebView2Ours
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R6
+  Push $R7
+  StrCpy $R4 0
+  ${If} $R5 == "msedgewebview2.exe"
+    StrCpy $R5 $R6
+    Call un.SkUserDataDir
+    ${If} $R5 != ""
+      Call un.SkNormalize
+      Push $R0
+      Call un.SkLongPath
+      Pop $R3
+      StrCpy $R0 $R5
+      Call un.SkNormalize
+      Push $R0
+      Call un.SkLongPath
+      Pop $R2
+      Push $R5
+      Call un.SkRelation
+      Pop $R5
+      ${If} $R4 == "same"
+      ${OrIf} $R4 == "inside"
+        StrCpy $R4 1
+      ${Else}
+        StrCpy $R4 0
+      ${EndIf}
+    ${EndIf}
+  ${Else}
+    StrCpy $R5 ""
+  ${EndIf}
+  Pop $R7
+  Pop $R6
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
+
+; un.SkWebView2In (and the logic test's stand-in list): one of them ended
+!macro SK_WV2_ENDED PID DIR
+  ${un.SkLog} "ended msedgewebview2.exe ${PID} (--user-data-dir ${DIR})"
+!macroend
+
 ; PROCESSENTRY32W as an x86 NSIS reads it (dwSize; th32ProcessID at 8, szExeFile at 36)
 !if ${NSIS_PTR_SIZE} != 4
   !error "un.SkWebView2In reads PROCESSENTRY32W as laid out in a 32-bit process"
 !endif
 !define SK_PE32W_SIZE 556
 
-; $R0 = a folder, $R2 = 1: end them -> $R1 = how many WebView2 processes (msedgewebview2.exe) run
-; with their --user-data-dir in that folder (another program's WebView2 has its own folder: never
-; touched). Registers but $R1 are kept.
+; The system's WebView2 processes with their profile in the folder $R0 (un.SkWebView2Ours, by the
+; command line: another program's are never touched). $R2 = "list" -> $R1 = how many, $R3 = their
+; process ids ("4242, 4243"). $R2 = "end" -> each one ended (TerminateProcess on the handle its
+; command line was read from: never another process that got its number since) and logged; $R1 /
+; $R3 = those that could not be ("4242: error 5, …": an elevated SpaceKnife's, from an uninstaller
+; that is not). Registers but $R1 and $R3 are kept.
 Function un.SkWebView2In
-  Push $R0
-  Push $R2
-  Push $R3
   Push $R4
   Push $R5
   Push $R6
-  Push $R7
   Push $R8
+  Push $R9
   Push $0
   Push $1
   Push $2
@@ -1706,66 +2386,85 @@ Function un.SkWebView2In
   Push $7
   Push $8
   Push $9
-  StrCpy $8 $R2
-  Call un.SkNormalize
-  StrCpy $9 $R0
   StrCpy $R8 0
+  StrCpy $R3 ""
   System::Call 'kernel32::CreateToolhelp32Snapshot(i 2, i 0) p .r0' ; TH32CS_SNAPPROCESS
   ${If} $0 P<> -1
-  ${AndIf} $9 != ""
+  ${AndIf} $0 P<> 0
     System::Alloc ${SK_PE32W_SIZE}
     Pop $1
     System::Call '*$1(i ${SK_PE32W_SIZE})'
     System::Call 'kernel32::Process32FirstW(p r0, p r1) i .r2'
     ${DoWhile} $2 <> 0
       System::Call '*$1(i, i, i .r3, p, i, i, i, i, i, &w260 .r4)'
+      ; by the file name first: no other process is opened
       ${If} $4 == "msedgewebview2.exe"
-        ; PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, else only the first
-        System::Call 'kernel32::OpenProcess(i 0x101001, i 0, i r3) p .r6'
+        ; PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, with PROCESS_TERMINATE to end it ($7 = 1)
+        StrCpy $6 0
+        StrCpy $7 0
+        StrCpy $R9 0
+        ${If} $R2 == "end"
+          System::Call 'kernel32::OpenProcess(i 0x101001, i 0, i r3) p .r6 ?e'
+          Pop $R9
+          ${If} $6 P<> 0
+            StrCpy $7 1
+          ${EndIf}
+        ${EndIf}
         ${If} $6 P= 0
-          System::Call 'kernel32::OpenProcess(i 0x1000, i 0, i r3) p .r6'
+          System::Call 'kernel32::OpenProcess(i 0x101000, i 0, i r3) p .r6'
         ${EndIf}
         ${If} $6 P<> 0
-          ; its command line (ProcessCommandLineInformation: a UNICODE_STRING, then the text)
-          System::Alloc 65552
-          Pop $7
-          System::Call 'ntdll::NtQueryInformationProcess(p r6, i 60, p r7, i 65536, p 0) i .r2'
-          StrCpy $5 ""
+          ; its command line (ProcessCommandLineInformation: a UNICODE_STRING, then the text; at
+          ; most 32767 characters), from just before its --user-data-dir= on
+          StrCpy $R6 ""
+          System::Alloc 65560
+          Pop $5
+          System::Call 'ntdll::NtQueryInformationProcess(p r6, i 60, p r5, i 65544, p 0) i .r2'
           ${If} $2 = 0
-            System::Call '*$7(&i2 .r2, &i2, p .r5)'
-            IntPtrOp $2 $5 + $2
+            System::Call '*$5(&i2 .r8, &i2, p .r9)'
+            IntPtrOp $2 $9 + $8
             System::Call '*$2(&i2 0)'
-            System::Call 'shlwapi::StrStrIW(p r5, w "--user-data-dir=") p .r2'
-            StrCpy $5 ""
+            System::Call 'shlwapi::StrStrIW(p r9, w "--user-data-dir=") p .r2'
             ${If} $2 P<> 0
-              System::Call 'kernel32::lstrcpynW(w .r5, p r2, i ${NSIS_MAX_STRLEN}) p'
-              StrCpy $5 $5 "" 16
-              ; the value: quoted, or up to the next space
-              StrCpy $2 $5 1
-              ${If} $2 == '"'
-                StrCpy $5 $5 "" 1
-                ${WordFind} "$5" '"' "+1" $5
-              ${Else}
-                ${WordFind} "$5" " " "+1" $5
+              ${If} $2 P> $9
+                IntPtrOp $2 $2 - 2
               ${EndIf}
+              System::Call 'kernel32::lstrcpynW(w .R6, p r2, i ${NSIS_MAX_STRLEN}) p'
             ${EndIf}
           ${EndIf}
-          System::Free $7
-          ${If} $5 != ""
-            StrCpy $R0 $5
-            Call un.SkNormalize
-            StrCpy $R2 $R0
-            StrCpy $R3 $9
-            Call un.SkRelation
-            ${If} $R4 == "same"
-            ${OrIf} $R4 == "inside"
-              IntOp $R8 $R8 + 1
-              ${If} $8 = 1
-                System::Call 'kernel32::TerminateProcess(p r6, i 1) i .r2'
+          System::Free $5
+          StrCpy $R5 $4
+          Call un.SkWebView2Ours
+          ${If} $R4 = 1
+          ${AndIf} $R2 == "end"
+            ${If} $7 = 1
+              System::Call 'kernel32::TerminateProcess(p r6, i 1) i .r2 ?e'
+              Pop $R9
+              ${If} $2 <> 0
                 System::Call 'kernel32::WaitForSingleObject(p r6, i 2000)'
-                ${un.SkLog} "ended msedgewebview2.exe $3 (--user-data-dir $R2): $2"
+              ${Else}
+                ; gone already (it ended meanwhile): that is not a failure
+                System::Call 'kernel32::WaitForSingleObject(p r6, i 0) i .r2'
+                ${If} $2 <> 0
+                  StrCpy $7 0
+                ${EndIf}
               ${EndIf}
             ${EndIf}
+            ${If} $7 = 1
+              !insertmacro SK_WV2_ENDED "$3" "$R5"
+            ${Else}
+              IntOp $R8 $R8 + 1
+              ${If} $R3 != ""
+                StrCpy $R3 "$R3, "
+              ${EndIf}
+              StrCpy $R3 "$R3$3: error $R9"
+            ${EndIf}
+          ${ElseIf} $R4 = 1
+            IntOp $R8 $R8 + 1
+            ${If} $R3 != ""
+              StrCpy $R3 "$R3, "
+            ${EndIf}
+            StrCpy $R3 "$R3$3"
           ${EndIf}
           System::Call 'kernel32::CloseHandle(p r6)'
         ${EndIf}
@@ -1773,8 +2472,6 @@ Function un.SkWebView2In
       System::Call 'kernel32::Process32NextW(p r0, p r1) i .r2'
     ${Loop}
     System::Free $1
-  ${EndIf}
-  ${If} $0 P<> -1
     System::Call 'kernel32::CloseHandle(p r0)'
   ${EndIf}
   StrCpy $R1 $R8
@@ -1788,42 +2485,64 @@ Function un.SkWebView2In
   Pop $2
   Pop $1
   Pop $0
+  Pop $R9
   Pop $R8
-  Pop $R7
   Pop $R6
   Pop $R5
   Pop $R4
-  Pop $R3
-  Pop $R2
-  Pop $R0
 FunctionEnd
 
-; WebView2 keeps the window's profile in the shell's folder ($R0: %LOCALAPPDATA%\<identifier>,
-; EBWebView), and its processes go a moment after the window that used them: up to 3 s for them
-; to go by themselves, then they are ended (un.SkWebView2In: those of this folder only). Registers
-; are kept.
+; The WebView2 processes with their profile in the folder $R0 (${SK_WEBVIEW2_SCAN}): waited for up
+; to $R1 rounds of 250 ms to go by themselves, then the ones still there ended. Each step goes to
+; the log; with $R1 = 0 (a look between two tries at the folder) only what it finds and ends.
+; -> $R1 = how many of them could not be ended. Registers but $R1 are kept.
 Function un.SkEndWebView2In
-  Push $R1
   Push $R2
+  Push $R3
+  Push $R8
   Push $R9
-  StrCpy $R9 0
-  ${Do}
-    StrCpy $R2 0
-    Call un.SkWebView2In
-    ${If} $R1 = 0
-    ${OrIf} $R9 >= 12
-      ${ExitDo}
+  StrCpy $R9 $R1
+  StrCpy $R8 0
+  StrCpy $R2 "list"
+  Call ${SK_WEBVIEW2_SCAN}
+  ${If} $R1 = 0
+    ${If} $R9 > 0
+      ${un.SkLog} "no WebView2 process has its profile in $R0"
     ${EndIf}
-    Sleep 250
-    IntOp $R9 $R9 + 1
-  ${Loop}
-  ${If} $R1 > 0
-    StrCpy $R2 1
-    Call un.SkWebView2In
+    Goto sk_wv2_done
   ${EndIf}
+  ${If} $R9 > 0
+    ${un.SkLog} "WebView2 with its profile in $R0 still running: msedgewebview2.exe $R3; waiting for it to go (up to $R9 x 250 ms)"
+  ${EndIf}
+  ${DoWhile} $R8 < $R9
+    Sleep 250
+    IntOp $R8 $R8 + 1
+    Call ${SK_WEBVIEW2_SCAN}
+    ${If} $R1 = 0
+      IntOp $R8 $R8 * 250
+      ${un.SkLog} "WebView2 of $R0 went by itself after about $R8 ms"
+      Goto sk_wv2_done
+    ${EndIf}
+  ${Loop}
+  ${If} $R9 > 0
+    IntOp $R8 $R8 * 250
+    ${un.SkLog} "WebView2 of $R0 still running after about $R8 ms: msedgewebview2.exe $R3; ending it"
+  ${ElseIf} $R3 != $SkWv2Seen
+    ${un.SkLog} "WebView2 with its profile in $R0 running: msedgewebview2.exe $R3; ending it"
+  ${EndIf}
+  StrCpy $SkWv2Seen $R3
+  StrCpy $R2 "end"
+  Call ${SK_WEBVIEW2_SCAN}
+  ${If} $R1 > 0
+  ${AndIf} $R3 != $SkWv2Stuck
+    ${un.SkLog} "could not end WebView2 of $R0: msedgewebview2.exe $R3"
+    StrCpy $SkWv2Stuck $R3
+  ${EndIf}
+  sk_wv2_done:
   Pop $R9
+  Pop $R8
+  Pop $R3
   Pop $R2
-  Pop $R1
 FunctionEnd
 
 ; a line in the log for a folder un.SkRemoveData should have removed and could not
@@ -1873,23 +2592,31 @@ Function un.SkRemoveData
     RMDir /r "${SK_APPDATA}\${BUNDLEID}"
   ${EndIf}
   ${If} ${SK_LOCALAPPDATA} != ""
-    ; the shell's own folder: the WebView2 processes of the window that just quit can hold it a
-    ; moment longer (un.SkCloseIn waits for the app only), then up to 5 s more for the removal
-    RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
-    ${If} ${FileExists} "${SK_LOCALAPPDATA}\${BUNDLEID}\*.*"
-      StrCpy $R0 "${SK_LOCALAPPDATA}\${BUNDLEID}"
+    ; the shell's own folder, with the window's WebView2 profile: its processes go first, whether
+    ; or not the folder is there yet (un.SkCloseIn waits for SpaceKnife's own programs only, and a
+    ; WebView2 still starting writes its profile into a folder deleted a moment before), waited
+    ; for and then ended (un.SkEndWebView2In: those of this folder only). Then the folder, a few
+    ; tries; after each one, one of them that came up meanwhile is ended and the folder tried again.
+    StrCpy $R0 "${SK_LOCALAPPDATA}\${BUNDLEID}"
+    StrCpy $R1 ${SK_WEBVIEW2_POLLS}
+    Call un.SkEndWebView2In
+    StrCpy $R9 0
+    ${Do}
+      RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
+      StrCpy $R1 0
       Call un.SkEndWebView2In
-      StrCpy $R9 0
-      ${Do}
-        RMDir /r "${SK_LOCALAPPDATA}\${BUNDLEID}"
-        ${IfNot} ${FileExists} "${SK_LOCALAPPDATA}\${BUNDLEID}\*.*"
-        ${OrIf} $R9 >= 10
-          ${ExitDo}
+      IntOp $R9 $R9 + 1
+      ${IfNot} ${FileExists} "${SK_LOCALAPPDATA}\${BUNDLEID}\*.*"
+        ${If} $R9 > 1
+          ${un.SkLog} "un.SkRemoveData: removed $R0 (try $R9)"
         ${EndIf}
-        Sleep 500
-        IntOp $R9 $R9 + 1
-      ${Loop}
-    ${EndIf}
+        ${ExitDo}
+      ${EndIf}
+      ${If} $R9 >= ${SK_REMOVE_TRIES}
+        ${ExitDo}
+      ${EndIf}
+      Sleep 500
+    ${Loop}
     RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\Cache"
     RMDir /r "${SK_LOCALAPPDATA}\${SK_DATA}\updates"
     ${If} $SkDeleteData = 1
