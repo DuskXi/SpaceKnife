@@ -226,6 +226,17 @@ test("the coming version's notes name only files of its release", (t) => {
   assert.ok(!notes.includes("{{"), "a placeholder is left");
 });
 
+test("the issue template and the web shim name the app's version", () => {
+  // docs/packaging.md §9 step 1 changes these with the version; release.yml checks only the four
+  // version fields, so a missed one would go out unnoticed
+  const root = fileURLToPath(new URL("../..", import.meta.url));
+  const version = JSON.parse(readFileSync(join(root, "apps", "desktop", "package.json"), "utf8")).version;
+  const template = readFileSync(join(root, ".github", "ISSUE_TEMPLATE", "bug_report.yml"), "utf8");
+  assert.ok(template.includes(`placeholder: "${version}"`), `bug_report.yml: the version's placeholder is not "${version}"`);
+  const shim = readFileSync(join(root, "apps", "desktop", "app", "shim.ts"), "utf8");
+  assert.ok(shim.includes(`version: "${version}-web"`), `app/shim.ts: the web version is not "${version}-web"`);
+});
+
 test("bad placeholders are refused", () => {
   const t = tmp();
   const done = release.assemble(V, artifacts(join(t, "a")), join(t, "out"));

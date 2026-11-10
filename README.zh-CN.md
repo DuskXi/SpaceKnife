@@ -81,7 +81,7 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 | 系统 | 文件 |
 |---|---|
 | Windows 10+ x64 | `SpaceKnife-<版本>-Setup-x64.exe`（可装给当前用户或所有用户；缺少 WebView2 Runtime 时会装上它；还没有代码签名，第一次运行时 SmartScreen 会提示「未知发布者」，点「更多信息 › 仍要运行」） |
-| Ubuntu 22.04+ / Debian 系 | `spaceknife_<版本>_amd64.deb` |
+| Ubuntu 22.04+ / Debian 12+ | `spaceknife_<版本>_amd64.deb`（需要 WebKitGTK 4.1，apt 会装上） |
 | RHEL 9+ / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` |
 | 其他 Linux x64 | `SpaceKnife-<版本>-x86_64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
 | Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `SpaceKnife.exe`；快照和设置都存在旁边的 `data` 文件夹里；需要 WebView2 Runtime，Windows 11 自带；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |

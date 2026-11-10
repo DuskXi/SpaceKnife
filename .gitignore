@@ -1,3 +1,8 @@
+# Python (tools/*.py, tests/parity: uv run)
+__pycache__/
+*.py[cod]
+.venv/
+
 # Rust
 target/
 target-*/

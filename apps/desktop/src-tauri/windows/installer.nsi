@@ -1,5 +1,7 @@
 ; SpaceKnife's Windows installer: a fork of tauri-bundler 2.10.4's NSIS template
 ; (crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi, the bundler of tauri-cli 2.12.4),
+; upstream https://github.com/tauri-apps/tauri, Copyright (c) 2017 - Present Tauri Apps Contributors,
+; MIT OR Apache-2.0 (the MIT text is in THIRD-PARTY-rust.txt, under tauri);
 ; set as bundle > windows > nsis > template. The bundler still renders it with its own data
 ; (handlebars, the same variables) and still writes utils.nsh / FileAssociation.nsh and the
 ; language files next to it; SpaceKnife's own logic is in spaceknife.nsh (installerHooks).

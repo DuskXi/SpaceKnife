@@ -81,7 +81,7 @@ Installers are on the [Releases](https://github.com/DuskXi/SpaceKnife/releases) 
 | System | File |
 |---|---|
 | Windows 10+ x64 | `SpaceKnife-<version>-Setup-x64.exe` (for the current user or all users; installs the WebView2 Runtime if it is missing; not code-signed yet, so SmartScreen warns about an unknown publisher on first run: "More info › Run anyway") |
-| Ubuntu 22.04+ / Debian family | `spaceknife_<version>_amd64.deb` |
+| Ubuntu 22.04+ / Debian 12+ | `spaceknife_<version>_amd64.deb` (needs WebKitGTK 4.1; apt installs it) |
 | RHEL 9+ / Fedora family | `spaceknife-<version>.x86_64.rpm` |
 | Other Linux x64 | `SpaceKnife-<version>-x86_64.AppImage` (needs FUSE 2, or run it with `--appimage-extract-and-run`) |
 | Windows 10+ x64, portable | `SpaceKnife-<version>-win-x64-portable.zip` (no installation: unzip anywhere and run `SpaceKnife.exe`; snapshots and settings stay in the `data` folder next to it; needs the WebView2 Runtime, which Windows 11 has; the first launch takes a few seconds longer while Windows checks the new files) |
