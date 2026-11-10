@@ -10,8 +10,10 @@
 // with --portable the data folder next to the program, which the app has to find by itself) and
 // writes its backend's address and token to SPACEKNIFE_READY_FILE (the Tauri shell's backend in
 // src-tauri/src/backend.rs, the Electron shell's spaceknife-cli serve --ready-file). The test waits
-// for that, says session.hello with the token and lists the drives (volume.list), then closes the
-// app the way the system does
+// for that, says session.hello with the token and lists the drives (volume.list). It changes 「主题」
+// to dark, light and back to 「跟随系统」 through the settings: the page hands each to the shell, whose
+// theme.json must follow (it is written once the window took the theme; a shell that hangs on the
+// way never writes it). Then it closes the app the way the system does
 // (WM_CLOSE / SIGTERM) and checks that it exits and its address closes. With --kind (implied by
 // --portable) the app must take itself for that kind of install (update.status). With --portable the data
 // folder must hold what the app wrote. The window itself is not looked at: the system WebView has
@@ -28,7 +30,7 @@ const args = process.argv.slice(2);
 const portable = args.includes("--portable");
 const kindAt = args.indexOf("--kind");
 const wantKind = kindAt >= 0 ? args[kindAt + 1] : portable ? "portable" : null;
-const target = args.find((a, i) => a !== "--portable" && a !== "--kind" && i !== kindAt + 1);
+const target = args.find((a, i) => a !== "--portable" && a !== "--kind" && (kindAt < 0 || i !== kindAt + 1));
 if (!target) fail("usage: node packaging/smoke-app.mjs [--portable] [--kind nsis|appimage|deb|rpm|dmg] <program>");
 const app = resolve(target);
 
@@ -38,6 +40,20 @@ function dataFolder(program) {
   const bundle = dirname(dirname(macos));
   if (basename(macos) === "MacOS" && bundle.endsWith(".app")) return join(dirname(bundle), "data");
   return join(macos, "data");
+}
+
+/** The theme the shell keeps in its home: the Tauri app's desktop/theme.json (window.rs), the
+ * Electron shell's electron/theme.json (its userData); null while neither says one. */
+function shellTheme(home) {
+  for (const file of [join(home, "desktop", "theme.json"), join(home, "electron", "theme.json")]) {
+    try {
+      const theme = JSON.parse(readFileSync(file, "utf8"))?.theme;
+      if (typeof theme === "string") return theme;
+    } catch {
+      // not there, or being replaced
+    }
+  }
+  return null;
 }
 
 async function smoke(home) {
@@ -74,6 +90,17 @@ async function smoke(home) {
     const { install_kind: kind } = await session.call("update.status");
     console.log(`install kind: ${kind}`);
     if (wantKind && kind !== wantKind) throw new Error(`the app takes itself for a ${kind} install, not ${wantKind}`);
+    // 「主题」 (UI-W7-31): the page applies the setting and hands it to the shell (set_theme), which
+    // changes the window's theme and then keeps the choice in theme.json. 0.3.5's Tauri app on
+    // Windows deadlocked there at the first change that changed the window's colours, and at every
+    // start after it. A page that connects late takes the setting when it does.
+    for (const theme of ["dark", "light", "system"]) {
+      await session.call("settings.update", { values: { "appearance.theme": theme } });
+      await until(`the window to take the theme "${theme}"`, () => shellTheme(home) === theme, 60_000).catch((e) => {
+        throw new Error(`${e.message}: the shell's theme.json says ${JSON.stringify(shellTheme(home))} (the shell hung on the way?)`);
+      });
+    }
+    console.log("theme: dark, light, system: the shell took each");
     session.close();
     // an AppImage started by its runtime: the program is the runtime's child, and SIGTERM to the
     // runtime would not reach it; the runtime exits with it

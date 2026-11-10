@@ -10,7 +10,7 @@ What is already done for the next version, **0.3.6**, and not in a release yet. 
 
 ### Fixes
 
-(nothing yet)
+- **Changing the theme no longer freezes the window (Windows).** In 0.3.5 the window stopped responding the first time you switched between Light, Dark and Match system in a way that changed its colours, and it froze again at every start after that. If 0.3.5 is stuck for you, end it in Task Manager and install 0.3.6 over it from the [releases page](https://github.com/DuskXi/SpaceKnife/releases) (the update button can't be reached while the window is frozen). 0.3.6 starts normally and keeps the theme you chose.
 
 ---
 
@@ -24,4 +24,4 @@ What is already done for the next version, **0.3.6**, and not in a release yet. 
 
 ### 修复
 
-（暂无）
+- **切换主题不再让窗口卡死（Windows）。** 0.3.5 在浅色、深色和「跟随系统」之间切换时，只要窗口颜色真的变了，第一次就会停止响应，之后每次启动也都会卡住。如果你的 0.3.5 已经卡住：在任务管理器里结束它，从[发布页](https://github.com/DuskXi/SpaceKnife/releases)下载 0.3.6 直接覆盖安装（窗口卡住时点不到更新按钮）。0.3.6 能正常启动，并保留你选的主题。

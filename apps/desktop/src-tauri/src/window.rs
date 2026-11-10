@@ -227,12 +227,17 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
                 let _ = w.emit(MAXIMIZED, now);
             }
         }
-        // the system's theme changed: the window's own background follows
-        WindowEvent::ThemeChanged(_) => {
-            w.state::<Themes>()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .updated();
+        // the window's theme changed (the system's, or set_theme's): its own background follows.
+        // Not through the theme keeper: set_theme holds it while it changes the window's theme,
+        // and this event can come inside that call, on the same thread (on Windows tao's
+        // set_theme sends the window a message, and the event goes straight to this handler);
+        // locking the keeper again there waits for ever (0.3.5: the window hung at the first
+        // theme change, and at every start after it)
+        WindowEvent::ThemeChanged(theme) => {
+            let bg = crate::theme::window_background(*theme == Theme::Dark);
+            if let Some(c) = parse_hex(bg) {
+                let _ = w.set_background_color(Some(c));
+            }
         }
         // a finished scan's flash stops once the window is looked at
         WindowEvent::Focused(true) => {
