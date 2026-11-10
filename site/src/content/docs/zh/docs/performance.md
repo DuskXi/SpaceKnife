@@ -148,21 +148,26 @@ SpaceKnife 从启动起就采样每一块物理磁盘，不需要管理员权限
 每次硬扫描结束后，日志文件里会有两行这样的记录（数字只是示例）：
 
 ```text
-scan done: 1,234,567 items, 1,103,402 files, 210.4 GiB in 41.20s (29,965 items/s), 12 errors
-scan profile: 1,234,567 items in 41.2s (29,965/s); listing threads busy 92% of 16; main thread folding 38%; held by the disk-load limit 0%; 4,823 slices; getattrlistbulk on
+scan done: 1234567 items, 1103402 files, 210.4 GiB in 41.20s (29965 items/s), 12 errors
+scan profile: 1234567 items in 41.2s (29965/s); listing calls busy 92% of 15.8 on average (16 at most) (listing width 8–16); io lane 2–24 (mean 9.6), cpu lane 8–16 (mean 12.4), 31% of folders in the io lane; cold fraction 0.84 0.71 0.52 0.40 0.33 0.28 0.25 0.22 0.20 0.18 0.17 0.15 (per 3.4s); device nvme; coordinator folding 38%; held by the disk-load limit 0%; 4823 slices; getattrlistbulk on
 ```
 
 日志文件是日志文件夹里的 `spaceknife.log`（「设置 › 高级 › 文件与诊断 › 日志文件夹」，另见[故障排除](../troubleshooting/)）。第二行说明扫描在等什么：
 
 | 片段 | 含义 | 怎么办 |
 |---|---|---|
-| `listing threads busy 92% of 16` | 16 个列目录线程把 92% 的时间花在系统调用上 | 接近 100%：瓶颈在磁盘或文件系统。SSD 还有余量时，多开线程（`SPACEKNIFE_SCAN_THREADS`）可能有用；磁盘本身忙或慢时没有办法 |
-| `main thread folding 38%` | 主线程把结果合并进目录树所占的时间 | 接近 100%：瓶颈在合并，加线程没用 |
+| `listing calls busy 92% of 15.8 on average (16 at most)` | 列目录调用平均 15.8 个、最多 16 个，92% 的时间花在系统调用上 | 接近 100%：瓶颈在磁盘或文件系统。SSD 还有余量时，多开线程（`SPACEKNIFE_SCAN_THREADS`）可能有用；磁盘本身忙或慢时没有办法 |
+| `listing width 8–16` | 扫描期间允许同时在列的列目录调用个数，从最少到最多 | — |
+| `io lane 2–24 (mean 9.6), cpu lane 8–16 (mean 12.4), 31% of folders in the io lane` | 要等读盘的文件夹（IO 道）和已在文件缓存里的文件夹（CPU 道）各同时列几个，以及在 IO 道列的文件夹占多少 | — |
+| `cold fraction … (per 3.4s)` | 要等读盘的文件夹所占的比例，扫描中每 3.4 秒一个点 | — |
+| `device nvme` | 扫描起步时按的盘的类型：`nvme`、`ssd`、`hdd`、`flash`、`network`、`virtual` 或 `unknown` | — |
+| `disk-load limit's concurrency 6.2 on average` | 只在设了磁盘负载上限时出现：上限平均允许同时列几个文件夹 | — |
+| `coordinator folding 38%` | 协调线程把结果合并进目录树所占的时间 | 接近 100%：瓶颈在合并，加线程没用 |
 | `held by the disk-load limit 0%` | 因为上限拦住下一批、没有任何目录在列的时间 | 很高：上限在起作用。想要速度就提高档位或选「极速」 |
-| `4,823 slices` | 列了多少批 | — |
+| `4823 slices` | 列了多少批 | — |
 | `getattrlistbulk on` | 只在 macOS 上：批量列目录是 `on`、`off: 原因` 还是 `untested` | — |
 
-忙碌和合并都很低时，说明列目录线程在等活干：目录树又深又窄，或者扫描正在给其他程序让路。命令行的 `--profile` 输出同样的数字。
+忙碌和合并都很低时，说明列目录调用在等活干：目录树又深又窄，或者扫描正在给其他程序让路。命令行的 `--profile` 输出同样的数字。
 
 ## 内存与超大磁盘
 

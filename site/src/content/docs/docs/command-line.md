@@ -124,11 +124,14 @@ sudo spaceknife-cli scan / --no-snapshot
 
 | Line | What it tells you |
 |---|---|
-| `Native walker · 16 listing threads` | Which walker listed the folders and how many listing threads were allowed |
+| `Native walker · 15.8 listing calls on average, 16 at most` | Which walker listed the folders, and how many listing calls ran at once on average and at most |
 | `Listing threads busy …` | Share of the listing threads' time spent in system calls. Near 100 % means the disk or the file system is the limit |
+| `IO lane width … (… on average), CPU lane width … (… on average); … of the folders listed in the IO lane` | How many folders were listed at once among those waiting for the disk (the IO lane) and those already in the file cache (the CPU lane), and the share of folders listed in the IO lane |
+| `Cold fraction (one point per … s): …; device hint …` | The share of folders that waited for the disk over the scan, and the kind of drive the scan started from |
 | `Main thread folding results …` | Share of the time spent adding results to the tree. Near 100 % means folding is the limit, and more threads won't help |
 | `… batches` | How many batches of folders were listed |
 | `Held by the disk-load limit …` | Only with `--disk-limit`: time spent waiting for the limit to allow another batch |
+| `Disk-load limit's concurrency … on average` | Only with `--disk-limit`: how many folders the limit let be listed at once, on average |
 | `Bulk listing (getattrlistbulk): …` | macOS only: whether files are listed in bulk (`on`, `off: <reason>` or `untested`) |
 
 The app writes the same numbers to its log file after every full scan; [Scan speed and disk load](../performance/#the-scan-profile-in-the-log) explains how to read them.

@@ -34,7 +34,7 @@ description: 首次启动的警告、权限、未知空间、扫描慢或卡住�
 
 ### Windows：窗口打不开
 
-SpaceKnife 的窗口由 Microsoft Edge WebView2 Runtime 绘制。Windows 11 自带，多数 Windows 10 电脑也已经装好；缺少时安装包会装上它，便携版则不会。便携版打开后没有窗口时，从微软免费下载安装 WebView2 Runtime，再启动 SpaceKnife；或者改用安装包。
+SpaceKnife 的窗口由 Microsoft Edge WebView2 Runtime（89.0.774.44 或更新）绘制。Windows 11 自带，多数 Windows 10 电脑也已经装好；安装包会装上或升级它，便携版不会。缺少或太旧时，SpaceKnife 在打开窗口之前就会说明（「SpaceKnife 需要 Microsoft Edge WebView2 Runtime，这台电脑上没有」或「……需要更新版本的 Microsoft Edge WebView2 Runtime」），什么都不改：点「下载 WebView2 Runtime」，免费安装后再启动 SpaceKnife；或者改用安装包。
 
 ### macOS：提示无法验证 SpaceKnife
 
@@ -126,12 +126,12 @@ macOS 上没有「完全磁盘访问权限」时，系统会为桌面、文稿�
 
 ### 「无法启动更新」
 
-便携版的「无缝更新」在替换任何东西之前先查两件事。任何一件不行，就什么都不改：这份副本照常使用，卡片显示「无法启动更新：」和原因。
+便携版的「无缝更新」在替换任何东西之前先查两件事。任何一件不行，就什么都不改：这份副本照常使用，SpaceKnife 显示「无法启动更新：」和原因（0.3.5 起留在更新卡片上；0.3.4 只短暂提示）。
 
 - **文件夹里不只有 SpaceKnife。**更新只换 SpaceKnife 自己的文件，所以程序所在的文件夹里还放着你别的东西（别的应用、文档）时，它不开始，并列出这些名字：「文件夹里还有不是 SpaceKnife 的东西（…）」。把 SpaceKnife 和它的 `data` 文件夹单独放进一个文件夹再试，或者用「自己替换」。系统自己放进文件夹的文件（`desktop.ini`、`.DS_Store`）不算，原样留着。
 - **新版本在这台电脑上启动不了。**常见的原因是缺少网页视图：Windows 上的 WebView2 Runtime（这时新版本会弹出一个窗口，说明缺什么、去哪里下载），或者小巧的 Linux 便携版要的 WebKitGTK 4.1（RHEL 9 没有）。装上它再试，或者换另一种下载（[下载哪个文件](../install/#下载哪个文件)）。
 
-如果更新已经换上、又不得不撤回（新版本没能启动），旧版本重新打开时会在更新卡片上说明：「更新没有完成：…」。每一步记在数据文件夹的 `updates/update-<版本>.log` 里。
+如果更新已经换上、又不得不撤回（新版本没能启动），旧版本（0.3.5 起）重新打开时会在更新卡片上说明：「更新没有完成：…」。每一步记在数据文件夹的 `updates/update-<版本>.log` 里。
 
 ### 安装包的更新没有完成
 

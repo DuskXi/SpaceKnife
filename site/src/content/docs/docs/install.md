@@ -83,7 +83,7 @@ Open the dmg and drag SpaceKnife into **Applications**. You need macOS 14 or lat
 
 ### Portable zip
 
-Unzip `SpaceKnife-<version>-mac-arm64-portable.zip` (Apple Silicon) or `…-mac-x64-portable.zip` (Intel) anywhere you can write, such as your user folder or a USB drive. The folder holds `SpaceKnife.app` and a `data` folder; keep the two together and open `SpaceKnife.app`. It keeps everything in `data` and nothing in your user Library ([portable mode](../data-locations/#portable-mode)). The first launch needs the same one-time permission as the dmg (below), for the app in that folder.
+Unzip `SpaceKnife-<version>-mac-arm64-portable.zip` (Apple Silicon) or `…-mac-x64-portable.zip` (Intel) anywhere you can write, such as your user folder or a USB drive. The folder holds `SpaceKnife.app` and a `data` folder; keep the two together and open `SpaceKnife.app`. It keeps its snapshots, settings, logs and cache in `data` ([portable mode](../data-locations/#portable-mode)); only the web view's own data (page storage and caches) goes where macOS keeps it for the app, `~/Library/WebKit/io.github.duskxi.spaceknife`. The first launch needs the same one-time permission as the dmg (below), for the app in that folder.
 
 ### First launch: allow it once
 
@@ -185,7 +185,7 @@ Whichever way you upgrade, your scans, snapshots and settings stay: they live ou
 
 ### Upgrading from 0.3.4
 
-SpaceKnife 0.3.5 is rewritten underneath: the backend is new, and so is the window around the same interface. The release files keep 0.3.4's names, so 0.3.4's update check finds 0.3.5 and the update card works as for any update. What stays:
+SpaceKnife 0.3.5 is rewritten underneath: the backend is new, and so is the window around the same interface. The release files keep 0.3.4's names, so 0.3.4's update check finds 0.3.5 and the update card works as for any update. If 0.3.4 is set to **Releases only** (**Settings › About & updates › Versions to offer**), it doesn't offer 0.3.5, since every 0.x release is a pre-release on GitHub: switch to **Include previews** for this update, or download the file yourself. What stays:
 
 - **Your data**: settings, file classes, classified folders, tags, the command palette's recent entries and the update state are read from the same folders ([Data locations](../data-locations/)). The theme you chose is kept.
 - **Your snapshots**: those 0.3.x saved open and compare as they are, without a conversion. 0.3.5 saves a newer format, which 0.3.x can't open: if you go back to 0.3.x, it shows only the snapshots it saved itself.
@@ -196,7 +196,7 @@ What the first update does, by kind of install:
 | 0.3.4 install | The update to 0.3.5 |
 |---|---|
 | Windows installer | **Seamless update** runs the new installer. It removes 0.3.4 with 0.3.4's own uninstaller, keeping your data, and installs 0.3.5 into the same folder, for the same users: one SpaceKnife in the app list, the same Start menu and desktop shortcuts, and pins on the taskbar keep working. Where the WebView2 Runtime is missing, or older than 89.0.774.44, it installs or updates that first; if it can't (no internet connection, for example), nothing is changed and 0.3.4 opens again. |
-| Windows portable | **Seamless update** first checks that 0.3.5 can start on this computer (it needs the WebView2 Runtime, 89.0.774.44 or later). If it can't, nothing is replaced, the card says **Can't start the update: …** and 0.3.4 goes on as before. If 0.3.5 is put in place but doesn't come up within 90 seconds, 0.3.4 is put back. On Windows on ARM, an x64 copy moves to the ARM build. |
+| Windows portable | **Seamless update** first checks that 0.3.5 can start on this computer (it needs the WebView2 Runtime, 89.0.774.44 or later). If it can't, nothing is replaced, 0.3.4 shows **Can't start the update: …** for a moment (a window of 0.3.5 also says what is missing and where to get it) and goes on as before. If 0.3.5 is put in place but doesn't come up within 90 seconds, 0.3.4 is put back. On Windows on ARM, an x64 copy moves to the ARM build. |
 | macOS dmg | **Open the disk image**, then drag SpaceKnife into Applications to replace 0.3.4. Allow it once and switch Full Disk Access off and on, as after every update. |
 | macOS portable | **Seamless update**, as before; then switch Full Disk Access off and on, as after every update. |
 | deb | **Open the package**: the software installer upgrades the `spaceknife` package. The program moves from `/opt/SpaceKnife` to `/usr/bin` and `/usr/lib/SpaceKnife`, and the package manager adds WebKitGTK 4.1. |
