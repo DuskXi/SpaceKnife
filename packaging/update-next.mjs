@@ -28,14 +28,14 @@
 // Then 「无缝更新」, where the card has it:
 // - clicked like a user, where OLD's window has a DevTools port (--click window): the Electron
 //   shell (--remote-debugging-port) and the Tauri app on Windows (WebView2 takes the port from
-//   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, or, where a runtime leaves that aside for the app's own
-//   arguments, from its per-program policy AdditionalBrowserArguments, which the test sets for
-//   SpaceKnife.exe on the runner and takes out again; a window that answers on neither is updated
-//   the test's way below, which the log says in a line of its own). The test clicks the title
-//   bar's badge and the card's 「无缝更新」 (twice when the card asks once more because a scan
-//   runs); what happens next is
-//   OLD's shell's own code: the portable copy's unpacking, plan and swap helper (NEW's program), the
-//   installer started with OLD's arguments, the AppImage put in place;
+//   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, or, for an elevated app as everything on a GitHub
+//   runner is, from the machine's per-program policy AdditionalBrowserArguments, which the test
+//   sets for SpaceKnife.exe on the runner and takes out again; a window that answers on neither
+//   is updated the test's way below, which the log says in a line of its own). The test clicks
+//   the title bar's badge and the card's 「无缝更新」 (twice when the card asks once more because a
+//   scan runs); what happens next is OLD's shell's own code: the portable copy's unpacking, plan
+//   and swap helper (NEW's program), the installer started with OLD's arguments, the AppImage
+//   put in place;
 // - done by the test where the system's web view has no DevTools port (--click test: the Tauri
 //   app on Linux and macOS): what the button does (src-tauri install.rs replace_portable), the
 //   unpacking, the plan and NEW's program started with --apply-update, as update-e2e.mjs does.
@@ -263,20 +263,26 @@ const AWAKE = ["--disable-renderer-backgrounding", "--disable-backgrounding-occl
 /** The Electron shell: its DevTools port (DevToolsActivePort in its userData). */
 const ELECTRON_ARGS = ["--remote-debugging-port=0", ...AWAKE];
 /** WebView2 (the Tauri app on Windows): the port from the environment, which what the app starts
- * inherits (the swap helper, the installer, NEW). Some runtimes (156 on Windows Server 2025 and
- * Windows 11 on ARM) leave the variable aside for the arguments the app gives (wry's): the same
- * arguments go into WebView2's own per-program setting as well (webview2Policy). */
+ * inherits (the swap helper, the installer, NEW). An elevated app's WebView2 leaves the variable
+ * and the user's own settings aside (the GitHub runners run everything elevated; older runtimes,
+ * as on Windows Server 2022, took them still): the same arguments go into WebView2's per-program
+ * policy as well, the machine's, which it reads for an elevated app too (webview2Policy;
+ * learn.microsoft.com, WebView2 security: "For an elevated host app, use appropriate override
+ * flags"). */
 const webview2Args = (port) => [`--remote-debugging-port=${port}`, ...AWAKE].join(" ");
 const webview2Env = (port) => ({ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: webview2Args(port) });
-const WEBVIEW2_POLICY = "HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
-let webview2PolicySet = false;
+const WEBVIEW2_POLICIES = ["HKLM", "HKCU"].map((hive) => `${hive}\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments`);
+const webview2PoliciesSet = [];
 
 /** WebView2's AdditionalBrowserArguments for SpaceKnife.exe (the program's name: OLD and NEW alike),
- * on this CI runner, for this leg: taken out again on the way out. */
+ * the machine's (an elevated app) and the user's, on this CI runner, for this leg: taken out again
+ * on the way out. */
 function webview2Policy(port) {
-  const r = spawnSync("reg.exe", ["add", WEBVIEW2_POLICY, "/v", "SpaceKnife.exe", "/t", "REG_SZ", "/d", webview2Args(port), "/f"], { encoding: "utf8" });
-  if (r.status !== 0) console.log(`(could not set ${WEBVIEW2_POLICY}: ${r.stderr?.trim()})`);
-  else webview2PolicySet = true;
+  for (const key of WEBVIEW2_POLICIES) {
+    const r = spawnSync("reg.exe", ["add", key, "/v", "SpaceKnife.exe", "/t", "REG_SZ", "/d", webview2Args(port), "/f"], { encoding: "utf8" });
+    if (r.status !== 0) console.log(`(could not set ${key}: ${r.stderr?.trim()})`);
+    else webview2PoliciesSet.push(key);
+  }
 }
 
 async function freePort() {
@@ -1329,7 +1335,7 @@ async function cleanup() {
   if (mode === "appimage") for (const p of appImageApps(join(work, basename(oldPath)))) stop(p.pid, true);
   const left = await stopUnder([...roots]);
   if (left.length) console.log(`ended what still ran from the test's folders: ${left.map((p) => `${p.pid} ${p.cmd}`).join("; ")}`);
-  if (webview2PolicySet) spawnSync("reg.exe", ["delete", WEBVIEW2_POLICY, "/v", "SpaceKnife.exe", "/f"], { stdio: "ignore" });
+  for (const key of webview2PoliciesSet) spawnSync("reg.exe", ["delete", key, "/v", "SpaceKnife.exe", "/f"], { stdio: "ignore" });
 }
 
 let leaving = false;
