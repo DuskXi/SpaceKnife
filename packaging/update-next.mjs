@@ -538,19 +538,18 @@ async function newStarted(where, name, updates) {
   return main;
 }
 
-/** Follow a portable copy's swap by its log until it says how it ended; a log NEW removed (it
- * cleans the updates folder as it starts) after it was read, with NEW running, says "updated". */
+/** Follow a portable copy's swap by its log until it says how it ended. No log, with NEW running
+ * (--updated: only the swap starts it so), says "updated": NEW removes the log with the rest of the
+ * update as it starts, which can be before a first read (OLD quits a moment before the swap). */
 async function swapEnded(log, where, name, timeout = 180_000) {
   let text = "";
-  let read = false;
   const deadline = Date.now() + timeout;
   for (;;) {
     try {
       text = readFileSync(log, "utf8");
-      read = true;
       seen.swapLog = text;
     } catch {
-      if (read && updatedApps(where, name).length) return { how: "updated", text, cleaned: true };
+      if (updatedApps(where, name).length) return { how: "updated", text, cleaned: true };
     }
     const how = swapEnding(text);
     if (how) return { how, text };
