@@ -84,7 +84,7 @@ describe("plainfs", () => {
   // Electron's own fs as the shell's main process has it (ELECTRON_RUN_AS_NODE keeps its .asar
   // handling): its rm fails on a staging folder holding an archive, removeTree does not
   const electron = electronBinary();
-  it.skipIf(!electron)("removes in Electron what Electron's fs cannot", () => {
+  it.skipIf(!electron)("removes in Electron what Electron's fs cannot", (ctx) => {
     const dir = work();
     // two folders: on Windows the archive Electron's fs opened stays open in that process
     const theirs = join(dir, "staging-0.3.6");
@@ -107,6 +107,12 @@ console.log(JSON.stringify(said));
     );
     const mod = fileURLToPath(new URL("./plainfs.ts", import.meta.url));
     const run = spawnSync(electron!, [script, mod, theirs, asar, ours], { env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, encoding: "utf8", timeout: 60_000 });
+    // the package can name a binary that is not there to run (CI skips Electron's download)
+    if (run.error || typeof run.stdout !== "string") {
+      console.warn(`skipped: Electron cannot run here: ${run.error?.message ?? "no output"}`);
+      ctx.skip();
+      return;
+    }
     const line = run.stdout.trim().split(/\r?\n/).at(-1) ?? "";
     expect(line, `${run.status} ${run.stderr}`).toMatch(/^\{/);
     const said = JSON.parse(line) as { folder: boolean; electronFs: string; removeTree: string };

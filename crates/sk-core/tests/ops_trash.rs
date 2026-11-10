@@ -1032,6 +1032,23 @@ mod freedesktop {
         let f = vol.join("dir").join("a b.txt");
         std::fs::create_dir_all(f.parent().unwrap()).unwrap();
         std::fs::write(&f, b"t").unwrap();
+        // FAT, exFAT: no folder modes (the mount's umask), so no sticky .Trash and no 0700
+        let keeps_modes = {
+            let p = vol.join(".mode-probe");
+            std::fs::create_dir(&p).unwrap();
+            let ok = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700)).is_ok()
+                && std::fs::metadata(&p).unwrap().permissions().mode() & 0o7777 == 0o700;
+            std::fs::remove_dir(&p).unwrap();
+            ok
+        };
+        if admin && !keeps_modes {
+            crate::fs_caps::skip(
+                "freedesktop::topdir_admin_trash",
+                dir.path(),
+                "no folder modes, so no sticky .Trash",
+            );
+            return;
+        }
         if admin {
             std::fs::create_dir(vol.join(".Trash")).unwrap();
             std::fs::set_permissions(vol.join(".Trash"), std::fs::Permissions::from_mode(0o1777))
@@ -1053,10 +1070,18 @@ mod freedesktop {
             PathBuf::from(&r.trash_ref),
             root.join("info").join("a b.txt.trashinfo")
         );
-        assert_eq!(
-            std::fs::metadata(&root).unwrap().permissions().mode() & 0o7777,
-            0o700
-        );
+        if keeps_modes {
+            assert_eq!(
+                std::fs::metadata(&root).unwrap().permissions().mode() & 0o7777,
+                0o700
+            );
+        } else {
+            crate::fs_caps::skip(
+                "freedesktop::topdir_trash (its 0700 check)",
+                dir.path(),
+                "no folder modes",
+            );
+        }
         assert!(
             std::fs::read_to_string(&r.trash_ref)
                 .unwrap()
