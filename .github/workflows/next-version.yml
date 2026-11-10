@@ -20,43 +20,40 @@ name: Next version
 # raised, built by the same four workflows). The versions come from the file names. The artifacts
 # are kept 14 days.
 on:
-  # while the experiment runs; out before this goes into dev
-  push:
-    branches: ["exp/next-test", "exp/next-test-*"]
   workflow_dispatch:
     inputs:
       old_portable:
         description: "Old: Portable build run (built with the deb)"
         type: string
-        default: "42729549234"
+        required: true
       old_macos:
         description: "Old: macOS build run"
         type: string
-        default: "42729554006"
+        required: true
       old_windows:
         description: "Old: the run with SpaceKnife-installers-win-x64 (Windows installer build or Installer experiments)"
         type: string
-        default: "42729534728"
+        required: true
       old_electron:
         description: "Old: Electron shell build run"
         type: string
-        default: "42729534787"
+        required: true
       new_portable:
         description: "New: Portable build run (built with the deb)"
         type: string
-        default: "42811231873"
+        required: true
       new_macos:
         description: "New: macOS build run"
         type: string
-        default: "42811236017"
+        required: true
       new_windows:
         description: "New: the run with SpaceKnife-installers-win-x64"
         type: string
-        default: "42811213620"
+        required: true
       new_electron:
         description: "New: Electron shell build run"
         type: string
-        default: "42811213651"
+        required: true
 
 permissions:
   contents: read
@@ -68,14 +65,14 @@ concurrency:
 
 # a push has no inputs: the same runs as the defaults above
 env:
-  OLD_PORTABLE: ${{ inputs.old_portable || '42729549234' }}
-  OLD_MACOS: ${{ inputs.old_macos || '42729554006' }}
-  OLD_WINDOWS: ${{ inputs.old_windows || '42729534728' }}
-  OLD_ELECTRON: ${{ inputs.old_electron || '42729534787' }}
-  NEW_PORTABLE: ${{ inputs.new_portable || '42811231873' }}
-  NEW_MACOS: ${{ inputs.new_macos || '42811236017' }}
-  NEW_WINDOWS: ${{ inputs.new_windows || '42811213620' }}
-  NEW_ELECTRON: ${{ inputs.new_electron || '42811213651' }}
+  OLD_PORTABLE: ${{ inputs.old_portable }}
+  OLD_MACOS: ${{ inputs.old_macos }}
+  OLD_WINDOWS: ${{ inputs.old_windows }}
+  OLD_ELECTRON: ${{ inputs.old_electron }}
+  NEW_PORTABLE: ${{ inputs.new_portable }}
+  NEW_MACOS: ${{ inputs.new_macos }}
+  NEW_WINDOWS: ${{ inputs.new_windows }}
+  NEW_ELECTRON: ${{ inputs.new_electron }}
   GH_TOKEN: ${{ github.token }}
 
 jobs:
