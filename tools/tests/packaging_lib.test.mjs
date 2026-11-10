@@ -1,15 +1,17 @@
 // packaging/lib.mjs: what the packaging end-to-end tests share — following a portable copy's swap
 // by its log and the new version's ready file, comparing an updated folder with the candidate,
-// finding and ending the processes a test left behind.
+// finding and ending the processes a test left behind; the files of a release as a test's release
+// list offers them, versions compared, a window's DevTools port found.
 //   node --test "tools/tests/*.test.mjs"
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { test } from "node:test";
 
-import { alternativesGroup, asarFilesIn, isElectron, notOwned, pidAlive, processesUnder, sleep, stopUnder, swapEnding, treeDiff, treeOf, uiIn, untilUninstalled, watchSwap } from "../../packaging/lib.mjs";
+import { alternativesGroup, asarFilesIn, compareVersions, devtoolsPorts, isElectron, notOwned, pidAlive, processesUnder, releaseFiles, sleep, stopUnder, swapEnding, treeDiff, treeOf, uiIn, untilUninstalled, watchSwap } from "../../packaging/lib.mjs";
+import { expected, publishedSums } from "../release.mjs";
 import { tempFolders } from "./temp.mjs";
 
 const tmp = tempFolders("sk-packaging-lib-");
@@ -264,4 +266,80 @@ test("an NSIS uninstaller is done when its own copy has ended, not when the one 
   // one that never ends: named in the timeout's message
   const stuck = [{ pid: 7, cmd: `${String.raw`C:\Temp\~nsuA.tmp\Au_.exe /S _?=C:\Programs\SpaceKnife`}\\` }];
   await assert.rejects(untilUninstalled(String.raw`C:\Programs\SpaceKnife`, { timeout: 200, every: 50, list: () => stuck }), /still at work after 0 s: 7 C:\\Temp\\~nsuA\.tmp\\Au_\.exe/);
+});
+
+test("versions are compared by their numbers, a pre-release below its version", () => {
+  assert.ok(compareVersions("0.3.6", "0.3.5") > 0);
+  assert.ok(compareVersions("0.3.10", "0.3.9") > 0, "by number, not as text");
+  assert.ok(compareVersions("0.4.0", "0.3.99") > 0);
+  assert.ok(compareVersions("1.0.0-beta.1", "1.0.0") < 0);
+  assert.ok(compareVersions("1.0.0~beta.2", "1.0.0-beta.1") > 0, "a deb's ~ as -");
+  assert.equal(compareVersions("v0.3.5", "0.3.5"), 0);
+});
+
+test("a test's release offers every file a release publishes, the real one under its own name", (t) => {
+  const dir = tmp();
+  const real = join(dir, "SpaceKnife-0.3.6-win-x64-portable.zip");
+  writeFileSync(real, "the real build\n");
+  const files = releaseFiles("0.3.6", new Map([["SpaceKnife-0.3.6-win-x64-portable.zip", real]]));
+  const names = files.map((f) => f.name);
+  // every name of tools/release.mjs expected, every checksum list it publishes, nothing else
+  const want = [...expected().map((e) => e.template.replace("{v}", "0.3.6")), ...publishedSums()];
+  assert.deepEqual([...names].sort(), [...want].sort());
+  assert.equal(new Set(names).size, names.length);
+  const zip = files.find((f) => f.name === "SpaceKnife-0.3.6-win-x64-portable.zip");
+  assert.equal(zip.path, real);
+  // the stand-ins are none of the real file's bytes, and each its own
+  const standIns = files.filter((f) => f.body && !f.name.startsWith("SHA256SUMS"));
+  assert.ok(standIns.length > 10);
+  assert.equal(new Set(standIns.map((f) => f.sha256)).size, standIns.length);
+  assert.ok(standIns.every((f) => f.sha256 !== zip.sha256 && f.body.toString().includes(f.name)));
+  // every file in the list the release publishes it in, with its checksum; the .zsync in none
+  const lists = new Map(files.filter((f) => f.name.startsWith("SHA256SUMS")).map((f) => [f.name, f.body.toString()]));
+  for (const e of expected()) {
+    const name = e.template.replace("{v}", "0.3.6");
+    const f = files.find((x) => x.name === name);
+    const listing = [...lists].filter(([, text]) => text.includes(`  ${name}\n`)).map(([n]) => n);
+    assert.deepEqual(listing, e.sums ? [e.sums] : [], name);
+    if (e.sums) assert.ok(lists.get(e.sums).includes(`${f.sha256}  ${name}\n`), name);
+  }
+  assert.match(lists.get("SHA256SUMS-portable-win-x64.txt"), new RegExp(`^${zip.sha256}  SpaceKnife-0\\.3\\.6-win-x64-portable\\.zip\\n$`));
+  // the bytes of a real file: its own digest (a big file is hashed once by the caller)
+  let asked = 0;
+  releaseFiles("0.3.6", new Map([["SpaceKnife-0.3.6-win-x64-portable.zip", real]]), () => (asked++, "f".repeat(64)));
+  assert.equal(asked, 1);
+});
+
+test("a test's release leaves out what came later, takes a package's ~, refuses a name it does not publish", () => {
+  const dir = tmp();
+  // 0.3.4 had no Tauri app for Linux
+  const old = releaseFiles("0.3.4").map((f) => f.name);
+  assert.ok(!old.some((n) => n.includes("-tauri.")), old.join(", "));
+  assert.ok(!old.includes("SHA256SUMS-tauri-linux-x64.txt"));
+  assert.ok(releaseFiles("0.3.5").some((f) => f.name === "SpaceKnife-0.3.5-linux-arm64-tauri.tar.gz"));
+  // a pre-release's deb as the packager spells it
+  const deb = join(dir, "spaceknife_0.4.0~beta.1_amd64.deb");
+  writeFileSync(deb, "deb\n");
+  const pre = releaseFiles("0.4.0-beta.1", new Map([["spaceknife_0.4.0~beta.1_amd64.deb", deb]]));
+  assert.ok(pre.some((f) => f.name === "spaceknife_0.4.0~beta.1_amd64.deb" && f.path === deb));
+  assert.ok(!pre.some((f) => f.name === "spaceknife_0.4.0-beta.1_amd64.deb"));
+  assert.throws(() => releaseFiles("0.3.6", new Map([["SpaceKnife_0.3.6_x64-setup.exe", deb]])), /not a file of release 0\.3\.6: SpaceKnife_0\.3\.6_x64-setup\.exe/);
+});
+
+test("a window's DevTools port is read from the newest DevToolsActivePort written since", () => {
+  const dir = tmp();
+  const profile = join(dir, "data", "desktop", "webview", "EBWebView");
+  mkdirSync(profile, { recursive: true });
+  const old = join(dir, "data", "electron");
+  mkdirSync(old, { recursive: true });
+  writeFileSync(join(old, "DevToolsActivePort"), "41000\n/devtools/browser/x\n");
+  const since = Date.now() + 5_000;
+  assert.deepEqual(devtoolsPorts([join(dir, "data")]), [41000]);
+  assert.deepEqual(devtoolsPorts([join(dir, "data")], since), [], "written before: another start's");
+  writeFileSync(join(profile, "DevToolsActivePort"), "42000\n/devtools/browser/y\n");
+  utimesSync(join(profile, "DevToolsActivePort"), new Date(since + 1000), new Date(since + 1000));
+  assert.deepEqual(devtoolsPorts([join(dir, "data")], since), [42000]);
+  assert.deepEqual(devtoolsPorts([join(dir, "data")]), [42000, 41000], "the newest first");
+  assert.deepEqual(devtoolsPorts([join(dir, "data")], 0, 1), [41000], "no deeper than asked");
+  assert.deepEqual(devtoolsPorts([join(dir, "nothing")]), []);
 });

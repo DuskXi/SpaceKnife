@@ -1,14 +1,17 @@
 // What the packaging tests share: waiting, the backend's JSON-RPC over its WebSocket (Node's own
 // WebSocket, no dependencies), ending a process tree, an archive's unpacking; following a portable
 // copy's swap, comparing an updated folder with the candidate, finding and ending what a test left
-// running in its folders, waiting for an NSIS uninstaller's own copy (unit tests:
-// tools/tests/packaging_lib.test.mjs).
+// running in its folders, waiting for an NSIS uninstaller's own copy; a window's page over the
+// DevTools protocol, a process's command line, the processor a program is built for, the files of
+// a release as a test's release list offers them (unit tests: tools/tests/packaging_lib.test.mjs).
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import net from "node:net";
 import { join } from "node:path";
+
+import { expected } from "../tools/release.mjs";
 
 export const WIN = process.platform === "win32";
 export const MAC = process.platform === "darwin";
@@ -391,4 +394,212 @@ export async function stopUnder(roots, { tries = 5 } = {}) {
     left = processesUnder(roots).filter((p) => !p.cmd.startsWith("[Z]"));
   }
   return first;
+}
+
+// ------------------------------------------------------------------ the update tests' other helpers
+
+/** The command line of a process (Windows: CIM; Linux: /proc; macOS: ps), "" when it can't be read. */
+export function commandLine(pid) {
+  if (WIN) {
+    const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`], { encoding: "utf8" });
+    return (r.stdout ?? "").trim();
+  }
+  if (MAC) return (spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).stdout ?? "").trim();
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** The processor a program is built for, from its header (PE, ELF, Mach-O): x64, arm64, or what
+ * the header says. */
+export function machineOf(file) {
+  const head = readFileSync(file).subarray(0, 4096);
+  if (head[0] === 0x4d && head[1] === 0x5a) {
+    const pe = head.readUInt32LE(0x3c);
+    return { 0x8664: "x64", 0xaa64: "arm64", 0x14c: "x86" }[head.readUInt16LE(pe + 4)] ?? "unknown";
+  }
+  if (head.readUInt32BE(0) === 0x7f454c46) return { 62: "x64", 183: "arm64" }[head.readUInt16LE(0x12)] ?? "unknown";
+  if (head.readUInt32LE(0) === 0xfeedfacf) return { 0x01000007: "x64", 0x0100000c: "arm64" }[head.readUInt32LE(4)] ?? "unknown";
+  if (head.readUInt32BE(0) === 0xcafebabe) return "universal";
+  return "unknown";
+}
+
+/** Two versions compared (`a` < `b`: negative): the numbers first, then a version without a
+ * pre-release part above one with it, then the pre-release parts as text; `-` or `~` before it. */
+export function compareVersions(a, b) {
+  const split = (v) => {
+    const [core, ...pre] = String(v).replace(/^v/, "").split(/[-~]/);
+    return { nums: core.split(".").map(Number), pre: pre.join("-") };
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let i = 0; i < 3; i++) if ((x.nums[i] ?? 0) !== (y.nums[i] ?? 0)) return (x.nums[i] ?? 0) - (y.nums[i] ?? 0);
+  if (x.pre === y.pre) return 0;
+  if (!x.pre) return 1;
+  if (!y.pre) return -1;
+  return x.pre < y.pre ? -1 : 1;
+}
+
+/** The files of release `version` as a test's release list offers them, as GitHub's does: every
+ * name the release publishes (tools/release.mjs expected; one that came with a later version left
+ * out) and its checksum files, each file listed in the one the release lists it in. `real` maps
+ * names to files on disk (the version's file for the install under test, its version spelled as
+ * the file spells it: deb and rpm write a pre-release's - as ~); every other name is a stand-in of
+ * a few bytes of its own, never an installable file: a copy that takes the wrong name downloads
+ * something that is not its update (its checksum is listed: the download itself passes), which a
+ * test's check of the name catches. `digest(path)`: a real file's SHA-256. Returns
+ * [{ name, path, sha256 } | { name, body, sha256 }], the checksum files last. */
+export function releaseFiles(version, real = new Map(), digest = sha256) {
+  const hash = (body) => createHash("sha256").update(body).digest("hex");
+  const out = [];
+  const lists = new Map();
+  for (const e of expected()) {
+    if (e.since && compareVersions(version, e.since) < 0) continue;
+    const names = [version, version.replaceAll("-", "~"), version.replaceAll("-", "_")].map((v) => e.template.replace("{v}", v));
+    const name = names.find((n) => real.has(n)) ?? names[0];
+    let file;
+    if (real.has(name)) file = { name, path: real.get(name), sha256: digest(real.get(name)) };
+    else {
+      const body = Buffer.from(`stand-in for ${name}: not a file of this install\n`);
+      file = { name, body, sha256: hash(body) };
+    }
+    out.push(file);
+    if (e.sums) lists.set(e.sums, `${lists.get(e.sums) ?? ""}${file.sha256}  ${name}\n`);
+  }
+  const unknown = [...real.keys()].filter((n) => !out.some((f) => f.name === n));
+  if (unknown.length) throw new Error(`not a file of release ${version}: ${unknown.join(", ")}`);
+  for (const [name, text] of [...lists].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const body = Buffer.from(text);
+    out.push({ name, body, sha256: hash(body) });
+  }
+  return out;
+}
+
+/** The ports in the DevToolsActivePort files below `roots` (at most `depth` folders down) written
+ * at or after `since` (ms), the newest first. Chromium writes one into its profile folder when it
+ * listens for the DevTools protocol (an Electron app's userData; WebView2's EBWebView in the
+ * window's data folder). */
+export function devtoolsPorts(roots, since = 0, depth = 4) {
+  const found = [];
+  const walk = (dir, left) => {
+    let names = [];
+    try {
+      names = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of names) {
+      const p = join(dir, e.name);
+      if (e.isDirectory() && left > 0) walk(p, left - 1);
+      else if (e.isFile() && e.name === "DevToolsActivePort") {
+        try {
+          const m = statSync(p).mtimeMs;
+          const port = Number(readFileSync(p, "utf8").split(/\s+/)[0]);
+          if (m >= since && port) found.push({ port, m });
+        } catch {
+          // being written, or gone
+        }
+      }
+    }
+  };
+  for (const r of roots) walk(r, depth);
+  return found.sort((a, b) => b.m - a.m).map((f) => f.port);
+}
+
+/** A page of an app's window over the DevTools protocol (Chromium's: an Electron window, or
+ * WebView2's when WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS gives it a port). `ports()` gives the ports
+ * to try ([] while there are none; it throws to end a wait that is pointless, the app having
+ * exited); `accept(evaluate)` says whether a page is the one wanted (the old version's window, not
+ * the new one's). Resolves { evaluate, close, port }: evaluate(expression) is its value, promises
+ * awaited; a page that stops answering (a reload, a renderer put to sleep while the window is
+ * minimized on a desktop nobody looks at) is woken, or found again, and asked again. */
+export async function devtoolsPage(ports, { what = "the window", accept = async () => true, timeout = 120_000 } = {}) {
+  let ws = null;
+  let ids = 0;
+  let port = null;
+  const pending = new Map();
+  const open = (url) =>
+    new Promise((ok, no) => {
+      const socket = new WebSocket(url);
+      socket.onopen = () => ok(socket);
+      socket.onerror = () => no(new Error("the DevTools socket was refused"));
+    });
+  const attach = (socket) => {
+    socket.onmessage = (m) => {
+      const msg = JSON.parse(m.data);
+      pending.get(msg.id)?.(msg);
+      pending.delete(msg.id);
+    };
+    socket.onclose = () => {
+      for (const done of pending.values()) done({ error: { message: "the DevTools socket closed" } });
+      pending.clear();
+      if (ws === socket) ws = null;
+    };
+    ws = socket;
+  };
+  const send = (method, params, wait) =>
+    new Promise((ok, no) => {
+      const id = ++ids;
+      const t = setTimeout(() => (pending.delete(id), no(new Error(`no answer to ${method} ${JSON.stringify(params).slice(0, 80)}`))), wait);
+      pending.set(id, (msg) => {
+        clearTimeout(t);
+        const r = msg.result;
+        if (msg.error || r?.exceptionDetails) no(new Error(JSON.stringify(msg.error ?? r.exceptionDetails)));
+        else ok(r);
+      });
+      ws.send(JSON.stringify({ id, method, params }));
+    });
+  const raw = async (expression) => (await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, 15_000))?.result?.value;
+  async function connect() {
+    await until(what, async () => {
+      for (const p of await ports()) {
+        const pages = await fetch(`http://127.0.0.1:${p}/json/list`, { signal: AbortSignal.timeout(5000) })
+          .then((r) => r.json())
+          .catch(() => []);
+        for (const t of pages.filter((t) => t.type === "page" && t.webSocketDebuggerUrl)) {
+          let socket;
+          try {
+            socket = await open(t.webSocketDebuggerUrl);
+          } catch {
+            continue;
+          }
+          attach(socket);
+          const ok = await accept(raw).catch(() => false);
+          if (ok) {
+            port = p;
+            return true;
+          }
+          socket.close();
+          ws = null;
+        }
+      }
+      return false;
+    }, timeout, 1000);
+  }
+  async function evaluate(expression, { tries = 4 } = {}) {
+    for (let i = 1; ; i++) {
+      try {
+        if (!ws) await connect();
+        return await raw(expression);
+      } catch (e) {
+        if (i >= tries) throw e;
+        console.log(`  devtools: ${e.message}; again`);
+        try {
+          if (ws) await send("Page.setWebLifecycleState", { state: "active" }, 5_000);
+        } catch {
+          try {
+            ws?.close();
+          } catch {
+            // gone
+          }
+          ws = null;
+        }
+        await sleep(1000);
+      }
+    }
+  }
+  await connect();
+  return { evaluate, close: () => ws?.close(), port: () => port };
 }
