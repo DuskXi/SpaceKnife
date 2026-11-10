@@ -338,7 +338,7 @@
  "自动检查更新": "Check for updates automatically",
  "每天最多一次，只读取 GitHub 上本项目的发布列表，不发送任何使用数据；小版本只在右上角提示": "At most once a day, it only reads this project's release list on GitHub and sends no usage data; small updates only show a badge at the top right",
  "提示哪些版本": "Versions to offer",
- "预览版是 GitHub 上标为预发布（Pre-release）的版本": "Previews are the releases marked as pre-release on GitHub",
+ "预览版是版本号带预发布段的版本（如 0.4.0-beta.1），以及 1.0 起 GitHub 上标为预发布的版本": "Previews are versions with a pre-release part (such as 0.4.0-beta.1) and, from 1.0 on, releases marked as pre-release on GitHub",
  "包括预览版": "Include previews",
  "只要正式版": "Releases only",
  "自动下载更新": "Download updates automatically",

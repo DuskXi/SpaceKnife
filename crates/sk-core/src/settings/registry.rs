@@ -165,7 +165,7 @@ pub(crate) fn registry() -> Vec<Spec> {
         Spec::new("general.update_download", C::About, "更新", "自动下载更新", "发现新版本后在后台下载并校验；只有你在更新卡片里点了「无缝更新」或安装方式才会安装，从不自己安装", Switch, b(true))
             .depends("general.update_check")
             .syn(&["update", "download", "auto", "下载"]),
-        Spec::new("general.update_channel", C::About, "更新", "提示哪些版本", "预览版是 GitHub 上标为预发布（Pre-release）的版本", Segmented, s("preview"))
+        Spec::new("general.update_channel", C::About, "更新", "提示哪些版本", "预览版是版本号带预发布段的版本（如 0.4.0-beta.1），以及 1.0 起 GitHub 上标为预发布的版本", Segmented, s("preview"))
             .opts(&[("preview", "包括预览版"), ("stable", "只要正式版")])
             .syn(&["update", "channel", "beta", "prerelease", "预发布"]),
         // ------------------------------------------------------------ 外观

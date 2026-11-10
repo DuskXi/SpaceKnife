@@ -344,6 +344,6 @@ SpaceKnife 的设置都在一个「设置」标签页里。改动立即保存，
 | --- | --- | --- | --- | --- |
 | 自动检查更新 | 开 | 开 `true` · 关 `false` | 每天最多一次，只读取 GitHub 上本项目的发布列表，不发送任何使用数据；小版本只在右上角提示。 | `general.update_check` |
 | 自动下载更新 | 开 | 开 `true` · 关 `false` | 发现新版本后在后台下载并校验；只有你在更新卡片里点了「无缝更新」或安装方式才会安装，从不自己安装。「自动检查更新」打开时才能修改。 | `general.update_download` |
-| 提示哪些版本 | 包括预览版 | 包括预览版 `"preview"` · 只要正式版 `"stable"` | 预览版是 GitHub 上标为预发布（Pre-release）的版本。 | `general.update_channel` |
+| 提示哪些版本 | 包括预览版 | 包括预览版 `"preview"` · 只要正式版 `"stable"` | 预览版是版本号带预发布段的版本（如 0.4.0-beta.1），以及 1.0 起 GitHub 上标为预发布的版本。 | `general.update_channel` |
 
 <!-- generated:settings:end -->

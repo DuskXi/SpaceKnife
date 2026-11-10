@@ -3,6 +3,7 @@
   "description": "Settings (get, update with versions and conflicts, invalid values, reset by page, export and import, settings.changed to every session in order) and file classes (get, update, folder classes, reset, classes.changed), and that both survive a restart.",
   "fixtures": {"small": "small"},
   "known_diffs": [
+    {"path": "**/meta/9/description", "why": "general.update_channel: the Rust text names 0.3.5's rule (a pre-release part in the version, or from 1.0 on GitHub's pre-release mark; during 0.x every release is marked so), not 0.3.4's (GitHub's mark only)"},
     {"path": "**/meta/45/description", "why": "scan.workers: the Rust text drops 0.3.4's mention of worker processes without the native extension (there is no Python fallback any more)"}
   ],
   "steps": [
