@@ -156,6 +156,11 @@ function go(path: string, how: InstallHow, step: InstallStep): void {
       >
         <span :style="pct === null ? undefined : { width: `${pct}%` }" />
       </div>
+      <!-- why the last click did not start it, also while the file is checked again (below) -->
+      <div v-if="installError" class="uc-line error" role="alert">
+        <Icon name="warning" :size="14" />
+        <span>{{ installError }}</span>
+      </div>
     </div>
     <template v-else-if="readyPath">
       <div class="uc-body">
@@ -210,6 +215,13 @@ function go(path: string, how: InstallHow, step: InstallStep): void {
         {{ t("这种安装方式请到发布页下载") }}
       </div>
       <div v-if="d.state === 'cancelled'" class="uc-line">{{ t("已取消下载") }}</div>
+      <!-- a click that did not start the update has the shell restart the backend (the files had
+           to be free): the new backend has no finished download until its first check verifies
+           the file again, a minute after it starts; the reason stays said meanwhile -->
+      <div v-if="installError" class="uc-line error" role="alert">
+        <Icon name="warning" :size="14" />
+        <span>{{ installError }}</span>
+      </div>
     </div>
 
     <div class="uc-actions">
