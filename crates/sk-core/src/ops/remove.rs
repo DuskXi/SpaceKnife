@@ -1787,18 +1787,63 @@ mod imp {
     const ERROR_SHARING_VIOLATION: i32 = 32;
     const ERROR_DIR_NOT_EMPTY: i32 = 145;
     const STATUS_DELETE_PENDING: i32 = 0xC000_0056_u32 as i32;
+    /// a read-only file opened to be deleted on close (FAT, exFAT)
+    const STATUS_CANNOT_DELETE: i32 = 0xC000_0121_u32 as i32;
     /// GetVolumeInformation: the file system can hold names that differ only in case
     const FILE_CASE_SENSITIVE_SEARCH: u32 = 0x1;
+    // NtCreateFile: open what is there, and how
+    const FILE_OPEN: u32 = 1;
+    const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x20;
+    const FILE_DELETE_ON_CLOSE: u32 = 0x1000;
+    const FILE_OPEN_FOR_BACKUP_INTENT: u32 = 0x4000;
+    const FILE_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 
     /// Pauses before a folder whose every entry was deleted, but that is not empty yet, is asked
     /// to go again (about a second in all): [`remove_when_empty`].
     const SETTLE_MS: [u64; 6] = [10, 30, 60, 120, 250, 500];
+
+    #[repr(C)]
+    struct UnicodeString {
+        length: u16,
+        maximum_length: u16,
+        buffer: *mut u16,
+    }
+
+    #[repr(C)]
+    struct ObjectAttributes {
+        length: u32,
+        root_directory: HANDLE,
+        object_name: *const UnicodeString,
+        attributes: u32,
+        security_descriptor: *const c_void,
+        security_quality_of_service: *const c_void,
+    }
+
+    #[repr(C)]
+    struct IoStatusBlock {
+        /// NTSTATUS or a pointer: a pointer's size
+        status: *mut c_void,
+        information: usize,
+    }
 
     #[link(name = "ntdll", kind = "raw-dylib")]
     unsafe extern "system" {
         /// The NTSTATUS the last failed call of this thread ended with (finer than its Win32
         /// error: STATUS_DELETE_PENDING is ERROR_ACCESS_DENIED there).
         fn RtlGetLastNtStatus() -> i32;
+        fn NtCreateFile(
+            handle: *mut HANDLE,
+            access: u32,
+            attributes: *const ObjectAttributes,
+            io: *mut IoStatusBlock,
+            allocation_size: *const i64,
+            file_attributes: u32,
+            share: u32,
+            disposition: u32,
+            options: u32,
+            ea: *const c_void,
+            ea_length: u32,
+        ) -> i32;
     }
 
     const BACKSLASH: u16 = b'\\' as u16;
@@ -2057,28 +2102,105 @@ mod imp {
         if ok { Ok(()) } else { Err(last()) }
     }
 
-    /// Delete what `h` is open on: POSIX semantics where the file system has them, else the
-    /// classic flag; a read-only item loses the flag first (through another handle checked to
-    /// be the same item), as Explorer does after asking.
-    /// `posix`: the item's file system may have POSIX semantics; cleared at its first refusal of
-    /// them (FAT, exFAT: not asked again for the rest of the item, one call less a file).
-    fn delete(h: &Handle, path: &[u16], f: &Facts, posix: &AtomicBool) -> io::Result<()> {
+    /// Ask for what `h` is open on to be deleted when it is closed, through a second handle on
+    /// it — opened relative to `h` by no name, so the very same entry whatever its path holds by
+    /// now — with FILE_DELETE_ON_CLOSE (what `rd /s` does). Without POSIX semantics this is one
+    /// write less a deletion on FAT and exFAT than setting the disposition, which they write to
+    /// the entry at once: on a drive set for quick removal every such write goes to the device
+    /// before the call returns, two a deletion instead of three. A folder that is not empty
+    /// then stays without a word ([`delete_and_close`] looks). Err: the NTSTATUS.
+    fn delete_on_close(h: &Handle) -> Result<(), i32> {
+        probe::call(Call::Delete);
+        let name = UnicodeString {
+            length: 0,
+            maximum_length: 0,
+            buffer: null_mut(),
+        };
+        let attributes = ObjectAttributes {
+            length: std::mem::size_of::<ObjectAttributes>() as u32,
+            root_directory: h.0,
+            object_name: &name,
+            attributes: 0,
+            security_descriptor: null(),
+            security_quality_of_service: null(),
+        };
+        let mut io = IoStatusBlock {
+            status: null_mut(),
+            information: 0,
+        };
+        let mut second: HANDLE = null_mut();
+        let options = FILE_DELETE_ON_CLOSE
+            | FILE_OPEN_FOR_BACKUP_INTENT
+            | FILE_OPEN_REPARSE_POINT
+            | FILE_SYNCHRONOUS_IO_NONALERT;
+        // SAFETY: the structures live for the call; a handle it returns is owned from here on.
+        let status = unsafe {
+            NtCreateFile(
+                &mut second,
+                DELETE | SYNCHRONIZE,
+                &attributes,
+                &mut io,
+                null(),
+                0,
+                SHARE_ALL,
+                FILE_OPEN,
+                options,
+                null(),
+                0,
+            )
+        };
+        if status < 0 {
+            return Err(status);
+        }
+        drop(Handle(second)); // the entry goes when `h` is closed too
+        Ok(())
+    }
+
+    /// How [`delete`] asked for an entry to go.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Asked {
+        /// its disposition set: refused then, or gone when the handle is closed
+        Disposition,
+        /// [`delete_on_close`]: gone when the handle is closed, a folder only if empty then
+        OnClose,
+    }
+
+    /// Delete what `h` is open on: POSIX semantics where the file system has them; else on close
+    /// ([`delete_on_close`]) where it can, else the classic flag. A read-only item loses the flag
+    /// first (through another handle checked to be the same item), as Explorer does after
+    /// asking. It goes when `h` is closed (with POSIX semantics its name at once).
+    /// `item.posix`: the item's file system may have POSIX semantics; cleared at its first
+    /// refusal of them (FAT, exFAT: not asked again for the rest of the item, one call less a
+    /// file). `item.on_close`: it may delete on close so; cleared at its first refusal other than
+    /// a read-only file's (a file system that cannot open by handle: the flag from then on).
+    fn delete(h: &Handle, path: &[u16], f: &Facts, item: &Item) -> io::Result<Asked> {
         if let Some(code) = f.undeletable {
             return Err(io::Error::from_raw_os_error(code));
         }
-        if posix.load(Ordering::Relaxed) {
+        if item.posix.load(Ordering::Relaxed) {
             let all = DISPOSITION_DELETE | DISPOSITION_POSIX | DISPOSITION_IGNORE_READONLY;
             match set_disposition(h, Some(all)) {
-                Ok(()) => return Ok(()),
+                Ok(()) => return Ok(Asked::Disposition),
                 // no such information class here (invalid function / not supported / parameter)
                 Err(e) if matches!(e.raw_os_error(), Some(1) | Some(50) | Some(87)) => {
-                    posix.store(false, Ordering::Relaxed)
+                    item.posix.store(false, Ordering::Relaxed)
                 }
                 Err(_) => {}
             }
         }
-        match set_disposition(h, None) {
-            Ok(()) => Ok(()),
+        // without POSIX semantics (where they were refused for another reason: as before)
+        let classic = |h: &Handle| -> io::Result<Asked> {
+            if !item.posix.load(Ordering::Relaxed) && item.on_close.load(Ordering::Relaxed) {
+                match delete_on_close(h) {
+                    Ok(()) => return Ok(Asked::OnClose),
+                    Err(STATUS_CANNOT_DELETE) => {} // read-only: the disposition says so
+                    Err(_) => item.on_close.store(false, Ordering::Relaxed),
+                }
+            }
+            set_disposition(h, None).map(|()| Asked::Disposition)
+        };
+        match classic(h) {
+            Ok(asked) => Ok(asked),
             Err(e)
                 if f.attrs & ATTR_READONLY != 0
                     && e.raw_os_error() == Some(ERROR_ACCESS_DENIED) =>
@@ -2106,15 +2228,39 @@ mod imp {
                     return Err(last());
                 }
                 drop(w);
-                if posix.load(Ordering::Relaxed) {
+                if item.posix.load(Ordering::Relaxed) {
                     set_disposition(h, Some(DISPOSITION_DELETE | DISPOSITION_POSIX))
                         .or_else(|_| set_disposition(h, None))
+                        .map(|()| Asked::Disposition)
                 } else {
-                    set_disposition(h, None)
+                    classic(h)
                 }
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// [`delete`], then `h` closed: a folder asked to go on close that is still there then (not
+    /// empty: FAT and exFAT keep it without a word) is ERROR_DIR_NOT_EMPTY, as a disposition
+    /// refused says it.
+    fn delete_and_close(h: Handle, path: &[u16], f: &Facts, item: &Item) -> io::Result<()> {
+        let asked = delete(&h, path, f, item);
+        drop(h);
+        match asked? {
+            Asked::OnClose if f.dir() && still_at(path, f) => {
+                Err(io::Error::from_raw_os_error(ERROR_DIR_NOT_EMPTY))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Whether the very entry `f` tells of is at `path` (by its identity; the entry itself, not
+    /// what a link there points to). Being deleted already, or not there: no.
+    fn still_at(path: &[u16], f: &Facts) -> bool {
+        open(path, FILE_READ_ATTRIBUTES | SYNCHRONIZE, false)
+            .ok()
+            .and_then(|h| identity(&h).ok())
+            == Some((f.volume, f.index))
     }
 
     /// A directory information class: the restart and the next query, where an entry's name
@@ -2312,6 +2458,9 @@ mod imp {
         case_blind: bool,
         /// it may delete with POSIX semantics: cleared at the first refusal ([`delete`])
         posix: AtomicBool,
+        /// without them it may delete on close ([`delete_on_close`]): cleared at the first
+        /// refusal that is not a read-only file's
+        on_close: AtomicBool,
     }
 
     /// A folder being emptied (by one thread or several).
@@ -2384,6 +2533,7 @@ mod imp {
                 names_known: f.name.is_some(),
                 case_blind: case_blind(&h),
                 posix: AtomicBool::new(true),
+                on_close: AtomicBool::new(true),
             });
             frame(h, f, top_w, item, buf)
         }
@@ -2444,7 +2594,7 @@ mod imp {
                 return Visit::Failed(super::mount_inside());
             }
             // a file, or a link of any kind: the entry itself, never what it points to
-            match delete(&h, &path, &facts, &dir.item.posix) {
+            match delete_and_close(h, &path, &facts, &dir.item) {
                 Ok(()) => Visit::Deleted,
                 Err(e) => Visit::Failed(e),
             }
@@ -2454,9 +2604,7 @@ mod imp {
             let Some(h) = dir.h.lock().take() else {
                 return Ok(());
             };
-            let gone = delete(&h, &dir.path, &dir.facts, &dir.item.posix);
-            drop(h);
-            match gone {
+            match delete_and_close(h, &dir.path, &dir.facts, &dir.item) {
                 Err(e) if e.raw_os_error() == Some(ERROR_DIR_NOT_EMPTY) => remove_when_empty(dir),
                 other => other,
             }
@@ -2508,9 +2656,7 @@ mod imp {
             if identity(&h)? != (dir.facts.volume, dir.facts.index) {
                 return Err(super::moved_inside());
             }
-            let gone = delete(&h, &dir.path, &dir.facts, &dir.item.posix);
-            drop(h);
-            match gone {
+            match delete_and_close(h, &dir.path, &dir.facts, &dir.item) {
                 Err(e) if e.raw_os_error() == Some(ERROR_DIR_NOT_EMPTY) => continue,
                 other => return other,
             }
