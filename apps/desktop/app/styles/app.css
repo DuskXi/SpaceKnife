@@ -583,6 +583,26 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .hc-time .mono { font-size: 11px; text-align: right; }
 .hc-hint { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--sk-color-line-strong); background: var(--sk-color-bg-overlay); font-size: 11px; color: var(--sk-color-text-tertiary); }
 
+/* ---------------------------------------------------------------- colour mode legend (ColorLegendTip) */
+.legend-anchor { position: relative; display: flex; }
+.legend-tip {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; width: 300px; overflow: hidden; pointer-events: none;
+  display: flex; flex-direction: column; gap: 8px; padding: 12px 12px 0;
+  border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-raised); box-shadow: var(--sk-shadow-popover); font-size: 12px; line-height: 16px;
+}
+.lt-title { font-size: 13px; font-weight: 600; line-height: 18px; color: var(--sk-color-text-primary); }
+.lt-rows { display: grid; grid-template-columns: 1fr; gap: 6px 12px; padding: 2px 0; }
+.lt-rows.two { grid-template-columns: 1fr 1fr; }
+.lt-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.lt-row.wide { grid-column: 1 / -1; }
+.lt-row .swatch { width: 10px; height: 10px; }
+.lt-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lt-note { font-size: 11px; color: var(--sk-color-text-tertiary); }
+.lt-hint {
+  display: flex; align-items: center; gap: 6px; margin: 2px -12px 0; padding: 8px 12px;
+  border-top: 1px solid var(--sk-color-line-strong); background: var(--sk-color-bg-overlay); font-size: 11px; color: var(--sk-color-text-tertiary);
+}
+
 /* ---------------------------------------------------------------- start page (W1) */
 .start { position: relative; min-height: 0; overflow: hidden; display: flex; justify-content: center; padding: 43px 24px; }
 .start-cols { display: flex; gap: 40px; width: 1160px; max-width: 100%; min-height: 0; }

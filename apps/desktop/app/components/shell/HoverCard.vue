@@ -7,6 +7,7 @@ import Icon from "@/components/ui/Icon.vue";
 import Kbd from "@/components/ui/Kbd.vue";
 import { useHoverCard } from "@/composables/useHoverCard";
 import { classColors } from "@/lib/classes";
+import { colorMeaning } from "@/lib/colorLegend";
 import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, sizeParts } from "@/lib/format";
 import { cardAvoid, hoverFacts, placeCard, splitPlaceholders } from "@/lib/hoverCard";
 import { t } from "@/lib/i18n";
@@ -105,7 +106,12 @@ const view = computed(() => {
   const folder = i ? i.path.slice(0, Math.max(0, i.path.length - i.node.name.length)).replace(/[\\/]+$/, "") : "";
   const parentName = folder.split(/[\\/]/).filter(Boolean).pop() ?? "";
   const flags = s.target === HIT_ROOT ? (f.info.root?.flags ?? 0) : (f.flags[s.target] ?? 0);
-  return { node, size: facts.size, fg, bg, num, unit, cls, dir, title, folder, parentName, flags };
+  // what the colour stands for in this colour mode (lib/colorLegend.ts); a file's class line has the
+  // swatch only where its colour is its class's
+  const mode = colorMode.value as ColorMode;
+  const meaning = colorMeaning(mode, f, s.target, v);
+  const classSwatch = mode === "class";
+  return { node, size: facts.size, fg, bg, num, unit, cls, dir, title, folder, parentName, flags, meaning, classSwatch };
 });
 
 const share = computed(() => splitPlaceholders(t("占 {name} {share}")));
@@ -164,9 +170,13 @@ function trashText(bin: boolean, size: number): string {
       <div v-if="view.node" class="hc-class muted">
         <span v-if="view.dir">{{ t("{files} 个文件 · {dirs} 个文件夹", { files: fmtInt(view.node.files), dirs: fmtInt(view.node.dirs) }) }}</span>
         <template v-else>
-          <span class="swatch" :style="{ background: view.bg }" />
+          <span v-if="view.classSwatch" class="swatch" :style="{ background: view.bg }" />
           <span>{{ view.cls?.name ?? t("其他") }}{{ view.node.ext ? ` · .${view.node.ext}` : "" }}</span>
         </template>
+      </div>
+      <div v-if="view.meaning" class="hc-class muted">
+        <span class="swatch" :style="{ background: view.bg }" />
+        <span>{{ view.meaning }}</span>
       </div>
     </div>
     <div v-if="view.node && showDates" class="hc-times">
