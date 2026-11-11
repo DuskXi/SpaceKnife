@@ -8,6 +8,7 @@ What is already done for the next version, **0.3.6**, and not in a release yet. 
 
 - **Every coloring explains its colors.** Hover Classes, Flat, Time or Branch in the toolbar to see what each color means: the file classes, the time bands (under 1 day, 1 day – 1 week, 1 week – 1 month, 1 month – 1 year, over 1 year), or the top-level branches in view. Right-click one to open the settings where its colors are set (File classes for Classes).
 - **The hover card says what a block's color stands for.** For "N small items" in Classes it names the class most of them are, such as Images, or says the classes are mixed; in Time it gives how long ago the file was last modified; in Branch the top-level item it belongs to.
+- **Hide the folders you already know** ([#26](https://github.com/DuskXi/SpaceKnife/issues/26)). List them in Settings › Visualization › Hidden folders, for example your music, movies or games. In a scan that holds any of them, Hide folders (H) appears in the toolbar: they take no room in the picture and the rest grows to fill it, until you turn it off. Nothing is hidden until you add a folder, and the scan itself still counts everything.
 
 ### Fixes
 
@@ -23,6 +24,7 @@ What is already done for the next version, **0.3.6**, and not in a release yet. 
 
 - **每种配色都有图例。** 鼠标停在工具栏的「类别」「扁平」「时间」「分支」上，就会看到每种颜色代表什么：各个文件类别、各个时间段（1 天内、1 天 – 1 周、1 周 – 1 个月、1 个月 – 1 年、1 年以上），或当前位置的各个顶层分支。右键直接打开设置这些颜色的地方（「类别」打开「文件类别」）。
 - **悬停气泡写出色块颜色的含义。** 类别配色下，「N 个小项」会写出其中大部分是哪一类（比如「图片」），或说明是多种类别混合；时间配色下写出距上次修改多久；分支配色下写出属于哪个顶层分支。
+- **隐藏你已经了解的文件夹**（[#26](https://github.com/DuskXi/SpaceKnife/issues/26)）。在「设置 › 可视化 › 隐藏的文件夹」里列出它们，比如音乐、影片、游戏。扫描里有其中的文件夹时，工具栏会出现「隐藏文件夹」（H）：它们不占画面，其余的块放大填满，关掉开关就回来。不添加就什么都不隐藏，扫描本身照样统计全部内容。
 
 ### 修复
 

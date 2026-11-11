@@ -89,6 +89,8 @@ fn facts(v: &View) -> ViewFacts {
         show_free: v.show_free,
         show_unknown: v.show_unknown,
         show_trash: v.show_trash,
+        hide_folders: v.hide_folders,
+        hidden_folders: v.hidden_folder_count(),
     }
 }
 

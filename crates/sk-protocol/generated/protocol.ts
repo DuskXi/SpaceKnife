@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "82e98c03926bb206";
+export const SCHEMA_HASH = "975ed83fc8815795";
 
 export interface AgeCond {
   end: number;
@@ -1390,7 +1390,7 @@ export interface SettingChange {
 export interface SettingMeta {
   applies: "now" | "next_scan" | "new_views";
   category: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | "about";
-  control: "switch" | "segmented" | "number" | "slider" | "color" | "text";
+  control: "switch" | "segmented" | "number" | "slider" | "color" | "text" | "folders";
   /** 'key' (a switch that must be on) or 'key=value' for this row to be editable */
   depends: string | null;
   description: string;
@@ -1839,6 +1839,8 @@ export interface ViewSettingsParams {
   /** Compare views: changes shown */
   direction?: "all" | "grow" | "shrink" | null;
   filter_mode?: "dim" | "hide" | null;
+  /** The folders of the setting treemap.hidden_folders: taken out of the picture, or drawn */
+  hide_folders?: boolean | null;
   /** CSS px */
   min_element?: number | null;
   show_free?: boolean | null;
@@ -1866,6 +1868,13 @@ export interface ViewState {
   filter_mode: "dim" | "hide";
   /** The scan holds a recycle bin / trash folder (the toggle is offered) */
   has_trash: boolean;
+  /** How many of those folders the scan holds (the toggle is offered when any) */
+  hidden_folders: number;
+  /**
+   * The folders of the setting treemap.hidden_folders are taken out of the picture (a view
+   * opens with them hidden; one the view is zoomed into stays)
+   */
+  hide_folders: boolean;
   min_element: number;
   results_sort: "size" | "name" | "count";
   scan_id: string;

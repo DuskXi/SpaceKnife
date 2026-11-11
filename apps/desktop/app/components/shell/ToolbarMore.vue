@@ -116,7 +116,8 @@ function onKey(e: KeyboardEvent): void {
           <div class="menu-label" aria-hidden="true">{{ t("显示") }}</div>
           <button v-for="s in chips" :key="s.id" role="menuitemcheckbox" :aria-checked="s.on(st)" class="menu-item" @click="pick(() => setViewSettings(viewId, s.flip(st)))">
             <span class="menu-check"><Icon v-if="s.on(st)" name="check" :size="14" /></span>
-            <span :class="['chip-swatch', s.id]" />
+            <Icon v-if="s.icon" class="chip-icon" :name="s.icon" :size="12" />
+            <span v-else :class="['chip-swatch', s.id]" />
             {{ s.label() }}
             <span class="menu-key">{{ s.key }}</span>
           </button>

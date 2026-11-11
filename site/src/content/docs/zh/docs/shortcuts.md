@@ -59,6 +59,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | <kbd>F</kbd> | 显示或隐藏可用空间块（快照对比里不起作用） |
 | <kbd>U</kbd> | 显示或隐藏未知空间块（快照对比里不起作用） |
 | <kbd>R</kbd> | 显示或隐藏回收站（扫描里有回收站时才有；快照对比里不起作用） |
+| <kbd>H</kbd> | 隐藏或显示设置里列出的文件夹（扫描里有其中的文件夹时才有；快照对比里不起作用） |
 | <kbd>Ctrl</kbd>+<kbd>=</kbd>、<kbd>Ctrl</kbd>+<kbd>+</kbd> | 提高细节层级，最多 15 |
 | <kbd>Ctrl</kbd>+<kbd>-</kbd> | 降低细节层级，最少 1 |
 
@@ -277,6 +278,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | 清除标签 | <kbd>0</kbd> · <kbd>Ctrl</kbd>+<kbd>0</kbd> | `clear tag` · `untag` | — |
 | 显示/隐藏未知空间 | <kbd>U</kbd> | `unknown space` | — |
 | 显示/隐藏回收站 | <kbd>R</kbd> | `trash` · `recycle bin` | — |
+| 显示/隐藏设置里列出的文件夹 | <kbd>H</kbd> | `hidden folders` · `hide folders` · `exclude` · `ignore` · `隐藏文件夹` · `忽略` | — |
 | 分屏 | — | `split` · `side by side` | — |
 | 暂停扫描 | — | `pause` | — |
 | 继续扫描 | — | `resume` · `continue` | — |

@@ -178,6 +178,9 @@ button:disabled { cursor: default; }
 }
 /* 「回收站」: the bin's dashed coral outline over its cross-hatching (「回收站特效」) */
 .chip-swatch.trash { border: 1px dashed var(--sk-treemap-trash-outline); background: repeating-linear-gradient(45deg, transparent 0 2px, var(--sk-treemap-trash-hatch) 2px 3px), repeating-linear-gradient(-45deg, var(--sk-color-bg-raised) 0 2px, var(--sk-treemap-trash-hatch) 2px 3px); }
+/* 「隐藏文件夹」 stands for no colour: its icon in the swatch's place */
+.chip-icon { flex: none; }
+.chip:not(.on) .chip-icon { color: var(--sk-color-text-tertiary); }
 .palette-btn { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 7px 0 9px; border: 0; border-radius: var(--sk-radius-md); background: transparent; box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); color: var(--sk-color-text-secondary); }
 .palette-btn:hover, .palette-btn.on { background: var(--sk-color-bg-hover); }
 /* a narrow window (toolbarFit.ts): chips as their swatch, the palette button and 「退出对比」 as their icon */
@@ -725,6 +728,22 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .set-text-input { width: 200px; height: 30px; padding: 0 10px; border: 0; border-radius: var(--sk-radius-md); outline: none; background: var(--sk-color-bg-field); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); color: var(--sk-color-text-primary); font-size: 12px; user-select: text; }
 .set-text-input:focus { box-shadow: inset 0 0 0 1px var(--sk-color-accent-default); }
 .set-text-input.small { width: 180px; height: 26px; }
+/* a list setting (FolderList: 「要隐藏的文件夹」): the list under the name, as wide as the row */
+.set-row.wide { flex-direction: column; align-items: stretch; gap: 10px; }
+.set-row.wide .set-control { flex: 1 1 auto; display: block; }
+.folder-list { display: flex; flex-direction: column; gap: 8px; }
+.fl-items { display: flex; flex-direction: column; margin: 0; padding: 4px; list-style: none; border-radius: var(--sk-radius-md); background: var(--sk-color-bg-field); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); }
+.fl-item { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 2px 0 8px; border-radius: var(--sk-radius-sm); color: var(--sk-color-text-secondary); }
+.fl-item:hover { background: var(--sk-color-bg-hover); }
+.fl-name { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; color: var(--sk-color-text-primary); }
+/* cut from the start (rtl box, the path itself isolated in <bdi>): the end next to the name stays */
+.fl-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font-size: 11px; color: var(--sk-color-text-tertiary); user-select: text; }
+.fl-empty { padding: 10px 12px; border-radius: var(--sk-radius-md); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); font-size: 12px; }
+.fl-add { display: flex; align-items: center; gap: 8px; }
+.fl-input { flex: 1 1 auto; display: flex; align-items: center; height: 30px; padding: 0 10px; border-radius: var(--sk-radius-md); background: var(--sk-color-bg-field); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); }
+.fl-input:focus-within { box-shadow: inset 0 0 0 1px var(--sk-color-accent-default); }
+.fl-input.invalid { box-shadow: inset 0 0 0 1px var(--sk-color-status-danger); }
+.fl-input input { flex: 1 1 auto; min-width: 0; border: 0; outline: none; background: transparent; color: var(--sk-color-text-primary); font: 12px var(--sk-font-family-mono); user-select: text; }
 .set-swatches { display: flex; gap: 8px; }
 .set-swatch { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.3); }
 .set-swatch.on { box-shadow: 0 0 0 2px var(--sk-color-bg-panel), 0 0 0 4px var(--sk-color-text-primary); }

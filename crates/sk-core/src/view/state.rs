@@ -179,6 +179,10 @@ pub struct ViewSettings {
     pub show_unknown: bool,
     /// the recycle bins (「回收站」 chip)
     pub show_trash: bool,
+    /// the folders of treemap.hidden_folders are taken out of the picture (「隐藏文件夹」 chip)
+    pub hide_folders: bool,
+    /// treemap.hidden_folders: absolute paths, as the user wrote them
+    pub hidden_folders: Vec<String>,
     /// a registered visualization
     pub visual: String,
     /// of `visual`, the one the view starts with
@@ -201,6 +205,8 @@ impl Default for ViewSettings {
             show_free: true,
             show_unknown: true,
             show_trash: true,
+            hide_folders: true,
+            hidden_folders: Vec::new(),
             visual: BASELINE.to_owned(),
             color_mode: ColorModeName::Class,
             colors: BTreeMap::new(),
@@ -337,6 +343,11 @@ pub struct View {
     pub show_free: bool,
     pub show_unknown: bool,
     pub show_trash: bool,
+    /// the folders of [`View::set_hidden_folders`] are taken out of the picture
+    pub hide_folders: bool,
+    hidden_paths: Vec<String>,
+    /// the nodes of `hidden_paths` in the store of version .0 ([`View::hidden_nodes`])
+    hidden_found: Mutex<Option<(u64, Vec<NodeId>)>>,
     pub font_scale: f64,
     pub aspect: f64,
     pub filter_mode: FilterModeName,
@@ -395,6 +406,9 @@ impl View {
             show_free: s.show_free,
             show_unknown: s.show_unknown,
             show_trash: s.show_trash,
+            hide_folders: s.hide_folders,
+            hidden_paths: s.hidden_folders,
+            hidden_found: Mutex::new(None),
             font_scale: s.font_scale,
             aspect: s.aspect,
             filter_mode: s.filter_mode,
@@ -954,18 +968,13 @@ impl View {
         } else {
             &store_sizes
         };
-        let bins;
+        let out = self.taken_out(&nodes);
         let without;
-        let sizes: &dyn SizeSource = if !self.show_trash && self.compare.is_none() {
-            bins = ctx.trash.find_bins(&nodes);
-            if !bins.is_empty() && !self.in_bin(&nodes, &bins) {
-                without = WithoutBins::new(base, &nodes, &bins);
-                &without
-            } else {
-                base
-            }
-        } else {
+        let sizes: &dyn SizeSource = if out.is_empty() {
             base
+        } else {
+            without = WithoutBins::new(base, &nodes, &out);
+            &without
         };
         let mut frame = self.spare.take().unwrap_or_default();
         let spec = self.root_spec(&nodes, &vis);
@@ -1001,6 +1010,78 @@ impl View {
     /// The scan holds a recycle bin (the 「回收站」 chip is offered).
     pub fn has_trash(&self) -> bool {
         self.compare.is_none() && !self.ctx.trash.find_bins(&self.ctx.store.read()).is_empty()
+    }
+
+    /// The subtrees taken out of the picture, sorted, none inside another: the recycle bins
+    /// (「回收站」 off) unless the view is in one, and the hidden folders (「隐藏文件夹」) but those
+    /// the view is in. Nothing in a comparison.
+    fn taken_out(&self, nodes: &Nodes) -> Vec<NodeId> {
+        if self.compare.is_some() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        if !self.show_trash {
+            let bins = self.ctx.trash.find_bins(nodes);
+            if !bins.is_empty() && !self.in_bin(nodes, &bins) {
+                out.extend(bins);
+            }
+        }
+        if self.hide_folders {
+            let z = self.zoom.node;
+            let around: Vec<NodeId> = if z == 0 || z as usize >= nodes.len() {
+                Vec::new()
+            } else {
+                std::iter::once(z).chain(nodes.ancestors(z)).collect()
+            };
+            out.extend(
+                self.hidden_nodes(nodes)
+                    .into_iter()
+                    .filter(|h| !around.contains(h)),
+            );
+        }
+        outermost(nodes, out)
+    }
+
+    /// The nodes of the hidden folders ([`View::set_hidden_folders`]) the store holds, sorted,
+    /// none inside another; not a scan's root (hiding it would leave nothing to see). Looked up
+    /// again when the store changed; none in a comparison.
+    pub fn hidden_nodes(&self, nodes: &Nodes) -> Vec<NodeId> {
+        if self.compare.is_some() || self.hidden_paths.is_empty() {
+            return Vec::new();
+        }
+        let version = nodes.version();
+        let mut found = self.hidden_found.lock();
+        if let Some((v, ids)) = &*found
+            && *v == version
+        {
+            return ids.clone();
+        }
+        let roots = nodes.roots();
+        let ids = outermost(
+            nodes,
+            self.hidden_paths
+                .iter()
+                .filter_map(|p| nodes.find_shown(std::path::Path::new(p)))
+                .filter(|&id| id != 0 && !roots.contains(&id))
+                .collect(),
+        );
+        *found = Some((version, ids.clone()));
+        ids
+    }
+
+    /// How many hidden folders the scan holds (the 「隐藏文件夹」 chip is offered when any).
+    pub fn hidden_folder_count(&self) -> u32 {
+        self.hidden_nodes(&self.ctx.store.read()).len() as u32
+    }
+
+    /// treemap.hidden_folders (absolute paths); true when the list changed.
+    pub fn set_hidden_folders(&mut self, paths: Vec<String>) -> bool {
+        if paths == self.hidden_paths {
+            return false;
+        }
+        self.hidden_paths = paths;
+        *self.hidden_found.get_mut() = None;
+        true
     }
 
     fn in_bin(&self, nodes: &Nodes, bins: &[NodeId]) -> bool {
@@ -1504,6 +1585,19 @@ impl View {
         self.spare = None;
         self.refilter(None);
     }
+}
+
+/// `ids` without repeats and without the ones inside another of them, sorted: subtrees to take
+/// out once each ([`WithoutBins`] takes each one's bytes off all its ancestors).
+fn outermost(nodes: &Nodes, mut ids: Vec<NodeId>) -> Vec<NodeId> {
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() < 2 {
+        return ids;
+    }
+    let all = ids.clone();
+    ids.retain(|&id| !nodes.ancestors(id).any(|a| all.binary_search(&a).is_ok()));
+    ids
 }
 
 /// An aggregate's net change (the shown direction's part) and status.

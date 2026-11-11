@@ -12,6 +12,22 @@
     {
       "path": "**/rev",
       "why": "0.3.5 by design (basket-confirm.v1): basket items carry `rev`, so basket.execute runs exactly what the user confirmed (0.3.4 ran what the basket held at that moment). A new field: a counter of the backend's basket, not comparable."
+    },
+    {
+      "path": "**/hide_folders",
+      "why": "0.3.6 by design (issue #26, 「隐藏的文件夹」): ViewState says whether the folders of the setting treemap.hidden_folders are taken out of the picture (a view opens with them hidden). A new field; 0.3.4 had no such setting."
+    },
+    {
+      "path": "**/hidden_folders",
+      "why": "0.3.6 by design (issue #26): how many folders of treemap.hidden_folders the view's scan holds (the 「隐藏文件夹」 toggle is offered when any; 0 here, the list is empty by default). A new field."
+    },
+    {
+      "path": "**/values/treemap.hidden_folders",
+      "why": "0.3.6 by design (issue #26): the new setting treemap.hidden_folders, the folders to hide one per line, empty by default."
+    },
+    {
+      "path": "**/defaults/treemap.hidden_folders",
+      "why": "0.3.6 by design (issue #26): the new setting's default, no folders."
     }
   ]
 }

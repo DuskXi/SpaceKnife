@@ -271,6 +271,7 @@ export function carried(st: ViewState): ViewSettingsParams {
     show_free: st.show_free,
     show_unknown: st.show_unknown,
     show_trash: st.show_trash,
+    hide_folders: st.hide_folders,
   };
 }
 

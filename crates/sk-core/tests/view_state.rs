@@ -1736,6 +1736,100 @@ fn hiding_the_bin_takes_it_out_of_the_picture() {
     assert!(!plain_v.has_trash());
 }
 
+/// The path of a node as the system writes it (what the user lists in 「隐藏的文件夹」).
+fn path_of(v: &View, path: &str) -> String {
+    let r = v.store().read();
+    r.path_lossy(if path.is_empty() { 1 } else { find(&r, path) })
+}
+
+#[test]
+fn hidden_folders_are_taken_out_of_the_picture() {
+    let s = dir([
+        (
+            "$Recycle.Bin",
+            dir([("S-1-5-21", dir([("$RX1.mp4", S::F(100 * MB))]))]),
+        ),
+        (
+            "Users",
+            dir([(
+                "lenny",
+                dir([
+                    ("Music", dir([("a.flac", S::F(600 * MB))])),
+                    (
+                        "Games",
+                        dir([
+                            ("g.pak", S::F(300 * MB)),
+                            ("Saves", dir([("s.dat", S::F(50 * MB))])),
+                        ]),
+                    ),
+                    ("Library", dir([("cache.db", S::F(100 * MB))])),
+                ]),
+            )]),
+        ),
+    ]);
+    let mut v = volume_view(1300 * MB, &s, None);
+    let music = node(&v, "Users/lenny/Music");
+    let games = node(&v, "Users/lenny/Games");
+    // nothing listed: nothing offered, all drawn
+    assert_eq!(v.hidden_folder_count(), 0);
+    assert!(v.render().draw.node.contains(&(music as i32)));
+    let drawn = |v: &View, n: NodeId| v.last.as_ref().unwrap().draw.node.contains(&(n as i32));
+    let size_of = |v: &View, p: &str| v.last.as_ref().unwrap().draw.size[row_of(v, p)];
+    let lenny_all = size_of(&v, "Users/lenny");
+
+    // a folder inside a listed one counts once; a path the scan doesn't hold, and the scan's
+    // root (hiding it would leave nothing), not at all
+    let list = vec![
+        path_of(&v, "Users/lenny/Music"),
+        path_of(&v, "Users/lenny/Games/Saves"),
+        path_of(&v, "Users/lenny/Games"),
+        format!("{}-elsewhere", path_of(&v, "Users")),
+        path_of(&v, ""),
+    ];
+    assert!(v.set_hidden_folders(list.clone()));
+    assert!(!v.set_hidden_folders(list));
+    assert_eq!(v.hidden_folder_count(), 2);
+    assert!(v.hide_folders, "a view opens with them hidden");
+    v.render();
+    assert!(!drawn(&v, music) && !drawn(&v, games));
+    // their bytes are off their ancestors once (Saves is inside Games)
+    assert_eq!(size_of(&v, "Users/lenny"), lenny_all - 950 * MB);
+    assert_eq!(
+        size_of(&v, "Users/lenny"),
+        size_of(&v, "Users/lenny/Library")
+    );
+
+    // the toggle brings them back
+    v.hide_folders = false;
+    v.render();
+    assert!(drawn(&v, music) && drawn(&v, games));
+    assert_eq!(size_of(&v, "Users/lenny"), lenny_all);
+
+    // a view zoomed into a hidden folder still shows it
+    v.hide_folders = true;
+    assert!(v.zoom_to_node(music));
+    v.render();
+    assert!(drawn(&v, node(&v, "Users/lenny/Music/a.flac")));
+    assert!(v.zoom_to_node(1));
+
+    // with the recycle bin hidden as well, and listed too, it is taken out once
+    let mut both = vec![
+        path_of(&v, "$Recycle.Bin"),
+        path_of(&v, "Users/lenny/Music"),
+    ];
+    both.push(path_of(&v, "Users/lenny/Music"));
+    v.set_hidden_folders(both);
+    v.show_trash = false;
+    v.render();
+    assert!(!drawn(&v, node(&v, "$Recycle.Bin")) && !drawn(&v, music));
+    assert!(drawn(&v, games));
+    assert_eq!(size_of(&v, "Users/lenny"), lenny_all - 600 * MB);
+
+    // no list, nothing offered
+    v.set_hidden_folders(Vec::new());
+    assert_eq!(v.hidden_folder_count(), 0);
+}
+
 // --------------------------------------------------------------------------- the wire
 
 #[test]

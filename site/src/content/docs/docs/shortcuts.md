@@ -59,6 +59,7 @@ Back and forward remember where you zoomed and what was selected, like browser h
 | <kbd>F</kbd> | Show or hide the free space block (no effect in a snapshot comparison) |
 | <kbd>U</kbd> | Show or hide the unknown space block (no effect in a snapshot comparison) |
 | <kbd>R</kbd> | Show or hide the Recycle Bin (only when the scan holds one; not in a snapshot comparison) |
+| <kbd>H</kbd> | Hide or show the folders listed in settings (only when the scan holds one of them; not in a snapshot comparison) |
 | <kbd>Ctrl</kbd>+<kbd>=</kbd>, <kbd>Ctrl</kbd>+<kbd>+</kbd> | Raise the detail level, up to 15 |
 | <kbd>Ctrl</kbd>+<kbd>-</kbd> | Lower the detail level, down to 1 |
 
@@ -277,6 +278,7 @@ Every other command shows up when you type its name or one of the words below:
 | Clear tag | <kbd>0</kbd> · <kbd>Ctrl</kbd>+<kbd>0</kbd> | `clear tag` · `untag` | — |
 | Show/hide unknown space | <kbd>U</kbd> | `unknown space` | — |
 | Show/hide the Recycle Bin | <kbd>R</kbd> | `trash` · `recycle bin` | — |
+| Show/hide the folders listed in settings | <kbd>H</kbd> | `hidden folders` · `hide folders` · `exclude` · `ignore` · `隐藏文件夹` · `忽略` | — |
 | Split view | — | `split` · `side by side` | — |
 | Pause scan | — | `pause` | — |
 | Resume scan | — | `resume` · `continue` | — |

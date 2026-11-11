@@ -294,8 +294,9 @@ pub fn subtree(nodes: &Nodes, tops: &[NodeId]) -> Vec<NodeId> {
     out
 }
 
-/// A size source with the recycle bins taken out (the 「回收站」 chip off): a bin and everything
-/// in it weigh nothing, and each of its ancestors loses the bin's bytes.
+/// A size source with subtrees taken out: the recycle bins (the 「回收站」 chip off) and the hidden
+/// folders (「隐藏文件夹」). A bin and everything in it weigh nothing, and each of its ancestors
+/// loses the bin's bytes; so none of `bins` may be inside another (they would be taken off twice).
 pub struct WithoutBins<'a> {
     base: &'a dyn SizeSource,
     inside: Vec<NodeId>,

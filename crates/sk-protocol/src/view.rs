@@ -185,6 +185,9 @@ pub struct ViewSettingsParams {
     /// The recycle bins: drawn, or taken out of the picture
     #[serde(default)]
     pub show_trash: Option<bool>,
+    /// The folders of the setting treemap.hidden_folders: taken out of the picture, or drawn
+    #[serde(default)]
+    pub hide_folders: Option<bool>,
     /// A visual.list id (needs visuals.v1)
     #[serde(default)]
     pub visual: Option<String>,
@@ -566,6 +569,13 @@ pub struct ViewState {
     /// The scan holds a recycle bin / trash folder (the toggle is offered)
     #[serde(default)]
     pub has_trash: bool,
+    /// The folders of the setting treemap.hidden_folders are taken out of the picture (a view
+    /// opens with them hidden; one the view is zoomed into stays)
+    #[serde(default = "crate::base::yes")]
+    pub hide_folders: bool,
+    /// How many of those folders the scan holds (the toggle is offered when any)
+    #[serde(default)]
+    pub hidden_folders: u32,
     /// A visual.list id
     #[serde(default = "treemap")]
     pub visual: String,

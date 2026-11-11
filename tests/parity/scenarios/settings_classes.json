@@ -4,7 +4,8 @@
   "fixtures": {"small": "small"},
   "known_diffs": [
     {"path": "**/meta/9/description", "why": "general.update_channel: the Rust text names 0.3.5's rule (a pre-release part in the version, or from 1.0 on GitHub's pre-release mark; during 0.x every release is marked so), not 0.3.4's (GitHub's mark only)"},
-    {"path": "**/meta/45/description", "why": "scan.workers: the Rust text drops 0.3.4's mention of worker processes without the native extension (there is no Python fallback any more)"}
+    {"path": "**/meta/45/description", "why": "scan.workers: the Rust text drops 0.3.4's mention of worker processes without the native extension (there is no Python fallback any more)"},
+    {"path": "**/meta/#len", "why": "0.3.6 by design (issue #26): one setting more, treemap.hidden_folders; it is the last, so every other setting keeps its index"}
   ],
   "steps": [
     {"connect": "other"},

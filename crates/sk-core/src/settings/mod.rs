@@ -92,6 +92,22 @@ fn literal_list(opts: &[(&str, &str, &str)]) -> String {
     }
 }
 
+/// The longest list a `folders` setting keeps (a few hundred paths).
+pub const FOLDERS_MAX_BYTES: usize = 65536;
+
+/// The folders of a `folders` setting (one path per line): each trimmed, the empty lines and the
+/// repeats left out, in their order.
+pub fn folder_list(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let p = line.trim();
+        if !p.is_empty() && !out.iter().any(|o| o == p) {
+            out.push(p.to_owned());
+        }
+    }
+    out
+}
+
 /// One value against its setting: `Err` is a pydantic-style message.
 pub fn check_value(spec: &Spec, value: &SettingValue) -> Result<SettingValue, String> {
     if !spec.options.is_empty() && spec.control == SettingControl::Segmented {
@@ -128,6 +144,15 @@ pub fn check_value(spec: &Spec, value: &SettingValue) -> Result<SettingValue, St
             _ => Err("Input should be a valid integer".into()),
         },
         Kind::Str => match value {
+            SettingValue::Str(s) if spec.control == SettingControl::Folders => {
+                if s.len() > FOLDERS_MAX_BYTES {
+                    Err(format!(
+                        "String should have at most {FOLDERS_MAX_BYTES} characters"
+                    ))
+                } else {
+                    Ok(SettingValue::Str(folder_list(s).join("\n")))
+                }
+            }
             SettingValue::Str(s) if spec.control == SettingControl::Color => {
                 let ok = s.len() == 7
                     && s.starts_with('#')
@@ -574,6 +599,26 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_owned(), v.clone()))
             .collect()
+    }
+
+    #[test]
+    fn a_folder_list_keeps_each_folder_once_a_line() {
+        assert_eq!(
+            folder_list("  /a \n\n/b\r\n/a\n C:\\Users\\x\\Music "),
+            ["/a", "/b", "C:\\Users\\x\\Music"]
+        );
+        assert!(folder_list("").is_empty() && folder_list("\n \n").is_empty());
+        let spec = &REGISTRY[BY_KEY["treemap.hidden_folders"]];
+        assert_eq!(spec.control, SettingControl::Folders);
+        assert_eq!(spec.default, SettingValue::Str(String::new()));
+        // written as typed, kept tidy; longer than a list can be is refused
+        assert_eq!(
+            check_value(spec, &SettingValue::Str("/a\n\n /b \n/a".into())),
+            Ok(SettingValue::Str("/a\n/b".into()))
+        );
+        let long = "/x".repeat(FOLDERS_MAX_BYTES);
+        assert!(check_value(spec, &SettingValue::Str(long)).is_err());
+        assert!(check_value(spec, &SettingValue::Int(1)).is_err());
     }
 
     #[test]

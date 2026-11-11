@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use sk_core::filter::classes::ClassMap;
 use sk_core::layout::registry;
-use sk_core::settings::SettingsStore;
+use sk_core::settings::{SettingsStore, folder_list};
 use sk_core::tr;
 use sk_core::view::state::BASELINE;
 use sk_core::view::{
@@ -425,13 +425,17 @@ impl ViewManager {
         let font_scale = st.get_int("treemap.font_scale") as f64 / 100.0;
         let aspect = aspect_of(st.get_int("treemap.aspect"));
         let origin = st.get_str("treemap.flame_origin");
+        let hidden = folder_list(&st.get_str("treemap.hidden_folders"));
         for host in self.all() {
             let changed = {
                 let Some(mut v) = host.view.try_lock_for(Duration::from_millis(200)) else {
                     continue;
                 };
+                // 「隐藏的文件夹」: the picture changes when any is shown (or would be hidden)
+                let hidden_changed = v.set_hidden_folders(hidden.clone());
                 let mut changed = (v.min_element, v.sort_by_size, v.font_scale, v.aspect)
-                    != (min_element, sort_by_size, font_scale, aspect);
+                    != (min_element, sort_by_size, font_scale, aspect)
+                    || hidden_changed;
                 v.min_element = min_element;
                 v.sort_by_size = sort_by_size;
                 v.font_scale = font_scale;
@@ -739,6 +743,7 @@ pub fn new_view_settings(st: &SettingsStore, caps: &[String], compare: bool) -> 
         show_free: st.get_bool("treemap.show_free"),
         show_unknown: st.get_bool("treemap.show_unknown"),
         show_trash: st.get_bool("treemap.show_trash"),
+        hidden_folders: folder_list(&st.get_str("treemap.hidden_folders")),
         visual,
         color_mode,
         colors,
@@ -813,6 +818,9 @@ pub fn apply_settings(view: &mut View, s: &ViewSettingsParams, caps: &[String]) 
     if let Some(b) = s.show_trash {
         view.show_trash = b;
     }
+    if let Some(b) = s.hide_folders {
+        view.hide_folders = b;
+    }
     if let Some(c) = &s.colors {
         view.set_colors(c);
     }
@@ -839,13 +847,14 @@ pub fn apply_settings(view: &mut View, s: &ViewSettingsParams, caps: &[String]) 
 /// What `view.set` can change: a frame is sent when any of it did.
 pub fn settings_key(v: &View) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}",
         v.detail,
         v.min_element,
         v.sort_by_size,
         v.show_free,
         v.show_unknown,
         v.show_trash,
+        v.hide_folders,
         v.visual,
         v.color_mode().as_str(),
         v.filter_mode.as_str(),

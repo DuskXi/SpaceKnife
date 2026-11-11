@@ -60,6 +60,7 @@ const shown = computed(() =>
     cmp.value ? "compare" : "",
     split.value ? "split" : "",
     st.value?.has_trash ? "trash" : "",
+    st.value?.hidden_folders ? "folders" : "",
     levelsThatFit(view.value?.info, st.value?.detail ?? 0) ?? "",
     (view.value?.info?.breadcrumb ?? []).map((c) => c.label).join("/"),
   ].join("|"),
@@ -137,10 +138,11 @@ const fold = computed(() => collapse(level.value));
             :class="['chip', { on: s.on(st), 'swatch-only': fold.chipSwatches }]"
             :aria-pressed="s.on(st)"
             :aria-label="s.label()"
-            :title="s.title()"
+            :title="s.title(st)"
             @click="setViewSettings(viewId, s.flip(st))"
           >
-            <span :class="['chip-swatch', s.id]" />
+            <Icon v-if="s.icon" class="chip-icon" :name="s.icon" :size="12" />
+            <span v-else :class="['chip-swatch', s.id]" />
             <template v-if="!fold.chipSwatches">{{ s.label() }}</template>
           </button>
         </template>

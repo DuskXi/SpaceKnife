@@ -2,6 +2,10 @@
   "name": "palette",
   "description": "The command palette over a scan: commands, queries (empty, a command name, a path, a filter, pinyin), command checks, the path group, filter previews, recents remembered and cleared, path forms, and the tags of the start page after a restart.",
   "fixtures": {"tree": "standard"},
+  "known_diffs": [
+    {"path": "steps/0/result/commands/#len", "why": "0.3.6 by design (issue #26): one command more, view.toggle_hidden_folders (H); it is the last, so every other command keeps its index"},
+    {"path": "steps/7/result/commands/**", "why": "0.3.6 by design (issue #26): the new command 「显示/隐藏设置里列出的文件夹」 (Show/hide the folders listed in settings) matches \"fd\" (folders) and ranks third, so every result after it moves down one"}
+  ],
   "steps": [
     {"call": "palette.commands", "params": {}},
     {"call": "palette.query", "params": {"context": {"tab": "start"}}},
