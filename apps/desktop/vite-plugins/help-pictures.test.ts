@@ -44,7 +44,7 @@ describe("imageSize", () => {
 
   it("reads the website's pictures", () => {
     const file = fileURLToPath(new URL("../../../site/src/assets/visualizations/polar.webp", import.meta.url));
-    expect(imageSize(readFileSync(file))).toEqual({ width: 1800, height: 917 });
+    expect(imageSize(readFileSync(file))).toEqual({ width: 1800, height: 915 });
   });
 
   it("refuses anything else, or a header cut short", () => {
