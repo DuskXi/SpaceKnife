@@ -883,6 +883,11 @@ fn reap(process: &mut dyn HelperProcess, grace: Duration) {
 /// prompts) again.
 pub struct SharedHelper {
     options: LaunchOptions,
+    /// held while a helper is launched: one launch at a time
+    launching: Mutex<()>,
+    /// held only for a moment: [`current`](Self::current) answers while a launch waits for the
+    /// user (the UAC prompt, polkit: up to minutes), and the backend's threads that ask (the drive
+    /// list every few seconds) don't wait with it
     client: Mutex<Option<Arc<HelperClient>>>,
 }
 
@@ -891,25 +896,30 @@ impl SharedHelper {
     pub fn new(options: LaunchOptions) -> Self {
         Self {
             options,
+            launching: Mutex::new(()),
             client: Mutex::new(None),
         }
     }
 
-    /// The live helper, if any.
+    /// The live helper, if any (none while the first one is still being launched).
     pub fn current(&self) -> Option<Arc<HelperClient>> {
         self.client.lock().as_ref().filter(|c| c.alive()).cloned()
     }
 
     /// The live helper, or a newly launched one.
     pub fn get(&self, elevate: bool) -> Result<Arc<HelperClient>, HelperError> {
-        let mut slot = self.client.lock();
-        if let Some(c) = slot.as_ref()
-            && c.alive()
-            && (c.elevated() || !elevate)
-        {
-            return Ok(c.clone());
+        let _launching = self.launching.lock();
+        let usable = self
+            .client
+            .lock()
+            .as_ref()
+            .filter(|c| c.alive() && (c.elevated() || !elevate))
+            .cloned();
+        if let Some(c) = usable {
+            return Ok(c);
         }
-        if let Some(old) = slot.take() {
+        let old = self.client.lock().take();
+        if let Some(old) = old {
             old.close();
         }
         let opts = LaunchOptions {
@@ -917,12 +927,13 @@ impl SharedHelper {
             ..self.options.clone()
         };
         let client = Arc::new(HelperClient::launch(opts)?);
-        *slot = Some(client.clone());
+        *self.client.lock() = Some(client.clone());
         Ok(client)
     }
 
     pub fn close(&self) {
-        if let Some(c) = self.client.lock().take() {
+        let c = self.client.lock().take();
+        if let Some(c) = c {
             c.close();
         }
     }

@@ -13,6 +13,11 @@ What is already done for the next version, **0.3.6**, and not in a release yet. 
 ### Fixes
 
 - **Changing the theme no longer freezes the window (Windows).** In 0.3.5 the window stopped responding the first time you switched between Light, Dark and Match system in a way that changed its colours, and it froze again at every start after that. If 0.3.5 is stuck for you, end it in Task Manager and install 0.3.6 over it from the [releases page](https://github.com/DuskXi/SpaceKnife/releases) (the update button can't be reached while the window is frozen). 0.3.6 starts normally and keeps the theme you chose.
+- **A whole-volume scan and the Disks page no longer hang while files change.** At the end of a scan of a whole drive, or when the Disks page showed an open scan of one, SpaceKnife could stop for good if the drive's free space changed in that moment (a busy system drive does so all the time): the scan stayed at "scanning" and the window stopped answering. Two rarer cases of the same kind are gone too, in the command palette and in the Delete basket while files change.
+- **Waiting for administrator rights no longer stops SpaceKnife.** While Windows asked whether to allow the scan helper (or Linux asked for a password), the drive list and soon everything else waited with it.
+- **Show in Explorer (Finder, file manager), Open and Open terminal here no longer freeze the window** when the item is on a network drive that went away or a disk that has to spin up first.
+- **The start page checks a typed folder once.** It checked it again about three times a second for as long as the path stayed in the box, keeping network drives and sleeping disks awake.
+- **The custom load limit's slider stays where you drag it** while a scan runs; progress updates used to put it back.
 
 ---
 
@@ -29,3 +34,8 @@ What is already done for the next version, **0.3.6**, and not in a release yet. 
 ### 修复
 
 - **切换主题不再让窗口卡死（Windows）。** 0.3.5 在浅色、深色和「跟随系统」之间切换时，只要窗口颜色真的变了，第一次就会停止响应，之后每次启动也都会卡住。如果你的 0.3.5 已经卡住：在任务管理器里结束它，从[发布页](https://github.com/DuskXi/SpaceKnife/releases)下载 0.3.6 直接覆盖安装（窗口卡住时点不到更新按钮）。0.3.6 能正常启动，并保留你选的主题。
+- **整卷扫描和「本机磁盘」页不再在文件变化时卡死。** 扫描整个磁盘结束时，或「本机磁盘」页显示一个打开着的整卷扫描时，如果那一刻磁盘的可用空间变了（繁忙的系统盘随时都在变），SpaceKnife 可能从此停住：扫描一直显示「扫描中」，窗口不再响应。同类但更少见的两处也修好了：文件变化时的命令面板和删除篮。
+- **等待管理员授权时不再卡住整个程序。** Windows 询问是否允许扫描助手（或 Linux 要求输入密码）期间，磁盘列表会跟着等待，很快其他功能也会停住。
+- **「在资源管理器中显示」（访达、文件管理器）、「打开」和「在此打开终端」不再让窗口卡住**，即使对象在已经断开的网络盘上，或在需要先唤醒的硬盘上。
+- **起始页对输入的路径只检查一次。** 以前只要路径还留在输入框里，就会每秒检查约三次，让网络盘和休眠的硬盘一直醒着。
+- **扫描进行中，自定义负载上限的滑块会停在你拖到的位置**，不再被进度更新拉回原处。

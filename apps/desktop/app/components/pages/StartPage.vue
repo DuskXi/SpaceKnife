@@ -48,9 +48,11 @@ const paths = computed(() => splitPaths(form.value.path));
 const rootMatch = computed(() => (paths.value.length === 1 ? volumes.value.find((v) => sameRoot(v.mount_point, paths.value[0]!)) : undefined));
 const selected = computed(() => (paths.value.length === 0 ? volumes.value.find((v) => v.mount_point === form.value.picked && !v.reason) : rootMatch.value));
 
-// validate typed paths shortly after typing stops (UI-W1-25)
+// validate typed paths shortly after typing stops (UI-W1-25). Two sources, compared one by one: a
+// getter returning a new array would differ every time the form changes, and the check's own
+// answer changes the form, so the same path was checked again and again
 watch(
-  () => [form.value.path, rootMatch.value?.mount_point] as const,
+  [() => form.value.path, () => rootMatch.value?.mount_point] as const,
   (_, __, onCleanup) => {
     if (!paths.value.length || rootMatch.value) {
       if (form.value.check) patch({ check: null });

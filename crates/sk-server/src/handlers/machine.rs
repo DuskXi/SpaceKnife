@@ -82,7 +82,11 @@ pub fn live_full(server: &Server, h: &ScanHandle) -> Result<(VolumeScan, Vec<Cla
     let running = still_running(h);
     let mut every = Vec::new();
     let mut folders = Vec::new();
-    if !running && let Some(node) = h.roots.read().first().map(|r| r.node) {
+    // the root read on its own: a guard in the `if let` would live through the whole walk below,
+    // and the monitor's write of the roots (free space, once a second) queued behind it held back
+    // summary_of's own read of them: both waited for ever
+    let first = h.roots.read().first().map(|r| r.node);
+    if !running && let Some(node) = first {
         let summary = crate::handlers::scan::summary_of(h, node, 0)?;
         if let Some(gap) = summary.gaps.iter().find(|g| {
             matches!(

@@ -185,6 +185,13 @@ fn build(
     let target = target_of(w.handle.as_deref());
     let q = params.text.trim();
     let vocab = current_vocab();
+    // the view's selection before the store: a render takes the view, then reads the store (twice);
+    // the other way round, with a file change's write waiting between those reads, the palette, the
+    // render and the change would each wait for another for ever
+    let selected = match (&w.view, q.is_empty()) {
+        (Some(v), true) => v.lock().selected,
+        _ => None,
+    };
     let guard = w.handle.as_ref().map(|h| h.store.read());
     let nodes: Option<&Nodes> = guard.as_deref();
     // the area basis per node, worked out per lookup (effective allocation, as the views size blocks)
@@ -288,13 +295,11 @@ fn build(
         .map(|(c, h)| command_row(c, &w.ctx, h))
         .collect();
 
-    let seed = match (&w.view, q.is_empty(), nodes) {
-        (Some(v), true, Some(n)) => {
-            let sel = v.lock().selected;
-            sel.filter(|&s| s > 0 && (s as usize) < n.len())
-                .map(|s| ppaths::seed_text(n, s))
-                .filter(|s| !s.is_empty())
-        }
+    let seed = match (selected, nodes) {
+        (Some(sel), Some(n)) => Some(sel)
+            .filter(|&s| s > 0 && (s as usize) < n.len())
+            .map(|s| ppaths::seed_text(n, s))
+            .filter(|s| !s.is_empty()),
         _ => None,
     };
     PaletteResult {

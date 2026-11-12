@@ -638,6 +638,29 @@ fn silent_helper_times_out() {
     assert!(t0.elapsed() < Duration::from_secs(15));
 }
 
+/// While a helper is being launched (waiting at the UAC prompt, say), asking for the live one
+/// does not wait for that launch: the drive list asks every few seconds, from the backend's threads.
+#[test]
+fn the_live_helper_is_asked_for_without_waiting_for_a_launch() {
+    let shared = Arc::new(SharedHelper::new(LaunchOptions {
+        connect_timeout: Some(Duration::from_secs(3)),
+        ..opts("silent")
+    }));
+    let launching = {
+        let s = shared.clone();
+        std::thread::spawn(move || s.get(false).map(|_| ()).unwrap_err().code)
+    };
+    std::thread::sleep(Duration::from_millis(500)); // the launch waits for the silent helper's hello
+    let t0 = Instant::now();
+    assert!(shared.current().is_none());
+    assert!(
+        t0.elapsed() < Duration::from_millis(500),
+        "current() waited {:?} for the launch",
+        t0.elapsed()
+    );
+    assert_eq!(launching.join().unwrap(), "timeout");
+}
+
 #[test]
 fn helper_that_exits_or_never_connects() {
     let t0 = Instant::now();

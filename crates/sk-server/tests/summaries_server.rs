@@ -182,3 +182,42 @@ async fn the_summary_cache_does_not_keep_a_closed_scan_alive() {
     assert!(gone, "the closed scan is still referenced");
     srv.shutdown();
 }
+
+/// A summary reads the scan's roots (its volume) while its caller may hold them already (the Disks
+/// page, the end of a whole-volume scan); the monitor's write of them (free space, once a second)
+/// queued in between must not hold that read back, or both wait for ever.
+#[tokio::test]
+async fn the_roots_are_read_again_while_a_writer_waits() {
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let (h, _tmp) = scanned(&c, &srv).await;
+    let root = root_of(&h);
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let reader = {
+        let h = h.clone();
+        std::thread::spawn(move || {
+            let held = h.roots.read();
+            held_tx.send(()).unwrap();
+            go_rx.recv().unwrap(); // a writer waits now
+            let found = h.root_of(&h.store.read(), root).map(|r| r.node);
+            drop(held);
+            done_tx.send(found).unwrap();
+        })
+    };
+    held_rx.recv().unwrap();
+    let writer = {
+        let h = h.clone();
+        std::thread::spawn(move || h.roots.write().len())
+    };
+    std::thread::sleep(Duration::from_millis(300)); // parked behind the reader's guard
+    go_tx.send(()).unwrap();
+    let found = done_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("root_of waited behind the queued writer");
+    assert_eq!(found, Some(root));
+    reader.join().unwrap();
+    assert_eq!(writer.join().unwrap(), 1);
+    srv.shutdown();
+}

@@ -30,8 +30,10 @@ const reason = computed(() => (platform === "win32" ? (props.scan.mft_available 
 const io = computed(() => props.scan.io);
 const customDefault = useApp((s) => setting(s, "scan.custom_limit", 70));
 const custom = ref(io.value?.level === "custom" ? Math.round(io.value.limit) : customDefault.value);
+// two sources, compared one by one: every progress event brings a new `io`, and a getter returning
+// a new array would put the slider back under the pointer while it is dragged
 watch(
-  () => [io.value?.level, io.value?.limit] as const,
+  [() => io.value?.level, () => io.value?.limit] as const,
   ([level, limit]) => {
     if (level === "custom" && limit != null) custom.value = Math.round(limit);
   },
