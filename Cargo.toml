@@ -4,7 +4,7 @@ members = ["crates/*", "apps/desktop/src-tauri"]
 default-members = ["crates/*"]
 
 [workspace.package]
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 license = "MIT"
 authors = ["DuskXi"]
