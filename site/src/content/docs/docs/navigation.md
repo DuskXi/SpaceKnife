@@ -7,7 +7,7 @@ Each view keeps its own **zoom root** (the folder that fills the view), its own 
 
 :::note[When keys work]
 - Keys act on the **focused view**: in split view, the pane you clicked last.
-- Single-key shortcuts (<kbd>V</kbd>, <kbd>C</kbd>, <kbd>F</kbd>, <kbd>U</kbd>, <kbd>1</kbd>–<kbd>4</kbd>, <kbd>0</kbd>, <kbd>/</kbd>, <kbd>Backspace</kbd>…) don't fire while you type in a text field such as the filter box, the path field or the command palette.
+- Single-key shortcuts (<kbd>V</kbd>, <kbd>C</kbd>, <kbd>F</kbd>, <kbd>U</kbd>, <kbd>R</kbd>, <kbd>H</kbd>, <kbd>1</kbd>–<kbd>4</kbd>, <kbd>0</kbd>, <kbd>/</kbd>, <kbd>Backspace</kbd>…) don't fire while you type in a text field such as the filter box, the path field or the command palette.
 - A focused button or menu item keeps <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Esc</kbd> and <kbd>Shift</kbd>+<kbd>F10</kbd> for itself; a focused drop-down list keeps <kbd>C</kbd> and <kbd>V</kbd>. Click the picture to get them back.
 - On macOS you can press <kbd>⌘</kbd> wherever this page says <kbd>Ctrl</kbd> (<kbd>Ctrl</kbd> works too). <kbd>Alt</kbd> is <kbd>Option</kbd>.
 :::
@@ -113,6 +113,8 @@ Rest the pointer on a block for a moment and a card appears beside it, placed so
 - the name and the folder it is in;
 - the size and its share of the parent folder;
 - for a folder, the number of files and folders; for a file, its file class and extension;
+- what the block's color stands for, where the lines above don't say it already: in **Classes**, for "N small items", the class that holds half or more of their space ("Mostly Pictures"), or "Mixed classes, none at half"; in **Time**, how long ago it was last modified ("Since last modified: 1 week – 1 month"); in **Branch**, the top-level branch it belongs to ("Branch: Games"). See [Coloring](../visualizations/#coloring);
+- for a block that is partly in [hidden folders](../visualizations/#hidden-folders), how much of it is in them and not drawn;
 - the **Created**, **Modified** and **Accessed** times, with how long ago.
 
 Once a card is open, moving to another block switches the card's content at once. Three switches in **Settings › General › Hover tips** control this: **Keep open when moving between blocks**, **Show dates and times** and **Show file age**.
@@ -157,7 +159,7 @@ An item that can't be used stays in the menu: hover it, or choose it, to see why
 
 Split view shows two views of the same scan side by side. Turn it on with the **Split view** button on the toolbar or the **Split view** command in the palette; use either again to go back to one view (the focused pane stays).
 
-- The new pane starts at the top of the scan with the focused pane's visualization, coloring, detail level and free and unknown space switches.
+- The new pane starts at the top of the scan with the focused pane's visualization, coloring, detail level and the free space, unknown space, Recycle Bin and Hide folders switches.
 - From then on each pane has its own zoom, history, selection, filter, visualization and level.
 - Each pane has a header with its own breadcrumb (click a segment to go up), its size, the number of matches while it filters, its own filter box, and a button to close it (**Close left pane**, **Close right pane**). Close one and the other takes the whole area.
 - Click inside a pane to focus it; its header is highlighted. The toolbar, the keys and the details panel follow the focused pane.

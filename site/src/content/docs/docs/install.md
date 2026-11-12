@@ -185,18 +185,18 @@ Whichever way you upgrade, your scans, snapshots and settings stay: they live ou
 
 ### Upgrading from 0.3.4
 
-SpaceKnife 0.3.5 is rewritten underneath: the backend is new, and so is the window around the same interface. The release files keep 0.3.4's names, so 0.3.4's update check finds 0.3.5 and the update card works as for any update. If 0.3.4 is set to **Releases only** (**Settings › About & updates › Versions to offer**), it doesn't offer 0.3.5, since every 0.x release is a pre-release on GitHub: switch to **Include previews** for this update, or download the file yourself. What stays:
+SpaceKnife 0.3.5 is rewritten underneath: the backend is new, and so is the window around the same interface. The release files keep 0.3.4's names, so 0.3.4's update check finds the newest version (0.3.5 or later) and the update card works as for any update. If 0.3.4 is set to **Releases only** (**Settings › About & updates › Versions to offer**), it offers none of them, since every 0.x release is a pre-release on GitHub: switch to **Include previews** for this update, or download the file yourself. What stays:
 
 - **Your data**: settings, file classes, classified folders, tags, the command palette's recent entries and the update state are read from the same folders ([Data locations](../data-locations/)). The theme you chose is kept.
-- **Your snapshots**: those 0.3.x saved open and compare as they are, without a conversion. 0.3.5 saves a newer format, which 0.3.x can't open: if you go back to 0.3.x, it shows only the snapshots it saved itself.
+- **Your snapshots**: those 0.3.x saved open and compare as they are, without a conversion. From 0.3.5 on SpaceKnife saves a newer format, which 0.3.4 can't open: if you go back to 0.3.4, it shows only the snapshots it saved itself.
 - **The command line** is now `spaceknife-cli`, next to the app (it was `resources/backend/spaceknife-backend`), and headless mode is `spaceknife-cli headless`. 0.3.4's ways of starting headless mode still work ([Headless mode](../headless/)).
 
 What the first update does, by kind of install:
 
-| 0.3.4 install | The update to 0.3.5 |
+| 0.3.4 install | The update to 0.3.5 or later |
 |---|---|
-| Windows installer | **Seamless update** runs the new installer. It removes 0.3.4 with 0.3.4's own uninstaller, keeping your data, and installs 0.3.5 into the same folder, for the same users: one SpaceKnife in the app list, the same Start menu and desktop shortcuts, and pins on the taskbar keep working. Where the WebView2 Runtime is missing, or older than 89.0.774.44, it installs or updates that first; if it can't (no internet connection, for example), nothing is changed and 0.3.4 opens again. |
-| Windows portable | **Seamless update** first checks that 0.3.5 can start on this computer (it needs the WebView2 Runtime, 89.0.774.44 or later). If it can't, nothing is replaced, 0.3.4 shows **Can't start the update: …** for a moment (a window of 0.3.5 also says what is missing and where to get it) and goes on as before. If 0.3.5 is put in place but doesn't come up within 90 seconds, 0.3.4 is put back. On Windows on ARM, an x64 copy moves to the ARM build. |
+| Windows installer | **Seamless update** runs the new installer. It removes 0.3.4 with 0.3.4's own uninstaller, keeping your data, and installs the new version into the same folder, for the same users: one SpaceKnife in the app list, the same Start menu and desktop shortcuts, and pins on the taskbar keep working. Where the WebView2 Runtime is missing, or older than 89.0.774.44, it installs or updates that first; if it can't (no internet connection, for example), nothing is changed and 0.3.4 opens again. |
+| Windows portable | **Seamless update** first checks that the new version can start on this computer (it needs the WebView2 Runtime, 89.0.774.44 or later). If it can't, nothing is replaced, 0.3.4 shows **Can't start the update: …** for a moment (a window of the new version also says what is missing and where to get it) and goes on as before. If the new version is put in place but doesn't come up within 90 seconds, 0.3.4 is put back. On Windows on ARM, an x64 copy moves to the ARM build. |
 | macOS dmg | **Open the disk image**, then drag SpaceKnife into Applications to replace 0.3.4. Allow it once and switch Full Disk Access off and on, as after every update. |
 | macOS portable | **Seamless update**, as before; then switch Full Disk Access off and on, as after every update. |
 | deb | **Open the package**: the software installer upgrades the `spaceknife` package. The program moves from `/opt/SpaceKnife` to `/usr/bin` and `/usr/lib/SpaceKnife`, and the package manager adds WebKitGTK 4.1. |

@@ -82,7 +82,7 @@ When the record can't be read, the card says why instead of leaving a gap:
 | The USB bridge doesn't pass on the disk's own record | The bridge chips in drive enclosures, USB sticks and card readers usually don't forward these queries. |
 | This disk didn't answer the query for its health record | Older SATA disks often have no Device Statistics log (they report their health only through each vendor's own SMART attributes, which SpaceKnife doesn't read); some RAID drivers don't pass such queries on either. |
 | The disk's own lifetime read and write totals need administrator rights here | On Linux only root can read the record. **Read with administrator rights…** on the card reads it, see [Reading with administrator rights on Linux](#reading-with-administrator-rights-on-linux); the temperature and the reads and writes since startup still show. |
-| This system has no way to read the disk's own health record | On macOS this version reads no disk's own record yet (0.3.4 read NVMe disks' through IOKit; that is planned to come back in the next version). The reads and writes since startup still show. |
+| This system has no way to read the disk's own health record | On macOS this version reads no disk's own record yet (0.3.4 read NVMe disks' through IOKit; that is planned to come back in a later version). The reads and writes since startup still show. |
 
 ### Reading with administrator rights on Linux
 

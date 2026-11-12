@@ -13,7 +13,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 
 ## 按键什么时候生效
 
-- **单键不会在输入框里触发。** <kbd>/</kbd>、<kbd>F</kbd>、<kbd>U</kbd>、<kbd>R</kbd>、<kbd>C</kbd>、<kbd>V</kbd>、数字键、<kbd>Enter</kbd>、<kbd>Delete</kbd>、<kbd>Backspace</kbd>、<kbd>Esc</kbd> 只在焦点不在文本框里时作用于视图。在过滤框里输入 `f` 不会关掉可用空间，<kbd>Ctrl</kbd>+<kbd>C</kbd> 在输入框里也是普通的复制。
+- **单键不会在输入框里触发。** <kbd>/</kbd>、<kbd>F</kbd>、<kbd>U</kbd>、<kbd>R</kbd>、<kbd>H</kbd>、<kbd>C</kbd>、<kbd>V</kbd>、数字键、<kbd>Enter</kbd>、<kbd>Delete</kbd>、<kbd>Backspace</kbd>、<kbd>Esc</kbd> 只在焦点不在文本框里时作用于视图。在过滤框里输入 `f` 不会关掉可用空间，<kbd>Ctrl</kbd>+<kbd>C</kbd> 在输入框里也是普通的复制。
 - **全局键在过滤框里也有效。** <kbd>Ctrl</kbd>+<kbd>K</kbd>、<kbd>Ctrl</kbd>+<kbd>J</kbd>、<kbd>Ctrl</kbd>+<kbd>T</kbd>、<kbd>Ctrl</kbd>+<kbd>W</kbd>、<kbd>Ctrl</kbd>+<kbd>,</kbd>、<kbd>Ctrl</kbd>+<kbd>Tab</kbd>，以及 0.3.2 起的 <kbd>F5</kbd>、<kbd>Shift</kbd>+<kbd>F5</kbd>、<kbd>Ctrl</kbd>+<kbd>S</kbd> 不用先离开过滤框。有些输入框把按键全部留给输入，全局键在里面不起作用：启动页的路径框、编辑路径的输入框（<kbd>Ctrl</kbd>+<kbd>L</kbd>），以及设置里的搜索框、数字框和标签名称框。
 - **视图键作用于焦点窗格。** 分屏时，带强调边框的那一侧是焦点窗格；点一下另一侧就把焦点移过去。
 - **控件自己的键优先。** 焦点在按钮、单选、菜单项这类控件上时，<kbd>Enter</kbd>、<kbd>Delete</kbd>、<kbd>Esc</kbd> 和 <kbd>Shift</kbd>+<kbd>F10</kbd> 交给控件（例如按钮上的 <kbd>Enter</kbd> 就是按下按钮）；焦点在下拉框上时，<kbd>C</kbd> 和 <kbd>V</kbd> 用来按首字母选项。

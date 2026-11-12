@@ -18,7 +18,7 @@ spaceknife-cli headless --listen 0.0.0.0:9000    # every network interface, port
 It prints the address to open in a browser, with a token at the end, and keeps running until you press <kbd>Ctrl</kbd>+<kbd>C</kbd>:
 
 ```text
-SpaceKnife headless mode · 0.3.5
+SpaceKnife headless mode · 0.3.6
 Open in a browser:
   http://192.168.1.20:8375/#token=n3Vq…
 Press Ctrl+C to stop.

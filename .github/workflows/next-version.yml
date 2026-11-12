@@ -60,10 +60,9 @@ permissions:
   actions: read # the artifacts of the build runs
 
 concurrency:
-  group: next-version-${{ github.ref }}
-  cancel-in-progress: true
+  group: next-version-${{ github.ref }}-${{ inputs.old_portable }}-${{ inputs.new_portable }}
+  cancel-in-progress: false
 
-# a push has no inputs: the same runs as the defaults above
 env:
   OLD_PORTABLE: ${{ inputs.old_portable }}
   OLD_MACOS: ${{ inputs.old_macos }}

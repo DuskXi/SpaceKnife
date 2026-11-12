@@ -76,7 +76,7 @@ The gray text after a command name is its current status, worked out when the pa
 | --- | --- |
 | Rescan everything | How the current scan reads the disk, "MFT quick scan" or "Full scan"; once the scan is done, with the time it took, like "MFT quick scan · about 5 s" |
 | Cycle coloring, Cycle visualization | "Current: File classes", "Current: Treemap" |
-| Show/hide free space, Show/hide unknown space | "Current: shown" or "Current: hidden" |
+| Show/hide free space, Show/hide unknown space, Show/hide the Recycle Bin, Show/hide the folders listed in settings | "Current: shown" or "Current: hidden" (for the listed folders: whether they are drawn) |
 | Open delete basket | The number of items in the delete basket, or "Empty" |
 | Compare with snapshot… | How many snapshots this scan target has, like "3 snapshots" |
 | Export report… | "CSV · JSON · HTML" |
@@ -96,6 +96,7 @@ A command that can't run now is grayed out, its reason replaces the status, and 
 | Nothing selected | Zoom in, Copy path, tags and the like need a selected block |
 | Nothing to go back to, Nothing to go forward to, Already at the root | You are at the end of the navigation |
 | No snapshots | No snapshot has been saved for this place yet |
+| This scan has no Recycle Bin, This scan has none of the folders listed in settings | Nothing for the switch to hide (see [The Recycle Bin](../visualizations/#the-recycle-bin) and [Hidden folders](../visualizations/#hidden-folders)) |
 | This window can't show this visualization | The window, or a snapshot comparison, can't show that visualization |
 | No update available | Show update is available only after a newer version was found |
 

@@ -228,7 +228,7 @@ Only the picture changes: what was scanned, the details panel and the lists stay
 
 | Setting | Default | Values | Description | Key |
 | --- | --- | --- | --- | --- |
-| Folders to hide | None | Full folder paths, one per line | In scan views these folders take no room in the picture and the other blocks grow to fill it. When a scan holds a folder of the list, Hide folders (<kbd>H</kbd>) appears in the toolbar and brings them back at any time. A new view opens with them hidden; zoomed into one of them, it shows as usual. Add a folder by typing its path or with Browse…. None by default. | `treemap.hidden_folders` |
+| Folders to hide | None | Full folder paths, one per line | In scan views these folders take no room in the picture and the other blocks grow to fill it. When a scan holds a folder of the list, Hide folders (<kbd>H</kbd>) appears in the toolbar and brings them back at any time. A new view opens with them hidden; zoomed into one of them, it shows as usual. Add a folder by typing its path, or with Browse… in the app. On Windows and macOS the case of a path doesn't matter. None by default. | `treemap.hidden_folders` |
 
 ### Scan & performance
 
