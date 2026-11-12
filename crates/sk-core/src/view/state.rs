@@ -284,6 +284,8 @@ pub struct Frame {
     pub serial: u64,
     /// the numbering its node ids and keys belong to ([`sk_store::Store::generation`])
     pub generation: u64,
+    /// [`View::hidden_folder_count`] when it was drawn (a scan reaching a listed folder)
+    pub hidden_folders: u32,
 }
 
 /// Python's `searchsorted(TONE_LIMITS, age, side="right")`; unknown times are the oldest.
@@ -346,7 +348,7 @@ pub struct View {
     /// the folders of [`View::set_hidden_folders`] are taken out of the picture
     pub hide_folders: bool,
     hidden_paths: Vec<String>,
-    /// the nodes of `hidden_paths` in the store of version .0 ([`View::hidden_nodes`])
+    /// the nodes of `hidden_paths` in the store of version .0 ([`View::hidden_listed`])
     hidden_found: Mutex<Option<(u64, Vec<NodeId>)>>,
     pub font_scale: f64,
     pub aspect: f64,
@@ -773,6 +775,11 @@ impl View {
             } else if chain.last() != Some(&0) {
                 chain.push(0);
             }
+            if self.hide_folders && self.hidden_listed(&nodes).binary_search(&key).is_ok() {
+                // a hidden folder is drawn only from inside: zoom into it (「在树图中定位」)
+                drop(nodes);
+                return self.zoom_to_node(key);
+            }
             let here = self.zoom.members.is_none();
             let inside = here && chain.contains(&self.zoom.node);
             let member = !here && self.zoom.members.as_ref().is_some_and(|m| m.contains(&key));
@@ -1002,6 +1009,7 @@ impl View {
         frame.serial = self.serial;
         // read under the reader: no renumbering in between
         frame.generation = ctx.store.generation();
+        frame.hidden_folders = self.hidden_nodes(&nodes).len() as u32;
         drop(nodes);
         self.spare = self.last.replace(frame);
         self.last.as_ref().expect("just rendered")
@@ -1033,8 +1041,10 @@ impl View {
             } else {
                 std::iter::once(z).chain(nodes.ancestors(z)).collect()
             };
+            // every listed folder, not only the outermost: zoomed into one, those listed inside
+            // it stay hidden
             out.extend(
-                self.hidden_nodes(nodes)
+                self.hidden_listed(nodes)
                     .into_iter()
                     .filter(|h| !around.contains(h)),
             );
@@ -1043,9 +1053,15 @@ impl View {
     }
 
     /// The nodes of the hidden folders ([`View::set_hidden_folders`]) the store holds, sorted,
-    /// none inside another; not a scan's root (hiding it would leave nothing to see). Looked up
-    /// again when the store changed; none in a comparison.
+    /// none inside another; not a scan's root (hiding it would leave nothing to see). None in a
+    /// comparison.
     pub fn hidden_nodes(&self, nodes: &Nodes) -> Vec<NodeId> {
+        outermost(nodes, self.hidden_listed(nodes))
+    }
+
+    /// Every node of [`View::hidden_nodes`] and also those inside another listed one, sorted
+    /// without repeats. Looked up again when the store changed.
+    fn hidden_listed(&self, nodes: &Nodes) -> Vec<NodeId> {
         if self.compare.is_some() || self.hidden_paths.is_empty() {
             return Vec::new();
         }
@@ -1057,14 +1073,22 @@ impl View {
             return ids.clone();
         }
         let roots = nodes.roots();
-        let ids = outermost(
-            nodes,
-            self.hidden_paths
-                .iter()
-                .filter_map(|p| nodes.find_shown(std::path::Path::new(p)))
-                .filter(|&id| id != 0 && !roots.contains(&id))
-                .collect(),
-        );
+        let mut ids: Vec<NodeId> = self
+            .hidden_paths
+            .iter()
+            .filter_map(|p| {
+                let p = std::path::Path::new(p);
+                // macOS ignores case by default: a folder typed in another case is still it
+                if cfg!(target_os = "macos") {
+                    nodes.find_caseless(p)
+                } else {
+                    nodes.find_shown(p)
+                }
+            })
+            .filter(|&id| id != 0 && !roots.contains(&id))
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
         *found = Some((version, ids.clone()));
         ids
     }

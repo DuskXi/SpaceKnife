@@ -9,7 +9,7 @@ import { useHoverCard } from "@/composables/useHoverCard";
 import { classColors } from "@/lib/classes";
 import { colorMeaning } from "@/lib/colorLegend";
 import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, sizeParts } from "@/lib/format";
-import { cardAvoid, hoverFacts, placeCard, splitPlaceholders } from "@/lib/hoverCard";
+import { cardAvoid, hiddenGap, hoverFacts, placeCard, splitPlaceholders } from "@/lib/hoverCard";
 import { t } from "@/lib/i18n";
 import type { TreeNodeResult } from "@/protocol/generated";
 import { call } from "@/state/actions";
@@ -26,6 +26,7 @@ const props = defineProps<{ hover: HoverInfo | null; bounds: { w: number; h: num
 const vocab = useApp((s) => s.vocab);
 const scanId = useApp((s) => (props.hover ? s.views[props.hover.viewId]?.state.scan_id : undefined));
 const colorMode = useApp((s) => (props.hover ? s.views[props.hover.viewId]?.state.color_mode : "class") ?? "class");
+const viewState = useApp((s) => (props.hover ? s.views[props.hover.viewId]?.state : undefined));
 const scanning = useApp((s) => {
   const st = scanId.value ? s.scans[scanId.value] : undefined;
   return st?.state === "scanning" || st?.state === "queued";
@@ -111,7 +112,12 @@ const view = computed(() => {
   const mode = colorMode.value as ColorMode;
   const meaning = colorMeaning(mode, f, s.target, v);
   const classSwatch = mode === "class";
-  return { node, size: facts.size, fg, bg, num, unit, cls, dir, title, folder, parentName, flags, meaning, classSwatch };
+  // the picture leaves out what is in hidden folders while the share and the counts are the whole
+  // folder's: say how much of it isn't drawn (not under a filter, which draws its own sizes)
+  const st = viewState.value;
+  const gap = hiddenGap(st, f.info.filter, dir, node?.alloc, facts.size);
+  const notDrawn = gap > 0 ? hiddenText(!!st && !st.show_trash && st.has_trash, gap) : "";
+  return { node, size: facts.size, fg, bg, num, unit, cls, dir, title, folder, parentName, flags, meaning, classSwatch, notDrawn };
 });
 
 const share = computed(() => splitPlaceholders(t("占 {name} {share}")));
@@ -124,6 +130,15 @@ const times = computed(() => {
     ["atime", t("访问"), n.atime],
   ] as const;
 });
+
+/** How much of a folder is in hidden folders (and, with 「回收站」 off, the bin) and not drawn. */
+function hiddenText(bins: boolean, size: number): string {
+  const s = fmtSize(size);
+  if (!bins) return t("其中 {size} 在隐藏的文件夹里，没有画出", { size: s });
+  return window.sk.platform === "darwin"
+    ? t("其中 {size} 在隐藏的文件夹或废纸篓里，没有画出", { size: s })
+    : t("其中 {size} 在隐藏的文件夹或回收站里，没有画出", { size: s });
+}
 
 /** In a recycle bin (「回收站特效」): its space comes back only when the bin is emptied. */
 function trashText(bin: boolean, size: number): string {
@@ -173,6 +188,10 @@ function trashText(bin: boolean, size: number): string {
           <span v-if="view.classSwatch" class="swatch" :style="{ background: view.bg }" />
           <span>{{ view.cls?.name ?? t("其他") }}{{ view.node.ext ? ` · .${view.node.ext}` : "" }}</span>
         </template>
+      </div>
+      <div v-if="view.notDrawn" class="hc-class muted">
+        <Icon name="eyeOff" :size="12" />
+        <span>{{ view.notDrawn }}</span>
       </div>
       <div v-if="view.meaning" class="hc-class muted">
         <span class="swatch" :style="{ background: view.bg }" />

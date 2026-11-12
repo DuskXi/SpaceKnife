@@ -2634,6 +2634,13 @@
           "format": "int64",
           "type": "integer"
         },
+        "hidden_folders": {
+          "default": 0,
+          "description": "How many folders of the setting treemap.hidden_folders the scan holds, as\nViewState.hidden_folders: it changes while a scan runs or files change, between the calls\nthat answer with the view's state",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "layout": {
           "default": "drawlist.v1",
           "description": "Layout of the binary frame that follows",
@@ -5316,7 +5323,8 @@
             "number",
             "slider",
             "color",
-            "text"
+            "text",
+            "folders"
           ],
           "type": "string"
         },
@@ -7085,6 +7093,14 @@
             "null"
           ]
         },
+        "hide_folders": {
+          "default": null,
+          "description": "The folders of the setting treemap.hidden_folders: taken out of the picture, or drawn",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "min_element": {
           "default": null,
           "description": "CSS px",
@@ -7209,6 +7225,18 @@
         "has_trash": {
           "default": false,
           "description": "The scan holds a recycle bin / trash folder (the toggle is offered)",
+          "type": "boolean"
+        },
+        "hidden_folders": {
+          "default": 0,
+          "description": "How many of those folders the scan holds (the toggle is offered when any)",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hide_folders": {
+          "default": true,
+          "description": "The folders of the setting treemap.hidden_folders are taken out of the picture (a view\nopens with them hidden; one the view is zoomed into stays)",
           "type": "boolean"
         },
         "min_element": {

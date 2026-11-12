@@ -82,8 +82,9 @@ export interface SkApi {
   dialog: {
     /** Pick a snapshot file (UI-W1-45, W4 「打开快照文件…」); null when cancelled. */
     openSnapshot(): Promise<string | null>;
-    /** Pick one or more folders (UI-W1-26 「浏览…」); [] when cancelled. */
-    openFolders(): Promise<string[]>;
+    /** Pick one or more folders (UI-W1-26 「浏览…」); [] when cancelled. The dialog's title says what
+     *  they are for; without one, folders to scan. */
+    openFolders(title?: string): Promise<string[]>;
     /** Pick one file to read (settings import, SpaceSniffer configuration); null when cancelled. */
     openFile(options: FileDialogOptions): Promise<string | null>;
     /** Choose where to write a file (export, settings export); null when cancelled. */

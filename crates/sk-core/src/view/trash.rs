@@ -297,20 +297,20 @@ pub fn subtree(nodes: &Nodes, tops: &[NodeId]) -> Vec<NodeId> {
 /// A size source with subtrees taken out: the recycle bins (the 「回收站」 chip off) and the hidden
 /// folders (「隐藏文件夹」). A bin and everything in it weigh nothing, and each of its ancestors
 /// loses the bin's bytes; so none of `bins` may be inside another (they would be taken off twice).
+/// What is inside is told by its ancestors, not by listing the subtrees: a hidden folder can hold
+/// a million items (a game library, a system folder) and the picture is drawn many times a second.
 pub struct WithoutBins<'a> {
     base: &'a dyn SizeSource,
-    inside: Vec<NodeId>,
+    /// sorted
+    bins: Vec<NodeId>,
     cut: HashMap<NodeId, i64>,
 }
 
 impl<'a> WithoutBins<'a> {
     pub fn new(base: &'a dyn SizeSource, nodes: &Nodes, bins: &[NodeId]) -> WithoutBins<'a> {
         let n = base.n();
-        let bins: Vec<NodeId> = bins.iter().copied().filter(|&b| (b as usize) < n).collect();
-        let inside: Vec<NodeId> = subtree(nodes, &bins)
-            .into_iter()
-            .filter(|&i| (i as usize) < n)
-            .collect();
+        let mut bins: Vec<NodeId> = bins.iter().copied().filter(|&b| (b as usize) < n).collect();
+        bins.sort_unstable();
         let mut cut: HashMap<NodeId, i64> = HashMap::new();
         for &b in &bins {
             let size = base.size(nodes, b);
@@ -318,7 +318,7 @@ impl<'a> WithoutBins<'a> {
                 *cut.entry(a).or_default() += size;
             }
         }
-        WithoutBins { base, inside, cut }
+        WithoutBins { base, bins, cut }
     }
 }
 
@@ -328,7 +328,8 @@ impl SizeSource for WithoutBins<'_> {
     }
 
     fn size(&self, nodes: &Nodes, id: NodeId) -> i64 {
-        if self.inside.binary_search(&id).is_ok() {
+        let taken = |a: NodeId| self.bins.binary_search(&a).is_ok();
+        if taken(id) || nodes.ancestors(id).any(taken) {
             return 0;
         }
         let s = self.base.size(nodes, id) - self.cut.get(&id).copied().unwrap_or(0);

@@ -158,6 +158,7 @@
  "没有找到与「{query}」相关的设置": "No settings match \"{query}\"",
  "没有需要改变的设置。": "No settings need to change.",
  "浏览…": "Browse…",
+ "选择要隐藏的文件夹": "Choose folders to hide",
  "浏览器模式下无法读取拖入文件的路径": "Can't read the paths of dropped files in browser mode.",
  "添加类别": "Add class",
  "同时应用到另一主题": "Also apply to the other theme",

@@ -80,7 +80,7 @@ describe("what a block's colour means", () => {
 
   it("names the class of an aggregate, or says it is mixed", () => {
     expect(colorMeaning("class", f, 12, vocab)).toBe("大部分是「图片」");
-    expect(colorMeaning("class", f, 13, vocab)).toBe("多种类别混合，没有一类过半");
+    expect(colorMeaning("class", f, 13, vocab)).toBe("多种类别混合，没有一类达到一半");
     // a file's class is on its own line already; without the classes nothing is said
     expect(colorMeaning("class", f, 11, vocab)).toBeNull();
     expect(colorMeaning("class", f, 12, null)).toBeNull();

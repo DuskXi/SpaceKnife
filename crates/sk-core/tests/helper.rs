@@ -87,6 +87,11 @@ fn run_mode(mode: &str, args: &[OsString]) -> i32 {
             },
         ),
         "exit5" => 5,
+        // the user takes a while to answer the prompt, then allows it
+        "late" => {
+            std::thread::sleep(Duration::from_millis(1500));
+            run_main_with(args, Hooks::default())
+        }
         "sleep" => {
             std::thread::sleep(Duration::from_secs(60));
             0
@@ -659,6 +664,26 @@ fn the_live_helper_is_asked_for_without_waiting_for_a_launch() {
         t0.elapsed()
     );
     assert_eq!(launching.join().unwrap(), "timeout");
+}
+
+/// 「停止助手」 while a launch still waits for the user stops the helper once it is up, as it did
+/// when a close waited for the launch: it is not kept running.
+#[test]
+fn a_helper_stopped_while_it_is_launched_is_not_kept() {
+    let shared = Arc::new(SharedHelper::new(opts("late")));
+    let launching = {
+        let s = shared.clone();
+        std::thread::spawn(move || s.get(false).map(|_| ()))
+    };
+    std::thread::sleep(Duration::from_millis(400)); // the user has not answered yet
+    shared.close();
+    let err = launching.join().unwrap().unwrap_err();
+    assert_eq!(err.code, "closed", "{err:?}");
+    assert!(shared.current().is_none());
+    // a later request launches a new one as usual
+    let again = shared.get(false).unwrap();
+    assert!(again.alive());
+    shared.close();
 }
 
 #[test]

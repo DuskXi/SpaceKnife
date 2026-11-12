@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "975ed83fc8815795";
+export const SCHEMA_HASH = "8d474495f35a20bf";
 
 export interface AgeCond {
   end: number;
@@ -702,6 +702,12 @@ export interface FrameInfo {
   /** None for drawlist.v1 */
   geometry: FlameGeometry | PolarGeometry | null;
   height: number;
+  /**
+   * How many folders of the setting treemap.hidden_folders the scan holds, as
+   * ViewState.hidden_folders: it changes while a scan runs or files change, between the calls
+   * that answer with the view's state
+   */
+  hidden_folders: number;
   /** Layout of the binary frame that follows */
   layout: string;
   layout_ms: number;

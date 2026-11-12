@@ -1811,6 +1811,26 @@ fn hidden_folders_are_taken_out_of_the_picture() {
     v.render();
     assert!(drawn(&v, node(&v, "Users/lenny/Music/a.flac")));
     assert!(v.zoom_to_node(1));
+    // zoomed into one, a folder listed inside it stays hidden (Saves inside Games)
+    assert!(v.zoom_to_node(games));
+    v.render();
+    assert!(drawn(&v, node(&v, "Users/lenny/Games/g.pak")));
+    assert!(!drawn(&v, node(&v, "Users/lenny/Games/Saves")));
+    assert!(v.zoom_to_node(1));
+    // 「在树图中定位」 a hidden folder zooms into it: from its parent it isn't drawn
+    v.render();
+    assert!(v.reveal(music));
+    assert_eq!(v.zoom.node, music);
+    v.render();
+    assert!(drawn(&v, node(&v, "Users/lenny/Music/a.flac")));
+    // and something inside one, into the folder it is in
+    assert!(v.zoom_to_node(1));
+    v.render();
+    let save = node(&v, "Users/lenny/Games/Saves/s.dat");
+    assert!(v.reveal(save));
+    v.render();
+    assert!(drawn(&v, save));
+    assert!(v.zoom_to_node(1));
 
     // with the recycle bin hidden as well, and listed too, it is taken out once
     let mut both = vec![

@@ -138,6 +138,7 @@ pub fn frame_info(view: &View, frame: &Frame, seq: u64, reason: &str) -> FrameIn
             dstat: r.dstat,
         }),
         generation: frame.generation,
+        hidden_folders: frame.hidden_folders,
     }
 }
 

@@ -550,6 +550,11 @@ pub struct FrameInfo {
     /// again). basket.add takes it with ids from this frame (node-generation.v1)
     #[serde(default)]
     pub generation: u64,
+    /// How many folders of the setting treemap.hidden_folders the scan holds, as
+    /// ViewState.hidden_folders: it changes while a scan runs or files change, between the calls
+    /// that answer with the view's state
+    #[serde(default)]
+    pub hidden_folders: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

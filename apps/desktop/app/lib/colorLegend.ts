@@ -78,7 +78,7 @@ export function colorLegend(mode: ColorModeName, vocab: FilterVocab | null | und
         lead: t("按文件类别着色，类别和颜色在「文件类别」设置里改"),
         rows: [...(vocab?.classes ?? []).map((c) => ({ color: colorOf(c), label: c.name })), folded],
         more: 0,
-        notes: [t("「N 个小项」取占一半以上空间的类别，没有过半的算「其他」")],
+        notes: [t("「N 个小项」取占一半及以上空间的类别，都不到一半的算「其他」")],
         settings,
       };
     case "flat":
@@ -132,7 +132,7 @@ export function colorMeaning(mode: ColorModeName, f: VisualFrame, row: number, v
   }
   if (mode === "class" && kind === Kind.SMALL && vocab) {
     const cls = vocab.classes[f.cls[row]!];
-    return cls ? t("大部分是「{cls}」", { cls: cls.name }) : t("多种类别混合，没有一类过半");
+    return cls ? t("大部分是「{cls}」", { cls: cls.name }) : t("多种类别混合，没有一类达到一半");
   }
   return null;
 }

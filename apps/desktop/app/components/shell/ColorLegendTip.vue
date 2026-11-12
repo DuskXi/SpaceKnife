@@ -5,6 +5,7 @@ import { computed } from "vue";
 
 import Kbd from "@/components/ui/Kbd.vue";
 import { colorLegend } from "@/lib/colorLegend";
+import { plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { pageName } from "@/lib/settingsPages";
 import { useApp } from "@/state/store";
@@ -29,7 +30,7 @@ const legend = computed(() => (void theme.value, colorLegend(props.mode, vocab.v
         <span class="lt-label">{{ r.label }}</span>
       </div>
     </div>
-    <div v-if="legend.more" class="lt-note muted">{{ t("还有 {n} 个分支", { n: legend.more }) }}</div>
+    <div v-if="legend.more" class="lt-note muted">{{ plural(legend.more, t("还有 {n} 个分支", { n: legend.more }), "1 more branch") }}</div>
     <div v-for="(n, i) in legend.notes" :key="`n${i}`" class="lt-note muted">{{ n }}</div>
     <div class="lt-hint">
       <span>{{ t("右键打开「{page}」设置", { page: pageName(legend.settings) }) }}</span>

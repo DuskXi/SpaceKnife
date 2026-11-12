@@ -112,8 +112,8 @@ export function browserApi(cfg: BrowserApiConfig, env: BrowserEnv): SkApi {
       openSnapshot: () => env.askPath({ title: t("打开快照文件"), hint: t("{host} 上的快照文件（.sks）路径", { host: server }), value: start }),
       openFile: (o) => env.askPath({ title: o.title, hint: t("{host} 上的文件路径（{types}）", { host: server, types: filters(o) }), value: start }),
       saveFile: (o) => env.askPath({ title: o.title, hint: t("保存到 {host} 上的这个位置", { host: server }), value: start + o.defaultName }),
-      openFolders: async () => {
-        const text = await env.askPath({ title: t("选择要扫描的文件夹"), hint: t("{host} 上的文件夹路径，多个用 ; 分隔", { host: server }), value: start });
+      openFolders: async (title?: string) => {
+        const text = await env.askPath({ title: title ?? t("选择要扫描的文件夹"), hint: t("{host} 上的文件夹路径，多个用 ; 分隔", { host: server }), value: start });
         return text ? text.split(";").map((x) => x.trim()).filter(Boolean) : [];
       },
     },

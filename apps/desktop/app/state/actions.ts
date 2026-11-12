@@ -175,6 +175,14 @@ async function reconnect(): Promise<void> {
 /** Views already told that their visualization cannot be drawn here. */
 const fellBack = new Set<string>();
 
+/** A running scan reaches a listed folder between the calls that answer with the view's state:
+ *  the frame brings the count, and with it the 「隐藏文件夹」 chip and H. The same state when
+ *  nothing changed (a server before the count sends none). */
+export function stateOfFrame(state: ViewState, info: Pick<FrameInfo, "hidden_folders">): ViewState {
+  const hidden = info.hidden_folders;
+  return hidden !== undefined && hidden !== state.hidden_folders ? { ...state, hidden_folders: hidden } : state;
+}
+
 async function applyFrame(info: FrameInfo): Promise<void> {
   const cur = get().views[info.view_id];
   if (!cur || (cur.info && info.seq <= cur.info.seq)) return;
@@ -188,7 +196,7 @@ async function applyFrame(info: FrameInfo): Promise<void> {
   if (!bin || !now || (now.info && info.seq <= now.info.seq)) return;
   const frame = decodeVisualFrame(bin, info);
   if (!frame) return fallBack(info);
-  patchView(info.view_id, { info, frame, filter: info.filter ?? now.filter });
+  patchView(info.view_id, { info, frame, filter: info.filter ?? now.filter, state: stateOfFrame(now.state, info) });
 }
 
 function fallBack(info: FrameInfo): void {

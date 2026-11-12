@@ -177,6 +177,37 @@ fn find_prefers_exact_case_and_refuses_ambiguity() {
     }
 }
 
+/// A typed path in another case than the disk's (the hidden folders on macOS): each name taken
+/// when one entry has it ignoring case, the root's too; two that differ only in case, neither.
+#[test]
+fn find_caseless_takes_a_name_in_another_case_when_only_one_has_it() {
+    let s = Store::new();
+    let mut a = s.appender();
+    let root = a.add_root_dir("/r").unwrap();
+    let first = a
+        .ingest_listing(
+            root,
+            &named_batch(
+                &["Music", "Doc", "doc"],
+                &[Kind::Dir, Kind::Dir, Kind::Dir],
+                &[0, 0, 0],
+                &[],
+            ),
+        )
+        .unwrap();
+    let saves = a
+        .ingest_listing(first, &named_batch(&["Saves"], &[Kind::Dir], &[0], &[]))
+        .unwrap();
+    let p = std::path::Path::new;
+    assert_eq!(a.find_caseless(p("/r/Music")), Some(first)); // as it is
+    assert_eq!(a.find_caseless(p("/r/music/SAVES")), Some(saves));
+    assert_eq!(a.find_caseless(p("/R/MUSIC")), Some(first));
+    assert_eq!(a.find_caseless(p("/r/doc")), Some(first + 2)); // exact case first
+    assert_eq!(a.find_caseless(p("/r/DOC")), None);
+    assert_eq!(a.find_caseless(p("/r/missing")), None);
+    assert_eq!(a.find_caseless(p("/elsewhere/music")), None);
+}
+
 /// tree.find and the palette take a path as the protocol writes it: a name that is not Unicode
 /// escaped (`\udc80` on Windows, where that backslash is no separator then; `\xff` on POSIX).
 /// A name that really is that text is found first.

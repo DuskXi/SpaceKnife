@@ -732,6 +732,40 @@ impl Nodes {
         self.find(raw).or_else(|| self.find_printable(raw))
     }
 
+    /// [`Nodes::find_shown`], else every name compared ignoring case (Unicode lower case), each
+    /// taken only when one entry has it that way: a path typed on a file system that ignores case
+    /// though it keeps it (macOS by default; on Windows [`Nodes::find`] folds case already).
+    pub fn find_caseless(&self, path: &std::path::Path) -> Option<NodeId> {
+        if let Some(id) = self.find_shown(path) {
+            return Some(id);
+        }
+        let parts = |s: &str| -> Vec<String> {
+            s.split(['/', '\\'])
+                .filter(|p| !p.is_empty() && *p != ".")
+                .map(str::to_lowercase)
+                .collect()
+        };
+        let want = parts(&path.to_string_lossy());
+        'roots: for root in self.roots() {
+            let at = parts(&String::from_utf8_lossy(self.name_bytes(root)));
+            if want.len() < at.len() || want[..at.len()] != at[..] {
+                continue;
+            }
+            let mut node = root;
+            for part in &want[at.len()..] {
+                let mut hits = self
+                    .children(node)
+                    .filter(|&ch| self.name(ch).to_lowercase() == *part);
+                match (hits.next(), hits.next()) {
+                    (Some(one), None) => node = one,
+                    _ => continue 'roots, // none, or two that differ only in case
+                }
+            }
+            return Some(node);
+        }
+        None
+    }
+
     fn find_printable(&self, path: &[u8]) -> Option<NodeId> {
         std::str::from_utf8(path).ok()?; // escaped text is text
         let target = names::normpath(path);

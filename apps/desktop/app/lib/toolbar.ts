@@ -2,6 +2,7 @@
 // space and recycle bin switches, and the breadcrumb's labels and full path.
 
 import type { ViewState } from "@/protocol/generated";
+import { plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import type { IconName } from "@/lib/icons";
 import type { COLOR_MODES } from "@/state/visuals";
@@ -37,7 +38,7 @@ export const SPACE_SWITCHES: readonly SpaceSwitch[] = [
     key: "H",
     icon: "eyeOff",
     label: () => t("隐藏文件夹"),
-    title: (st) => t("隐藏设置里列出的 {n} 个文件夹（H）", { n: st.hidden_folders }),
+    title: (st) => plural(st.hidden_folders, t("隐藏设置里列出的 {n} 个文件夹（H）", { n: st.hidden_folders }), "Hide the folder listed in settings (H)"),
     on: (st) => st.hide_folders,
     flip: (st) => ({ hide_folders: !st.hide_folders }),
   },

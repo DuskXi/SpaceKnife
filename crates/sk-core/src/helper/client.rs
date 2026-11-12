@@ -18,6 +18,7 @@ use std::ffi::OsString;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -889,6 +890,8 @@ pub struct SharedHelper {
     /// user (the UAC prompt, polkit: up to minutes), and the backend's threads that ask (the drive
     /// list every few seconds) don't wait with it
     client: Mutex<Option<Arc<HelperClient>>>,
+    /// counts [`close`](Self::close): a launch that waited for the user through one is not kept
+    closes: AtomicU64,
 }
 
 impl SharedHelper {
@@ -898,6 +901,7 @@ impl SharedHelper {
             options,
             launching: Mutex::new(()),
             client: Mutex::new(None),
+            closes: AtomicU64::new(0),
         }
     }
 
@@ -926,13 +930,27 @@ impl SharedHelper {
             elevate,
             ..self.options.clone()
         };
+        let closes = self.closes.load(Ordering::SeqCst);
         let client = Arc::new(HelperClient::launch(opts)?);
-        *self.client.lock() = Some(client.clone());
+        // under the slot's lock, as `close` counts under it: kept, or stopped by a close
+        let mut slot = self.client.lock();
+        if self.closes.load(Ordering::SeqCst) != closes {
+            // 「停止助手」 while the user was still answering the prompt: stopped, not kept running
+            drop(slot);
+            client.close();
+            return Err(HelperError::unavailable(t("扫描助手已关闭"), "closed"));
+        }
+        *slot = Some(client.clone());
         Ok(client)
     }
 
+    /// Stop the helper; one still being launched (waiting for the user) is stopped once it is up.
     pub fn close(&self) {
-        let c = self.client.lock().take();
+        let c = {
+            let mut slot = self.client.lock();
+            self.closes.fetch_add(1, Ordering::SeqCst);
+            slot.take()
+        };
         if let Some(c) = c {
             c.close();
         }

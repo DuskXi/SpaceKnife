@@ -52,7 +52,7 @@ function remove(p: string): void {
 }
 
 async function browse(): Promise<void> {
-  const picked = await window.sk.dialog.openFolders();
+  const picked = await window.sk.dialog.openFolders(t("选择要隐藏的文件夹"));
   if (picked.length) add(picked);
 }
 

@@ -110,9 +110,10 @@ pub fn window_flash(window: WebviewWindow) {
 
 // ------------------------------------------------------------------ shell
 
-// A command that is not async runs on the main thread, which draws the window: these two touch the
-// file system (the path's metadata, the shell's item lookup), which on a share that went away or a
-// disk spinning up takes seconds to minutes, so they run on a thread of their own.
+// A command that is not async runs on the main thread, which draws the window: these three touch the
+// file system (the path's metadata, the shell's item lookup, the terminal's working folder), which
+// on a share that went away or a disk spinning up takes seconds to minutes, so they run on a thread
+// of their own.
 
 #[tauri::command]
 pub async fn show_item_in_folder(path: String) {
@@ -141,8 +142,9 @@ pub async fn open_path(app: AppHandle, path: String) -> String {
 }
 
 #[tauri::command]
-pub fn open_terminal(dir: String) {
-    crate::terminal::open_terminal(&dir);
+pub async fn open_terminal(dir: String) {
+    let _ =
+        tauri::async_runtime::spawn_blocking(move || crate::terminal::open_terminal(&dir)).await;
 }
 
 #[tauri::command]
@@ -271,8 +273,10 @@ pub async fn dialog_open_snapshot(window: WebviewWindow) -> Option<String> {
 
 /// Pick one or more folders (UI-W1-26 「浏览…」); [] when cancelled.
 #[tauri::command]
-pub async fn dialog_open_folders(window: WebviewWindow) -> Vec<String> {
-    let dialog = file_dialog(&window, &mt(TextKey::PickFolders, &[]), &[]);
+pub async fn dialog_open_folders(window: WebviewWindow, title: Option<String>) -> Vec<String> {
+    // the page names what the folders are for when it is not a scan (the hidden folders' Browse…)
+    let title = title.unwrap_or_else(|| mt(TextKey::PickFolders, &[]));
+    let dialog = file_dialog(&window, &title, &[]);
     let picked = answer(|tx| dialog.pick_folders(move |p| drop(tx.send(p))))
         .await
         .flatten();

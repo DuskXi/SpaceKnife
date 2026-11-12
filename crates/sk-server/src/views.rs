@@ -111,6 +111,56 @@ fn fallback_of(chain: &[NodeId], f: &dyn Fn(NodeId) -> Option<NodeId>, home: Nod
         .unwrap_or(0)
 }
 
+/// The settings every open view follows as they change ([`Views::apply_settings_live`]).
+struct LiveSettings {
+    min_element: f64,
+    sort_by_size: bool,
+    font_scale: f64,
+    aspect: f64,
+    origin: String,
+    hidden: Vec<String>,
+}
+
+impl LiveSettings {
+    fn read(st: &SettingsStore) -> Self {
+        Self {
+            min_element: setting_f64(st, "treemap.min_element"),
+            sort_by_size: st.get_bool("treemap.sort_by_size"),
+            font_scale: st.get_int("treemap.font_scale") as f64 / 100.0,
+            aspect: aspect_of(st.get_int("treemap.aspect")),
+            origin: st.get_str("treemap.flame_origin"),
+            hidden: folder_list(&st.get_str("treemap.hidden_folders")),
+        }
+    }
+
+    /// Whether the picture changed.
+    fn apply(&self, v: &mut View) -> bool {
+        // 「隐藏的文件夹」: the picture changes when any is shown (or would be hidden)
+        let hidden_changed = v.set_hidden_folders(self.hidden.clone());
+        let mut changed = (v.min_element, v.sort_by_size, v.font_scale, v.aspect)
+            != (
+                self.min_element,
+                self.sort_by_size,
+                self.font_scale,
+                self.aspect,
+            )
+            || hidden_changed;
+        v.min_element = self.min_element;
+        v.sort_by_size = self.sort_by_size;
+        v.font_scale = self.font_scale;
+        v.aspect = self.aspect;
+        let flame = vec![(
+            "origin".to_owned(),
+            sk_core::layout::api::OptValue::Str(self.origin.clone()),
+        )];
+        if v.visual_options.get("flame") != Some(&flame) {
+            v.visual_options.insert("flame".to_owned(), flame);
+            changed = changed || v.visual == "flame";
+        }
+        changed
+    }
+}
+
 /// What a view opens on: a scan or a ready comparison.
 pub struct Target {
     pub id: String,
@@ -420,36 +470,27 @@ impl ViewManager {
     /// Geometry settings re-lay out every open view at once (UI-W7-32); the flame graph's
     /// direction the views showing a flame graph.
     pub fn apply_settings_live(&self, server: &Arc<Server>, st: &SettingsStore) {
-        let min_element = setting_f64(st, "treemap.min_element");
-        let sort_by_size = st.get_bool("treemap.sort_by_size");
-        let font_scale = st.get_int("treemap.font_scale") as f64 / 100.0;
-        let aspect = aspect_of(st.get_int("treemap.aspect"));
-        let origin = st.get_str("treemap.flame_origin");
-        let hidden = folder_list(&st.get_str("treemap.hidden_folders"));
+        let live = LiveSettings::read(st);
         for host in self.all() {
-            let changed = {
-                let Some(mut v) = host.view.try_lock_for(Duration::from_millis(200)) else {
-                    continue;
-                };
-                // 「隐藏的文件夹」: the picture changes when any is shown (or would be hidden)
-                let hidden_changed = v.set_hidden_folders(hidden.clone());
-                let mut changed = (v.min_element, v.sort_by_size, v.font_scale, v.aspect)
-                    != (min_element, sort_by_size, font_scale, aspect)
-                    || hidden_changed;
-                v.min_element = min_element;
-                v.sort_by_size = sort_by_size;
-                v.font_scale = font_scale;
-                v.aspect = aspect;
-                let flame = vec![(
-                    "origin".to_owned(),
-                    sk_core::layout::api::OptValue::Str(origin.clone()),
-                )];
-                if v.visual_options.get("flame") != Some(&flame) {
-                    v.visual_options.insert("flame".to_owned(), flame);
-                    changed = changed || v.visual == "flame";
-                }
-                changed
+            let Some(mut v) = host.view.try_lock_for(Duration::from_millis(200)) else {
+                // busy drawing (a large scan): applied once it is free, with the settings of that
+                // moment, so that a later change is never undone by this one
+                let (srv, h) = (server.clone(), host.clone());
+                server.rt.spawn(async move {
+                    let (s2, h2) = (srv.clone(), h.clone());
+                    let changed = tokio::task::spawn_blocking(move || {
+                        LiveSettings::read(&s2.settings).apply(&mut h2.view.lock())
+                    })
+                    .await
+                    .unwrap_or(false);
+                    if changed {
+                        srv.views.repaint(&h, "settings", false).await;
+                    }
+                });
+                continue;
             };
+            let changed = live.apply(&mut v);
+            drop(v);
             if changed {
                 self.spawn_repaint(server, &host, "settings", false);
             }

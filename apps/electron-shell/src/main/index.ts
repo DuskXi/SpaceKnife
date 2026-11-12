@@ -267,8 +267,9 @@ function registerIpc(): void {
     else console.warn(`[shell] not opening ${String(url)}: not a page of the project (GitHub, the website)`);
   });
   ipcMain.handle("sk:installUpdate", (_e, path: unknown, how: unknown) => installUpdate(String(path), how === "classic" ? "classic" : "seamless"));
-  ipcMain.handle("sk:openFolders", async () => {
-    const opts = { title: mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
+  ipcMain.handle("sk:openFolders", async (_e, title: unknown) => {
+    // the page names what the folders are for when it is not a scan (the hidden folders' Browse…)
+    const opts = { title: typeof title === "string" && title ? title : mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return res.canceled ? [] : res.filePaths;
   });
