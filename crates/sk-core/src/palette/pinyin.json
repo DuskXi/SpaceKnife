@@ -32,6 +32,7 @@
  "显示/隐藏可用空间": ["xian", "shi", "/", "yin", "cang", "ke", "yong", "kong", "jian"],
  "显示/隐藏回收站": ["xian", "shi", "/", "yin", "cang", "hui", "shou", "zhan"],
  "显示/隐藏未知空间": ["xian", "shi", "/", "yin", "cang", "wei", "zhi", "kong", "jian"],
+ "显示/隐藏设置里列出的文件夹": ["xian", "shi", "/", "yin", "cang", "she", "zhi", "li", "lie", "chu", "de", "wen", "jian", "jia"],
  "暂停扫描": ["zan", "ting", "sao", "miao"],
  "本机磁盘": ["ben", "ji", "ci", "pan"],
  "查看更新": ["cha", "kan", "geng", "xin"],

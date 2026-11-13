@@ -77,7 +77,7 @@ export async function tauriApi(): Promise<SkApi> {
     },
     dialog: {
       openSnapshot: () => invoke<string | null>("dialog_open_snapshot"),
-      openFolders: () => invoke<string[]>("dialog_open_folders"),
+      openFolders: (title?: string) => invoke<string[]>("dialog_open_folders", { title: title ?? null }),
       openFile: (options: FileDialogOptions) => invoke<string | null>("dialog_open_file", { options }),
       saveFile: (options: FileDialogOptions & { defaultName: string }) => invoke<string | null>("dialog_save_file", { options }),
     },

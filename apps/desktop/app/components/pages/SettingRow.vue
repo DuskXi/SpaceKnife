@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import FolderList from "@/components/pages/FolderList.vue";
 import SettingControl from "@/components/pages/SettingControl.vue";
 import { t } from "@/lib/i18n";
 import { dependsOk, markOnce, type SettingValue } from "@/lib/settingsPages";
@@ -23,7 +24,7 @@ const save = (v: SettingValue) => void updateSettings({ [props.meta.key]: v });
 </script>
 
 <template>
-  <div :id="id" :class="['set-row', { disabled }]">
+  <div :id="id" :class="['set-row', { disabled, wide: meta.control === 'folders' }]">
     <div class="set-text">
       <div class="set-name">
         {{ name[0] }}<mark v-if="name[1]">{{ name[1] }}</mark>{{ name[2] }}
@@ -34,7 +35,8 @@ const save = (v: SettingValue) => void updateSettings({ [props.meta.key]: v });
       <div v-if="meta.applies === 'new_views' && meta.enabled" class="set-note subtle">{{ t("只影响之后新开的视图") }}</div>
     </div>
     <div class="set-control">
-      <SettingControl :meta="meta" :value="value" :disabled="disabled" :described-by="`${id}-desc`" @save="save" />
+      <FolderList v-if="meta.control === 'folders'" :value="String(value ?? '')" :label="meta.name" :disabled="disabled" :described-by="`${id}-desc`" @save="save" />
+      <SettingControl v-else :meta="meta" :value="value" :disabled="disabled" :described-by="`${id}-desc`" @save="save" />
     </div>
   </div>
 </template>

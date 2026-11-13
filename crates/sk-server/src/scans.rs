@@ -365,9 +365,11 @@ impl ScanHandle {
         Ok(())
     }
 
-    /// The scan root holding `node`.
+    /// The scan root holding `node`. Read recursively: a caller may hold the roots already, and a
+    /// plain read waits behind a queued writer (the monitor updating free space), which waits for
+    /// that caller.
     pub fn root_of(&self, nodes: &Nodes, node: NodeId) -> Option<RootInfo> {
-        let roots = self.roots.read();
+        let roots = self.roots.read_recursive();
         let chain: Vec<NodeId> = std::iter::once(node).chain(nodes.ancestors(node)).collect();
         roots.iter().find(|r| chain.contains(&r.node)).cloned()
     }

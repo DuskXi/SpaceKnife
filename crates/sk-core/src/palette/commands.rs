@@ -64,6 +64,10 @@ pub struct ViewFacts {
     pub show_free: bool,
     pub show_unknown: bool,
     pub show_trash: bool,
+    /// the folders of 「要隐藏的文件夹」 are taken out of the picture
+    pub hide_folders: bool,
+    /// how many of them the scan holds
+    pub hidden_folders: u32,
 }
 
 /// Where the palette was opened.
@@ -194,6 +198,13 @@ fn need_trash_view(c: &Context) -> Option<String> {
         None => reason("需要先完成扫描"),
         Some(v) if v.has_trash => None,
         Some(_) => reason("这次扫描里没有回收站"),
+    }
+}
+fn need_hidden_folders_view(c: &Context) -> Option<String> {
+    match &c.view {
+        None => reason("需要先完成扫描"),
+        Some(v) if v.hidden_folders > 0 => None,
+        Some(_) => reason("这次扫描里没有设置里列出的文件夹"),
     }
 }
 /// A view of the scan itself: a comparison's view shows changes, its folders are not the scan's.
@@ -382,6 +393,11 @@ fn status_trash(c: &Context) -> String {
     c.view
         .as_ref()
         .map_or_else(String::new, |v| shown_hidden(v.show_trash))
+}
+fn status_hidden_folders(c: &Context) -> String {
+    c.view
+        .as_ref()
+        .map_or_else(String::new, |v| shown_hidden(!v.hide_folders))
 }
 fn status_basket(c: &Context) -> String {
     if c.basket == 0 {
@@ -1050,6 +1066,24 @@ const DEFS: &[Def] = &[
         needs: &[need_flame_polar],
         status: Some(pick_flame_polar),
         typed_only: true,
+        ..D
+    },
+    // last: the commands before it keep their place in the list (tests/parity's goldens)
+    Def {
+        id: "view.toggle_hidden_folders",
+        name: "显示/隐藏设置里列出的文件夹",
+        icon: "eyeOff",
+        keys: &["H"],
+        aliases: &[
+            "hidden folders",
+            "hide folders",
+            "exclude",
+            "ignore",
+            "隐藏文件夹",
+            "忽略",
+        ],
+        needs: &[need_hidden_folders_view],
+        status: Some(status_hidden_folders),
         ..D
     },
 ];

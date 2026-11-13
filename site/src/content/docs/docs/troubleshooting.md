@@ -124,6 +124,10 @@ Every 15 seconds the backend compares its memory with what the open scans need. 
 
 ## Updates
 
+### Windows: 0.3.5 stops responding after a theme change
+
+On Windows, SpaceKnife 0.3.5 stops responding when you switch **Settings › Appearance › Theme** between **Light**, **Dark** and **Match system** and the window's colors really change. It then freezes again at every start, so the update badge can't be reached. End SpaceKnife in Task Manager and download 0.3.6 or later from the [Releases page](https://github.com/DuskXi/SpaceKnife/releases): run the new installer over the installed version, or, for a portable copy, unpack the new zip and copy the old copy's `data` folder into it. The new version starts normally and keeps the theme you chose.
+
 ### "Can't start the update"
 
 **Seamless update** of a portable copy checks two things before it replaces anything. When either says no, nothing is changed: the copy goes on as it was, and SpaceKnife says **Can't start the update:** and why (from 0.3.5 on it stays on the update card; 0.3.4 shows it only for a moment).

@@ -87,6 +87,11 @@ fn run_mode(mode: &str, args: &[OsString]) -> i32 {
             },
         ),
         "exit5" => 5,
+        // the user takes a while to answer the prompt, then allows it
+        "late" => {
+            std::thread::sleep(Duration::from_millis(1500));
+            run_main_with(args, Hooks::default())
+        }
         "sleep" => {
             std::thread::sleep(Duration::from_secs(60));
             0
@@ -636,6 +641,49 @@ fn silent_helper_times_out() {
     });
     assert_eq!(err.code, "timeout", "{err:?}");
     assert!(t0.elapsed() < Duration::from_secs(15));
+}
+
+/// While a helper is being launched (waiting at the UAC prompt, say), asking for the live one
+/// does not wait for that launch: the drive list asks every few seconds, from the backend's threads.
+#[test]
+fn the_live_helper_is_asked_for_without_waiting_for_a_launch() {
+    let shared = Arc::new(SharedHelper::new(LaunchOptions {
+        connect_timeout: Some(Duration::from_secs(3)),
+        ..opts("silent")
+    }));
+    let launching = {
+        let s = shared.clone();
+        std::thread::spawn(move || s.get(false).map(|_| ()).unwrap_err().code)
+    };
+    std::thread::sleep(Duration::from_millis(500)); // the launch waits for the silent helper's hello
+    let t0 = Instant::now();
+    assert!(shared.current().is_none());
+    assert!(
+        t0.elapsed() < Duration::from_millis(500),
+        "current() waited {:?} for the launch",
+        t0.elapsed()
+    );
+    assert_eq!(launching.join().unwrap(), "timeout");
+}
+
+/// 「停止助手」 while a launch still waits for the user stops the helper once it is up, as it did
+/// when a close waited for the launch: it is not kept running.
+#[test]
+fn a_helper_stopped_while_it_is_launched_is_not_kept() {
+    let shared = Arc::new(SharedHelper::new(opts("late")));
+    let launching = {
+        let s = shared.clone();
+        std::thread::spawn(move || s.get(false).map(|_| ()))
+    };
+    std::thread::sleep(Duration::from_millis(400)); // the user has not answered yet
+    shared.close();
+    let err = launching.join().unwrap().unwrap_err();
+    assert_eq!(err.code, "closed", "{err:?}");
+    assert!(shared.current().is_none());
+    // a later request launches a new one as usual
+    let again = shared.get(false).unwrap();
+    assert!(again.alive());
+    shared.close();
 }
 
 #[test]

@@ -138,6 +138,7 @@ pub fn frame_info(view: &View, frame: &Frame, seq: u64, reason: &str) -> FrameIn
             dstat: r.dstat,
         }),
         generation: frame.generation,
+        hidden_folders: frame.hidden_folders,
     }
 }
 
@@ -156,6 +157,8 @@ pub fn view_state(view: &View, scan_id: &str) -> ViewState {
         show_unknown: view.show_unknown,
         show_trash: view.show_trash,
         has_trash: view.has_trash(),
+        hide_folders: view.hide_folders,
+        hidden_folders: view.hidden_folder_count(),
         visual: view.visual.clone(),
         color_mode: view.color_mode(),
         colors: view.colors(),

@@ -8,8 +8,8 @@
 // run spaceknife-cli with them, and with this process's terminal, instead of a window (cli.ts).
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -256,7 +256,7 @@ function registerIpc(): void {
   ipcMain.on("sk:setTheme", (_e, theme: unknown) => themes?.set(theme));
   // the system's theme changed (or themeSource did): the window's own background follows
   nativeTheme.on("updated", () => themes?.updated());
-  ipcMain.on("sk:openTerminal", (_e, dir: unknown) => openTerminal(dir));
+  ipcMain.on("sk:openTerminal", (_e, dir: unknown) => void openTerminal(dir));
   // one fixed settings pane, not a URL from the page (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
   ipcMain.on("sk:openFullDiskAccess", () => {
     if (process.platform === "darwin") void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles");
@@ -267,8 +267,9 @@ function registerIpc(): void {
     else console.warn(`[shell] not opening ${String(url)}: not a page of the project (GitHub, the website)`);
   });
   ipcMain.handle("sk:installUpdate", (_e, path: unknown, how: unknown) => installUpdate(String(path), how === "classic" ? "classic" : "seamless"));
-  ipcMain.handle("sk:openFolders", async () => {
-    const opts = { title: mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
+  ipcMain.handle("sk:openFolders", async (_e, title: unknown) => {
+    // the page names what the folders are for when it is not a scan (the hidden folders' Browse…)
+    const opts = { title: typeof title === "string" && title ? title : mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return res.canceled ? [] : res.filePaths;
   });
@@ -500,12 +501,14 @@ function unpack(file: string, into: string): Promise<void> {
   );
 }
 
-/** 「在终端中打开」: the first terminal of terminal.ts that starts, never through a shell. */
-function openTerminal(dir: unknown): void {
+/** 「在终端中打开」: the first terminal of terminal.ts that starts, never through a shell. The folder
+ * is looked at without blocking: a share that went away takes the main process (the window with
+ * it) for as long as the system waits for it. */
+async function openTerminal(dir: unknown): Promise<void> {
   if (typeof dir !== "string") return;
   let folder = false;
   try {
-    folder = statSync(dir).isDirectory();
+    folder = (await stat(dir)).isDirectory();
   } catch {
     // gone: nothing to open
   }

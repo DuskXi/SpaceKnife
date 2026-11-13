@@ -18,6 +18,7 @@ use std::ffi::OsString;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -883,7 +884,14 @@ fn reap(process: &mut dyn HelperProcess, grace: Duration) {
 /// prompts) again.
 pub struct SharedHelper {
     options: LaunchOptions,
+    /// held while a helper is launched: one launch at a time
+    launching: Mutex<()>,
+    /// held only for a moment: [`current`](Self::current) answers while a launch waits for the
+    /// user (the UAC prompt, polkit: up to minutes), and the backend's threads that ask (the drive
+    /// list every few seconds) don't wait with it
     client: Mutex<Option<Arc<HelperClient>>>,
+    /// counts [`close`](Self::close): a launch that waited for the user through one is not kept
+    closes: AtomicU64,
 }
 
 impl SharedHelper {
@@ -891,38 +899,59 @@ impl SharedHelper {
     pub fn new(options: LaunchOptions) -> Self {
         Self {
             options,
+            launching: Mutex::new(()),
             client: Mutex::new(None),
+            closes: AtomicU64::new(0),
         }
     }
 
-    /// The live helper, if any.
+    /// The live helper, if any (none while the first one is still being launched).
     pub fn current(&self) -> Option<Arc<HelperClient>> {
         self.client.lock().as_ref().filter(|c| c.alive()).cloned()
     }
 
     /// The live helper, or a newly launched one.
     pub fn get(&self, elevate: bool) -> Result<Arc<HelperClient>, HelperError> {
-        let mut slot = self.client.lock();
-        if let Some(c) = slot.as_ref()
-            && c.alive()
-            && (c.elevated() || !elevate)
-        {
-            return Ok(c.clone());
+        let _launching = self.launching.lock();
+        let usable = self
+            .client
+            .lock()
+            .as_ref()
+            .filter(|c| c.alive() && (c.elevated() || !elevate))
+            .cloned();
+        if let Some(c) = usable {
+            return Ok(c);
         }
-        if let Some(old) = slot.take() {
+        let old = self.client.lock().take();
+        if let Some(old) = old {
             old.close();
         }
         let opts = LaunchOptions {
             elevate,
             ..self.options.clone()
         };
+        let closes = self.closes.load(Ordering::SeqCst);
         let client = Arc::new(HelperClient::launch(opts)?);
+        // under the slot's lock, as `close` counts under it: kept, or stopped by a close
+        let mut slot = self.client.lock();
+        if self.closes.load(Ordering::SeqCst) != closes {
+            // 「停止助手」 while the user was still answering the prompt: stopped, not kept running
+            drop(slot);
+            client.close();
+            return Err(HelperError::unavailable(t("扫描助手已关闭"), "closed"));
+        }
         *slot = Some(client.clone());
         Ok(client)
     }
 
+    /// Stop the helper; one still being launched (waiting for the user) is stopped once it is up.
     pub fn close(&self) {
-        if let Some(c) = self.client.lock().take() {
+        let c = {
+            let mut slot = self.client.lock();
+            self.closes.fetch_add(1, Ordering::SeqCst);
+            slot.take()
+        };
+        if let Some(c) = c {
             c.close();
         }
     }

@@ -19,7 +19,7 @@ SpaceKnife comes with a command-line program, `spaceknife-cli`, built from the s
 | macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli` |
 | From source | `cargo run -p sk-server --bin spaceknife-cli -- <command>` in the repository |
 
-Up to 0.3.4 the command line was the backend program inside the app, `resources/backend/spaceknife-backend` (macOS: `Contents/Resources/backend/spaceknife-backend`). In 0.3.5 it is `spaceknife-cli`: `scan`, `run`, `snapshot` and `version` work as before, and `scan` prints what it printed, so scripts only need the new path. `schema` is gone (the protocol's JSON Schema is in the repository), and `headless` is new.
+Up to 0.3.4 the command line was the backend program inside the app, `resources/backend/spaceknife-backend` (macOS: `Contents/Resources/backend/spaceknife-backend`). From 0.3.5 on it is `spaceknife-cli`: `scan`, `run`, `snapshot` and `version` work as before, and `scan` prints what it printed, so scripts only need the new path. `schema` is gone (the protocol's JSON Schema is in the repository), and `headless` is new.
 
 The examples on this page write `spaceknife-cli`. Add the folder to your PATH, or make an alias:
 

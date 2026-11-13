@@ -157,6 +157,9 @@ export async function runCommand(id: string): Promise<void> {
     case "view.toggle_trash":
       if (st?.has_trash) await setViewSettings(viewId, { show_trash: !st.show_trash });
       return;
+    case "view.toggle_hidden_folders":
+      if (st && st.hidden_folders > 0) await setViewSettings(viewId, { hide_folders: !st.hide_folders });
+      return;
     case "view.detail_up":
       if (st) await setViewSettings(viewId, { detail: Math.min(15, st.detail + 1) });
       return;

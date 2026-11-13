@@ -138,7 +138,7 @@ const SCAN_GROUP_NOTE: &str = "限制扫描造成的磁盘读取占用";
 pub(crate) fn registry() -> Vec<Spec> {
     use SettingApplies::{NewViews, NextScan};
     use SettingCategory as C;
-    use SettingControl::{Color, Number, Segmented, Slider, Switch, Text};
+    use SettingControl::{Color, Folders, Number, Segmented, Slider, Switch, Text};
     let b = SettingValue::Bool;
     let i = SettingValue::Int;
     let s = |v: &str| SettingValue::Str(v.to_owned());
@@ -376,5 +376,10 @@ pub(crate) fn registry() -> Vec<Spec> {
             .unit("%")
             .applies(NextScan)
             .syn(&["memory", "ram", "mmap", "budget", "swap", "内存映射"]),
+        // ------------------------------------------------------------ 可视化 · 隐藏的文件夹
+        // last, so the settings already numbered keep their place (the meta list's order)
+        Spec::new("treemap.hidden_folders", C::Treemap, "隐藏的文件夹", "要隐藏的文件夹", "扫描视图里这些文件夹整个不占画面，其余的块放大填满；工具栏的「隐藏文件夹」（H）随时可以让它们回来。默认一个也没有", Folders, s(""))
+            .note("只影响画面：扫描到的数据、详情面板和各个列表都不变")
+            .syn(&["hide", "hidden", "exclude", "ignore", "skip", "whitelist", "blacklist", "忽略", "排除", "白名单", "黑名单", "不扫描"]),
     ]
 }

@@ -18,8 +18,8 @@ describe("toolbar words", () => {
   });
 
   it("shows the recycle bin switch only when the scan holds one, named for the system", () => {
-    expect(spaceSwitches({ has_trash: false }).map((s) => s.id)).toEqual(["free", "unknown"]);
-    expect(spaceSwitches({ has_trash: true }).map((s) => s.id)).toEqual(["free", "unknown", "trash"]);
+    expect(spaceSwitches({ has_trash: false, hidden_folders: 0 }).map((s) => s.id)).toEqual(["free", "unknown"]);
+    expect(spaceSwitches({ has_trash: true, hidden_folders: 0 }).map((s) => s.id)).toEqual(["free", "unknown", "trash"]);
     const bin = SPACE_SWITCHES[2]!;
     vi.stubGlobal("window", { sk: { platform: "darwin" } });
     expect(bin.label()).toBe("废纸篓");
@@ -28,6 +28,16 @@ describe("toolbar words", () => {
     const st = { show_free: true, show_unknown: false, show_trash: false } as ViewState;
     expect(SPACE_SWITCHES[0]!.flip(st)).toEqual({ show_free: false });
     expect(SPACE_SWITCHES[1]!.on(st)).toBe(false);
+  });
+
+  it("offers 「隐藏文件夹」 only when the scan holds a folder of the list, pressed while they are hidden", () => {
+    expect(spaceSwitches({ has_trash: false, hidden_folders: 2 }).map((s) => s.id)).toEqual(["free", "unknown", "folders"]);
+    const folders = SPACE_SWITCHES.find((s) => s.id === "folders")!;
+    expect([folders.key, folders.icon, folders.label()]).toEqual(["H", "eyeOff", "隐藏文件夹"]);
+    expect(folders.title({ hidden_folders: 2 })).toBe("隐藏设置里列出的 2 个文件夹（H）");
+    const st = { hide_folders: true, hidden_folders: 2 } as ViewState;
+    expect(folders.on(st)).toBe(true);
+    expect(folders.flip(st)).toEqual({ hide_folders: false });
   });
 
   it("labels breadcrumb segments", () => {

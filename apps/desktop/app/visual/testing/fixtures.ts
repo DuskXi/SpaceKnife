@@ -132,6 +132,7 @@ export function frameInfo(patch: Partial<FrameInfo> = {}): FrameInfo {
     generation: 1,
     geometry: null,
     height: 100,
+    hidden_folders: 0,
     layout: "drawlist.v1",
     layout_ms: 0.4,
     reason: "open",

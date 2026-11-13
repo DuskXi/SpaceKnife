@@ -1,7 +1,7 @@
 {
   "name": "spaceknife-desktop",
   "productName": "SpaceKnife",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "description": "SpaceKnife — see what fills your drives (Tauri + Nuxt desktop app)",
   "author": {

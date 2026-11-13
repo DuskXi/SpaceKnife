@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use sk_core::filter::classes::ClassMap;
 use sk_core::layout::registry;
-use sk_core::settings::SettingsStore;
+use sk_core::settings::{SettingsStore, folder_list};
 use sk_core::tr;
 use sk_core::view::state::BASELINE;
 use sk_core::view::{
@@ -109,6 +109,56 @@ fn fallback_of(chain: &[NodeId], f: &dyn Fn(NodeId) -> Option<NodeId>, home: Nod
         .find_map(|&n| f(n))
         .or_else(|| f(home))
         .unwrap_or(0)
+}
+
+/// The settings every open view follows as they change ([`Views::apply_settings_live`]).
+struct LiveSettings {
+    min_element: f64,
+    sort_by_size: bool,
+    font_scale: f64,
+    aspect: f64,
+    origin: String,
+    hidden: Vec<String>,
+}
+
+impl LiveSettings {
+    fn read(st: &SettingsStore) -> Self {
+        Self {
+            min_element: setting_f64(st, "treemap.min_element"),
+            sort_by_size: st.get_bool("treemap.sort_by_size"),
+            font_scale: st.get_int("treemap.font_scale") as f64 / 100.0,
+            aspect: aspect_of(st.get_int("treemap.aspect")),
+            origin: st.get_str("treemap.flame_origin"),
+            hidden: folder_list(&st.get_str("treemap.hidden_folders")),
+        }
+    }
+
+    /// Whether the picture changed.
+    fn apply(&self, v: &mut View) -> bool {
+        // 「隐藏的文件夹」: the picture changes when any is shown (or would be hidden)
+        let hidden_changed = v.set_hidden_folders(self.hidden.clone());
+        let mut changed = (v.min_element, v.sort_by_size, v.font_scale, v.aspect)
+            != (
+                self.min_element,
+                self.sort_by_size,
+                self.font_scale,
+                self.aspect,
+            )
+            || hidden_changed;
+        v.min_element = self.min_element;
+        v.sort_by_size = self.sort_by_size;
+        v.font_scale = self.font_scale;
+        v.aspect = self.aspect;
+        let flame = vec![(
+            "origin".to_owned(),
+            sk_core::layout::api::OptValue::Str(self.origin.clone()),
+        )];
+        if v.visual_options.get("flame") != Some(&flame) {
+            v.visual_options.insert("flame".to_owned(), flame);
+            changed = changed || v.visual == "flame";
+        }
+        changed
+    }
 }
 
 /// What a view opens on: a scan or a ready comparison.
@@ -420,32 +470,27 @@ impl ViewManager {
     /// Geometry settings re-lay out every open view at once (UI-W7-32); the flame graph's
     /// direction the views showing a flame graph.
     pub fn apply_settings_live(&self, server: &Arc<Server>, st: &SettingsStore) {
-        let min_element = setting_f64(st, "treemap.min_element");
-        let sort_by_size = st.get_bool("treemap.sort_by_size");
-        let font_scale = st.get_int("treemap.font_scale") as f64 / 100.0;
-        let aspect = aspect_of(st.get_int("treemap.aspect"));
-        let origin = st.get_str("treemap.flame_origin");
+        let live = LiveSettings::read(st);
         for host in self.all() {
-            let changed = {
-                let Some(mut v) = host.view.try_lock_for(Duration::from_millis(200)) else {
-                    continue;
-                };
-                let mut changed = (v.min_element, v.sort_by_size, v.font_scale, v.aspect)
-                    != (min_element, sort_by_size, font_scale, aspect);
-                v.min_element = min_element;
-                v.sort_by_size = sort_by_size;
-                v.font_scale = font_scale;
-                v.aspect = aspect;
-                let flame = vec![(
-                    "origin".to_owned(),
-                    sk_core::layout::api::OptValue::Str(origin.clone()),
-                )];
-                if v.visual_options.get("flame") != Some(&flame) {
-                    v.visual_options.insert("flame".to_owned(), flame);
-                    changed = changed || v.visual == "flame";
-                }
-                changed
+            let Some(mut v) = host.view.try_lock_for(Duration::from_millis(200)) else {
+                // busy drawing (a large scan): applied once it is free, with the settings of that
+                // moment, so that a later change is never undone by this one
+                let (srv, h) = (server.clone(), host.clone());
+                server.rt.spawn(async move {
+                    let (s2, h2) = (srv.clone(), h.clone());
+                    let changed = tokio::task::spawn_blocking(move || {
+                        LiveSettings::read(&s2.settings).apply(&mut h2.view.lock())
+                    })
+                    .await
+                    .unwrap_or(false);
+                    if changed {
+                        srv.views.repaint(&h, "settings", false).await;
+                    }
+                });
+                continue;
             };
+            let changed = live.apply(&mut v);
+            drop(v);
             if changed {
                 self.spawn_repaint(server, &host, "settings", false);
             }
@@ -739,6 +784,7 @@ pub fn new_view_settings(st: &SettingsStore, caps: &[String], compare: bool) -> 
         show_free: st.get_bool("treemap.show_free"),
         show_unknown: st.get_bool("treemap.show_unknown"),
         show_trash: st.get_bool("treemap.show_trash"),
+        hidden_folders: folder_list(&st.get_str("treemap.hidden_folders")),
         visual,
         color_mode,
         colors,
@@ -813,6 +859,9 @@ pub fn apply_settings(view: &mut View, s: &ViewSettingsParams, caps: &[String]) 
     if let Some(b) = s.show_trash {
         view.show_trash = b;
     }
+    if let Some(b) = s.hide_folders {
+        view.hide_folders = b;
+    }
     if let Some(c) = &s.colors {
         view.set_colors(c);
     }
@@ -839,13 +888,14 @@ pub fn apply_settings(view: &mut View, s: &ViewSettingsParams, caps: &[String]) 
 /// What `view.set` can change: a frame is sent when any of it did.
 pub fn settings_key(v: &View) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{}",
         v.detail,
         v.min_element,
         v.sort_by_size,
         v.show_free,
         v.show_unknown,
         v.show_trash,
+        v.hide_folders,
         v.visual,
         v.color_mode().as_str(),
         v.filter_mode.as_str(),

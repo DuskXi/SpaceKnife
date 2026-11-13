@@ -49,6 +49,7 @@ describe("electronApi", () => {
     expect([sk.platform, sk.version, sk.host, sk.justUpdated, sk.remote]).toEqual(["win32", "0.3.5", "app", true, null]);
     expect(sk.versions).toEqual({ runtime: "Electron", runtimeVersion: "44.9.3", webview: "Chromium 146" });
     expect(await sk.dialog.openFolders()).toEqual(["D:\\x"]);
+    await sk.dialog.openFolders("Choose folders to hide");
     await sk.dialog.saveFile({ title: "Export", filters: [], defaultName: "a.csv" });
     await sk.update.install("C:\\u\\SpaceKnife-0.3.6-Setup-x64.exe", "seamless");
     sk.window.toggleMaximize();
@@ -56,6 +57,7 @@ describe("electronApi", () => {
     sk.setTheme("dark");
     expect(calls).toEqual([
       ["invoke", "sk:openFolders"],
+      ["invoke", "sk:openFolders", "Choose folders to hide"],
       ["invoke", "sk:saveFile", { title: "Export", filters: [], defaultName: "a.csv" }],
       ["invoke", "sk:installUpdate", "C:\\u\\SpaceKnife-0.3.6-Setup-x64.exe", "seamless"],
       ["send", "sk:win", "toggleMaximize"],

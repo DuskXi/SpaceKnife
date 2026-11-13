@@ -94,7 +94,7 @@ The treemap has no such element: its zoom root is the whole view.
 
 What switching keeps and what it doesn't:
 
-- **Kept**: the zoom root (also a zoom into a "small items" block), back and forward history, the selection, the filter and its dim or hide mode, the detail level and the free and unknown space switches.
+- **Kept**: the zoom root (also a zoom into a "small items" block), back and forward history, the selection, the filter and its dim or hide mode, the detail level and the free space, unknown space, Recycle Bin and Hide folders switches.
 - **Changed**: the coloring becomes the one the target visualization last used (see [Coloring](#coloring)).
 - **Closed**: the hover card and the context menu.
 - **Not recorded in history**: <kbd>Backspace</kbd> never takes you back to the previous visualization.
@@ -104,7 +104,7 @@ The two pictures cross-fade for 200 ms; with **Reduce motion** on they swap at o
 A visualization this window can't show stays on the toolbar, disabled, and its tooltip says why. <kbd>V</kbd> skips it.
 
 :::note[Narrow windows]
-When the window is too narrow for the whole toolbar, the groups it has no room for move into the **More** menu (**…**) next to them. First the **Free space** and **Unknown space** chips shrink to their swatch, then the **Coloring** group and the chips move into the menu, and the **Visualization** group goes last. The keys work as always.
+When the window is too narrow for the whole toolbar, the groups it has no room for move into the **More** menu (**…**) next to them. First the switch chips shrink to their swatch or icon, then the **Coloring** group and the chips move into the menu, and the **Visualization** group goes last. The keys work as always.
 :::
 
 Every tab and every split pane has its own visualization. New views start with **Settings › Appearance › Visualization › Default visualization for new views**.
@@ -121,10 +121,12 @@ The toolbar's **Coloring** group has four modes. <kbd>C</kbd> steps through them
 |---|---|---|---|
 | File classes | **Classes** | **Coloring: file classes** | The file class, found by the extension: Video, Pictures, Audio, Archives, Programs, Documents, Games, Code, Data, and Other for the rest; the files in games, projects and other recognised folders take the folder's class. Edit the classes in **Settings › File classes**. |
 | Flat | **Flat** | **Coloring: flat** | Nothing: every file has the same neutral color, so only size and structure remain |
-| Date modified | **Time** | **Coloring: date modified** | How recently a file changed, in five bands: under a day, a week, a month, a year, and older |
+| Date modified | **Time** | **Coloring: date modified** | How long ago a file was last modified, in five bands: Under 1 day, 1 day – 1 week, 1 week – 1 month, 1 month – 1 year, Over 1 year. A file without a modification time counts as over 1 year. |
 | Top-level branch | **Branch** | **Coloring: top-level branch** | Which top-level item a block belongs to |
 
 The four **Coloring: …** commands only appear when you type in the palette; **Cycle coloring** (<kbd>C</kbd>) is always there.
+
+Rest the pointer on **Classes**, **Flat**, **Time** or **Branch**, or move the keyboard focus to one, and the legend of that coloring opens below it: **Classes** lists every file class with its color, **Time** the five bands, **Flat** says that every file has one color and only the sizes compare, and **Branch** lists the top-level branches here, largest first (up to 8; the rest are counted). The first legend opens after a short pause (about 350 ms; at once with the keyboard), moving on to another mode switches it at once, and <kbd>Esc</kbd> closes it. Right-click a mode to open the settings where its colors are set: **File classes** for **Classes**, **Appearance** for the others. The hover card also says what the color of the block under the pointer stands for (see [Hover cards](../navigation/#hover-cards)).
 
 More about the modes:
 
@@ -205,6 +207,18 @@ Choose **Moving**, **Still** or **Off** in **Settings › Appearance › Treemap
 
 To leave the bin out of the picture, press <kbd>R</kbd> or click the **Recycle Bin** chip next to **Unknown space** (**Trash** on macOS). The chip is there only when the scan holds a bin, and not in comparisons. With it off, the bin takes no room and the rest grows to fill the view. Its bytes are not counted as unknown space, and a view zoomed into the bin keeps showing it. New views follow **Settings › Visualization › Geometry › Show the Recycle Bin in new views**.
 
+## Hidden folders
+
+Some folders are big and you already know why: your music, your movies, a game library. List them in **Settings › Visualization › Hidden folders** and they take no room in the picture, so the other blocks grow to fill it. Nothing is listed by default: type a folder's full path and press <kbd>Enter</kbd> (or click **Add**), or click **Browse…** in the app.
+
+- When a scan holds a folder of the list, **Hide folders** appears among the switch chips in the toolbar, also while the scan runs. Its tooltip says how many of the listed folders the scan holds. Click it, press <kbd>H</kbd> or run **Show/hide the folders listed in settings** in the command palette to bring the folders back; do it again to hide them.
+- A new view opens with them hidden. A new split pane takes the switch from the focused pane, as it does the Recycle Bin's.
+- Zoomed into a hidden folder, or into a folder inside one, it shows as usual; folders listed inside it stay hidden. Locating a hidden folder from a list (the results list, or **Show in treemap** in the log panel) zooms into it.
+- The root of a scan is never hidden.
+- Only the picture changes: the scan, the details panel, exports and the lists still count everything. The hover card of a block that is partly in a hidden folder says how much of it is in hidden folders and not drawn.
+- It has no effect in a snapshot comparison.
+- On Windows and macOS the case of a path doesn't matter; on Linux it does.
+
 ## While a scan runs: the breathing outline
 
 The picture fills in while the scan runs, several times a second. You can select, hover, zoom, go back, change the level and switch the visualization the whole time.
@@ -236,7 +250,7 @@ When you compare a scan with a snapshot (see [Snapshots and comparison](../snaps
 
 ## Settings that shape the picture
 
-The defaults, the initial detail level and the two "in new views" switches only affect views opened afterwards; everything else applies at once to the open views. See the [Settings reference](../settings/) for the full list.
+The defaults, the initial detail level and the "in new views" switches only affect views opened afterwards; everything else applies at once to the open views. See the [Settings reference](../settings/) for the full list.
 
 | Setting | Where | Effect |
 |---|---|---|
@@ -253,6 +267,7 @@ The defaults, the initial detail level and the two "in new views" switches only 
 | Initial detail level | Visualization › Geometry | Level of new views |
 | Show free space / unknown space in new views | Visualization › Geometry | Start values of <kbd>F</kbd> and <kbd>U</kbd> |
 | Show the Recycle Bin in new views | Visualization › Geometry | Start value of <kbd>R</kbd> |
+| Folders to hide | Visualization › Hidden folders | Folders left out of the picture while **Hide folders** (<kbd>H</kbd>) is on; new views start with it on |
 | Sort by size | Visualization › Geometry | Largest first, or by name |
 | Flame graph direction | Visualization › Flame graph | Root at bottom or at top |
 | Zoom animation duration | Visualization › Animation | 0 to 600 ms, 250 by default; 0 turns it off |
@@ -268,6 +283,7 @@ The defaults, the initial detail level and the two "in new views" switches only 
 | <kbd>F</kbd> | Show or hide free space |
 | <kbd>U</kbd> | Show or hide unknown space |
 | <kbd>R</kbd> | Show or hide the Recycle Bin (when the scan holds one) |
+| <kbd>H</kbd> | Hide or show the folders listed in settings (when the scan holds one of them) |
 | Double-click, <kbd>Enter</kbd> | Zoom in, also into merged blocks |
 
 Single-letter keys don't work while you type in a text field, and a focused drop-down list keeps <kbd>C</kbd> and <kbd>V</kbd> for itself. On macOS you can press <kbd>⌘</kbd> wherever this page says <kbd>Ctrl</kbd>. All keys are listed in [Keyboard shortcuts](../shortcuts/); zooming and the rest of the navigation are in [Navigating the picture](../navigation/).

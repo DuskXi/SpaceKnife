@@ -4,6 +4,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import ColorModes from "@/components/shell/ColorModes.vue";
 import ComparePicker from "@/components/shell/ComparePicker.vue";
 import CompareDirection from "@/components/shell/CompareDirection.vue";
 import CompareExit from "@/components/shell/CompareExit.vue";
@@ -16,12 +17,12 @@ import { OVERVIEW } from "@/help/docs";
 import { helpTitle } from "@/help/links";
 import { t } from "@/lib/i18n";
 import { PAGES } from "@/lib/settingsPages";
-import { colorLabel, CRUMBS_MIN, spaceSwitches } from "@/lib/toolbar";
+import { CRUMBS_MIN, spaceSwitches } from "@/lib/toolbar";
 import { collapse } from "@/lib/toolbarFit";
 import { setViewSettings, settingsGo, settingsHistory, toggleSplit, viewCall } from "@/state/actions";
 import { helpGo, helpHistory } from "@/state/help";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
-import { COLOR_MODES, levelsThatFit } from "@/state/visuals";
+import { levelsThatFit } from "@/state/visuals";
 
 import FilterBox from "./FilterBox.vue";
 import ToolbarButton from "./ToolbarButton.vue";
@@ -59,6 +60,7 @@ const shown = computed(() =>
     cmp.value ? "compare" : "",
     split.value ? "split" : "",
     st.value?.has_trash ? "trash" : "",
+    st.value?.hidden_folders ? "folders" : "",
     levelsThatFit(view.value?.info, st.value?.detail ?? 0) ?? "",
     (view.value?.info?.breadcrumb ?? []).map((c) => c.label).join("/"),
   ].join("|"),
@@ -127,19 +129,7 @@ const fold = computed(() => collapse(level.value));
       <template v-if="scanTab && st && viewId && !cmp">
         <ToolbarVisuals v-if="!fold.visualInMenu" :view-id="viewId" :st="st" />
         <ToolbarDetail :view-id="viewId" :st="st" :compact="fold.compact" />
-        <div v-if="!fold.coloringInMenu" class="segmented" role="radiogroup" :aria-label="t('配色')" :title="t('配色（C）')">
-          <span class="seg-icon"><Icon name="palette" :size="14" /></span>
-          <button
-            v-for="m in COLOR_MODES"
-            :key="m"
-            role="radio"
-            :aria-checked="st.color_mode === m"
-            :class="{ on: st.color_mode === m }"
-            @click="setViewSettings(viewId, { color_mode: m })"
-          >
-            {{ colorLabel(m) }}
-          </button>
-        </div>
+        <ColorModes v-if="!fold.coloringInMenu" :view-id="viewId" :st="st" />
         <!-- the recycle bin's only when the scan holds one (and not in a comparison) -->
         <template v-if="!fold.chipsInMenu">
           <button
@@ -148,10 +138,11 @@ const fold = computed(() => collapse(level.value));
             :class="['chip', { on: s.on(st), 'swatch-only': fold.chipSwatches }]"
             :aria-pressed="s.on(st)"
             :aria-label="s.label()"
-            :title="s.title()"
+            :title="s.title(st)"
             @click="setViewSettings(viewId, s.flip(st))"
           >
-            <span :class="['chip-swatch', s.id]" />
+            <Icon v-if="s.icon" class="chip-icon" :name="s.icon" :size="12" />
+            <span v-else :class="['chip-swatch', s.id]" />
             <template v-if="!fold.chipSwatches">{{ s.label() }}</template>
           </button>
         </template>

@@ -1,7 +1,7 @@
 // The pure helpers of the hover cards (shell/HoverCard in the Electron renderer, also used by the
 // compare card): what a hovered row is, what the card keeps clear of and where it goes.
 
-import type { FilterVocab } from "@/protocol/generated";
+import type { FilterInfo, FilterVocab, ViewState } from "@/protocol/generated";
 import { pointerBox } from "@/visual/hit";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 
@@ -53,4 +53,20 @@ export function placeCompareCard(r: Box, card: { w: number; h: number }, bounds:
  * renders `slot` parts as the named node. */
 export function splitPlaceholders(text: string): { text: string; slot: boolean }[] {
   return text.split(/\{(\w+)\}/).map((part, i) => ({ text: part, slot: i % 2 === 1 }));
+}
+
+/** How much of a folder the picture leaves out because it is in hidden folders (「隐藏文件夹」 on,
+ *  any in the scan): the hover card's share and counts are the whole folder's, its size the drawn
+ *  part. 0 for a file, without hidden folders, and under a filter that hides (it draws its own
+ *  sizes). With 「回收站」 off as well, the bin's bytes are in it too. */
+export function hiddenGap(
+  st: Pick<ViewState, "hide_folders" | "hidden_folders"> | undefined,
+  filter: FilterInfo | null | undefined,
+  dir: boolean,
+  alloc: number | undefined,
+  drawn: number,
+): number {
+  if (!st || !dir || alloc === undefined || !st.hide_folders || st.hidden_folders <= 0) return 0;
+  if (filter?.active && filter.mode === "hide") return 0;
+  return Math.max(0, alloc - drawn);
 }

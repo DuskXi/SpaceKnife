@@ -264,7 +264,7 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
 
 Rust 后端合进来时还没补上的（原来记在 `crates/PORTING-BACKEND.md` 的「Known gaps」）：
 
-- [ ] macOS 的 NVMe 健康记录：见「本机统计页面」，0.3.6 移植，在 Intel Mac 上实测
+- [ ] macOS 的 NVMe 健康记录：见「本机统计页面」，0.3.6 之后的版本移植（2026-11-12 定：不进 0.3.6），在 Intel Mac 上实测
 - [ ] `ops::names` 仍是文件操作模块自己的一份扫描名字检查（`ops/names.rs`、`ops/win.rs` 里的 `TODO(scan)`），和扫描器的合成一份
 - [ ] 删除篮里不是合法 Unicode 的名字：按真实路径（`BasketItem::os_path` / `os_members`）找到并执行，显示的名字相同的两个兄弟也是两项；但占用检测（Restart Manager，按显示的路径）说不出是谁占着这类文件
 
@@ -302,7 +302,7 @@ Rust 后端合进来时还没补上的（原来记在 `crates/PORTING-BACKEND.md
 - [x] 界面：单独的标签页（`pages/MachinePage.tsx`），每块盘一张卡片，盘上的卷按盘上顺序；链路比盘能跑的慢时用一行说明（不弹窗）
 - [ ] macOS 只用记录的数据形状测过（`system_profiler` 的键名随系统版本变化，比如 macOS 15 的 `SPUSBHostDataType`）：在真机上核对 NVMe / SATA / USB 链路
 - [x] 磁盘自己的记录（0.3.3）：Windows 不提权读 NVMe 健康日志 / ATA 设备统计日志；Linux 点「用管理员权限读取…」后由提权助手读（NVMe 管理命令、SG_IO 的 ATA 直通）；macOS 经 IOKit 的 NVMe SMART 接口读 NVMe 盘（不提权）只到 0.3.4，见下一项
-- [ ] macOS 的 NVMe 健康记录移植到 Rust（0.3.6）：0.3.5 的 `sk_core::disks::mac_smart` 是空壳（IOKit 的 NVMe SMART user client 那段 FFI 没有移植），Mac 上「本机磁盘」读不到 NVMe 盘自己的记录（累计读写、温度、通电时间、剩余寿命），0.3.5 的发布说明已写进已知限制。移植后在 Intel Mac 上实测（见下一项）
+- [ ] macOS 的 NVMe 健康记录移植到 Rust（0.3.6 之后的版本；2026-11-12 定：不进 0.3.6）：0.3.5 的 `sk_core::disks::mac_smart` 是空壳（IOKit 的 NVMe SMART user client 那段 FFI 没有移植），Mac 上「本机磁盘」读不到 NVMe 盘自己的记录（累计读写、温度、通电时间、剩余寿命），0.3.5 和 0.3.6 的发布说明都写进了已知限制。移植后在 Intel Mac 上实测（见下一项）
 - [ ] macOS 的 NVMe SMART 在 Intel Mac 上实测（0.3.4 的 `disks/mac_smart.py` 没在真机上跑过；Rust 版移植之后一起测）：数值和 smartctl / DriveDx 对一下；另一个程序（Stats、DriveDx）占着接口时安静地读不到；连读约 20 次看有没有泄漏；正式签名（Developer ID、hardened runtime、不加 disable-library-validation）的包里也读得到。有机会在 Apple 芯片的 Mac 上跑一次
 - [ ] macOS 的 SATA 盘（iMac 2019 的机械盘 / Fusion Drive）：`ATASMARTLib` 的接口还没调研（要不要 root、读得到什么）
 - [ ] Linux 的 deb / rpm 在真机桌面上走一遍：polkit 密码框、以 root 跑 `spaceknife-cli helper`；可以随包附带一个 polkit 策略文件（`org.freedesktop.policykit.exec.path` 指向 `/usr/bin/spaceknife-cli`（deb）/ `/opt/SpaceKnife/spaceknife-cli`（rpm）），让密码框写清楚要做什么（现在是 pkexec 的通用说明）

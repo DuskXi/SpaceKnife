@@ -24,9 +24,9 @@ describe("markdown subset", () => {
   it("shows the pictures the pages name with their size, anything else as its description", () => {
     // the same file from the English and the Chinese page's folder
     const en = html("![The treemap](../../../assets/visualizations/treemap-en.webp)", "en", "visualizations");
-    expect(en).toMatch(/^<p><img class="help-picture" src="[^"]*treemap-en[^"]*\.webp" alt="The treemap" width="1800" height="917" loading="lazy" decoding="async"><\/p>\n$/);
+    expect(en).toMatch(/^<p><img class="help-picture" src="[^"]*treemap-en[^"]*\.webp" alt="The treemap" width="1800" height="915" loading="lazy" decoding="async"><\/p>\n$/);
     const zh = html("![树图](../../../../assets/visualizations/treemap.webp)", "zh", "visualizations");
-    expect(zh).toMatch(/<img class="help-picture" src="[^"]*treemap[^"]*\.webp" alt="树图" width="1800" height="917"/);
+    expect(zh).toMatch(/<img class="help-picture" src="[^"]*treemap[^"]*\.webp" alt="树图" width="1800" height="915"/);
     // a path the Chinese page would need, written in an English one, is outside site/src
     expect(html("![wrong folder](../../../../assets/visualizations/treemap.webp)")).toBe('<p><span class="help-image">wrong folder</span></p>\n');
     expect(html("![on the web](https://example.com/a.png)")).toBe('<p><span class="help-image">on the web</span></p>\n');

@@ -29,6 +29,8 @@ str_enum! {
     }
 }
 
+// `folders`: a list of folders, kept as a string with one absolute path per line
+// (treemap.hidden_folders); the page edits it as a list.
 str_enum! {
     pub enum SettingControl {
         Switch = "switch",
@@ -37,6 +39,7 @@ str_enum! {
         Slider = "slider",
         Color = "color",
         Text = "text",
+        Folders = "folders",
     }
 }
 

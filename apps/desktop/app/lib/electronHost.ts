@@ -144,7 +144,7 @@ export function electronApi(bridge: ElectronBridge, target: Pick<Window, "addEve
     },
     dialog: {
       openSnapshot: () => invoke<string | null>("sk:openSnapshot"),
-      openFolders: () => invoke<string[]>("sk:openFolders"),
+      openFolders: (title?: string) => invoke<string[]>("sk:openFolders", ...(title ? [title] : [])),
       openFile: (options: FileDialogOptions) => invoke<string | null>("sk:openFile", options),
       saveFile: (options: FileDialogOptions & { defaultName: string }) => invoke<string | null>("sk:saveFile", options),
     },

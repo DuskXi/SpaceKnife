@@ -46,7 +46,7 @@ SpaceKnife's own folders, like the folder it is installed in, are protected: you
 
 Automatic snapshots are saved as `snapshots/<location>-<id>/<date>-<time>.sks`, for example `snapshots/Videos-3f2a9c41d0be/20261020-081530.sks`. The date and time are in UTC. The folder of a location has the same name as in 0.3.x, so its tags and snapshots stay together after an upgrade.
 
-Snapshots saved by 0.3.x open and compare as they are; 0.3.5 saves a newer format, which 0.3.x can't open. The cleanup below never deletes a snapshot file SpaceKnife can't read (damaged, or saved by a newer version).
+Snapshots saved by 0.3.4 and earlier open and compare as they are; from 0.3.5 on SpaceKnife saves a newer format, which 0.3.4 and earlier can't open. The cleanup below never deletes a snapshot file SpaceKnife can't read (damaged, or saved by a newer version).
 
 For each location SpaceKnife keeps the newest 10 (**Settings › Advanced › Recent snapshots to keep**, 1–100), and of the older ones the newest of each week; the rest are deleted after each automatic save.
 
@@ -60,7 +60,7 @@ Files whose names aren't a date and time are never deleted by that cleanup: rena
 
 ### Logs
 
-`logs/spaceknife.log` grows to 10 MB, then starts a new file; the 5 newest old files are kept, as `spaceknife.log.1` (the newest) to `spaceknife.log.5`. The old logs 0.3.x kept (`spaceknife.<time>.log`) are deleted at the first start of 0.3.5. **Settings › Advanced › Log file level** chooses **Info** or **Debug**. The log panel (<kbd>Ctrl</kbd>+<kbd>J</kbd>) shows the events of this session.
+`logs/spaceknife.log` grows to 10 MB, then starts a new file; the 5 newest old files are kept, as `spaceknife.log.1` (the newest) to `spaceknife.log.5`. The old logs 0.3.x kept (`spaceknife.<time>.log`) are deleted at the first start of 0.3.5 or later. **Settings › Advanced › Log file level** chooses **Info** or **Debug**. The log panel (<kbd>Ctrl</kbd>+<kbd>J</kbd>) shows the events of this session.
 
 For a bug report, **Settings › Advanced › Copy diagnostics** puts the versions, platform, capabilities and the paths of the settings file and log folder on the clipboard. Nothing is sent anywhere.
 

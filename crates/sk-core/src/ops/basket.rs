@@ -794,30 +794,36 @@ impl Basket {
     /// Items whose scan is closed (`store_of` returns None) keep what is known. Returns the ids
     /// of items that are newly missing (the service removes them and tells the user, UI-W5-48).
     pub fn refresh(&self, store_of: &mut dyn FnMut(&str) -> Option<Store>) -> Vec<String> {
-        let mut g = self.inner.lock();
-        // the store of every entry, grouped
-        let mut stores: Vec<Store> = Vec::new();
-        let mut which: Vec<Option<usize>> = Vec::with_capacity(g.entries.len());
-        for e in &g.entries {
-            which.push(store_of(&e.item.scan_id).map(|s| {
-                match stores.iter().position(|k| k.ptr_eq(&s)) {
-                    Some(k) => k,
-                    None => {
-                        stores.push(s);
-                        stores.len() - 1
-                    }
-                }
-            }));
+        // The items' scans first; then each store is read before the basket is locked again: the
+        // order `add` takes them in (its caller reads the store, then adds). Locking the basket and
+        // then reading a store, with a file change's write waiting for that store, could leave
+        // this, an add and the change waiting for one another for ever.
+        let scans: Vec<String> = {
+            let g = self.inner.lock();
+            let mut ids: Vec<String> = g.entries.iter().map(|e| e.item.scan_id.clone()).collect();
+            ids.sort();
+            ids.dedup();
+            ids
+        };
+        // the store of each scan, grouped (scans can share one)
+        let mut stores: Vec<(Store, Vec<String>)> = Vec::new();
+        for id in scans {
+            let Some(s) = store_of(&id) else { continue };
+            match stores.iter_mut().find(|(k, _)| k.ptr_eq(&s)) {
+                Some((_, ids)) => ids.push(id),
+                None => stores.push((s, vec![id])),
+            }
         }
-        let mut newly_missing: Vec<usize> = Vec::new();
-        for (k, store) in stores.iter().enumerate() {
+        let mut newly_missing: Vec<String> = Vec::new();
+        for (store, ids) in &stores {
             let nodes = store.read();
+            let mut g = self.inner.lock();
             let mut index = PathIndex::new();
-            for (i, w) in which.iter().enumerate() {
-                if *w != Some(k) {
-                    continue;
-                }
-                let e = &mut g.entries[i];
+            for e in g
+                .entries
+                .iter_mut()
+                .filter(|e| ids.contains(&e.item.scan_id))
+            {
                 // found by the names the file system has (the shown ones may have lost some)
                 let paths: Vec<PathBuf> = if e.group() {
                     os_members_of(&e.item)
@@ -836,7 +842,7 @@ impl Basket {
                     e.fingerprint = None;
                     e.item.status = ItemStatus::Missing;
                     if was != ItemStatus::Missing {
-                        newly_missing.push(i);
+                        newly_missing.push(e.item.id.clone());
                     }
                     continue;
                 }
@@ -867,12 +873,17 @@ impl Basket {
                 e.item.status = Inner::status(e, true);
             }
         }
+        let mut g = self.inner.lock();
         g.settle();
-        newly_missing.sort();
+        // in the basket's order
+        let at: HashMap<&str, usize> = g
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.item.id.as_str(), i))
+            .collect();
+        newly_missing.sort_by_key(|id| at.get(id.as_str()).copied().unwrap_or(usize::MAX));
         newly_missing
-            .into_iter()
-            .map(|i| g.entries[i].item.id.clone())
-            .collect()
     }
 
     /// Apply [`super::locks::find_lockers`] results: items (or members) held open become `locked`.

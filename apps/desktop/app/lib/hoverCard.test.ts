@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import type { FilterInfo } from "@/protocol/generated";
+
 import { pointerBox } from "@/visual/hit";
 import { hitOfKey } from "@/visual/hover";
 import { encodeFrame, TREEMAP_ROWS } from "@/visual/testing/fixtures";
 import { HIT_NONE, HIT_ROOT, type HoverInfo } from "@/visual/types";
 
-import { cardAvoid, hoverFacts, placeCard, placeCompareCard, sameTarget, splitPlaceholders } from "./hoverCard";
+import { cardAvoid, hiddenGap, hoverFacts, placeCard, placeCompareCard, sameTarget, splitPlaceholders } from "./hoverCard";
 
 const { frame } = encodeFrame("drawlist.v1", TREEMAP_ROWS);
 const hover = (patch: Partial<HoverInfo> = {}): HoverInfo => ({ viewId: "v", frame, target: 0, avoid: { x: 10, y: 10, w: 50, h: 40 }, pointer: { x: 30, y: 30 }, placement: "beside", ...patch });
@@ -61,5 +63,23 @@ describe("hover card helpers", () => {
       { text: "share", slot: true },
       { text: "", slot: false },
     ]);
+  });
+});
+
+describe("hiddenGap", () => {
+  const on = { hide_folders: true, hidden_folders: 2 };
+  it("is what a folder holds beyond what is drawn while hidden folders are taken out", () => {
+    expect(hiddenGap(on, null, true, 1050, 100)).toBe(950);
+    expect(hiddenGap(on, null, true, 100, 100)).toBe(0);
+  });
+  it("is nothing for a file, with the toggle off or none in the scan, or under a hiding filter", () => {
+    expect(hiddenGap(on, null, false, 1050, 100)).toBe(0);
+    expect(hiddenGap({ hide_folders: false, hidden_folders: 2 }, null, true, 1050, 100)).toBe(0);
+    expect(hiddenGap({ hide_folders: true, hidden_folders: 0 }, null, true, 1050, 100)).toBe(0);
+    expect(hiddenGap(undefined, null, true, 1050, 100)).toBe(0);
+    expect(hiddenGap(on, null, true, undefined, 100)).toBe(0);
+    const filter: FilterInfo = { active: true, mode: "hide", alloc: 0, diagnostics: [], files: 0, size: 0, stale: false, text: "*.mp4" };
+    expect(hiddenGap(on, filter, true, 1050, 100)).toBe(0);
+    expect(hiddenGap(on, { ...filter, mode: "dim" }, true, 1050, 100)).toBe(950);
   });
 });

@@ -45,6 +45,15 @@ impl ThemeSetting {
 pub const WINDOW_BG_DARK: &str = "#08090B";
 pub const WINDOW_BG_LIGHT: &str = "#E9EBEF";
 
+/// The window's own background when it shows dark colours, or light ones.
+pub const fn window_background(dark: bool) -> &'static str {
+    if dark {
+        WINDOW_BG_DARK
+    } else {
+        WINDOW_BG_LIGHT
+    }
+}
+
 /// The theme theme.json keeps; anything unreadable is 「跟随系统」.
 pub fn parse_theme_file(text: Option<&str>) -> ThemeSetting {
     let Some(text) = text.filter(|t| !t.is_empty()) else {
@@ -130,11 +139,7 @@ impl<H: ThemeHost> ThemeKeeper<H> {
 
     /// The window's background for the theme on screen: each theme's color.bg.window.
     pub fn background(&self) -> &'static str {
-        if self.host.dark() {
-            WINDOW_BG_DARK
-        } else {
-            WINDOW_BG_LIGHT
-        }
+        window_background(self.host.dark())
     }
 
     /// set_theme from the page: it applied the setting to itself; here the window and the file.
@@ -159,7 +164,8 @@ impl<H: ThemeHost> ThemeKeeper<H> {
         }
     }
 
-    /// The system's theme changed (or the window's did): the window's background follows.
+    /// Once the window exists: its background for the theme it shows (「跟随系统」: the system's).
+    /// The window's later theme changes are followed in window.rs, without the keeper.
     pub fn updated(&mut self) {
         let bg = self.background();
         self.host.set_background(bg);
@@ -367,5 +373,13 @@ mod tests {
         keeper.host.system_dark = true;
         keeper.updated();
         assert_eq!(keeper.host().log, [format!("bg {WINDOW_BG_DARK}")]);
+    }
+
+    #[test]
+    fn the_window_background_needs_no_keeper() {
+        // what window.rs gives the window when its theme changed (the event can come while set
+        // holds the keeper): the same colours the keeper gives
+        assert_eq!(window_background(true), WINDOW_BG_DARK);
+        assert_eq!(window_background(false), WINDOW_BG_LIGHT);
     }
 }
