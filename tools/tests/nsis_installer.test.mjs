@@ -197,6 +197,17 @@ test("the uninstaller deletes the GUID keys only when they name its own folder",
   assert.ok(at(body(helpers, "un.SkDetectScope"), "Call un.SkScopeFor") >= 0);
 });
 
+test("closing SpaceKnife asks its windows, never tao's event-loop window", () => {
+  // 0.3.5 and 0.3.6 lose tao's event-loop window ("Tao Thread Event Target", visible but layered)
+  // to a WM_CLOSE, and then their window's own close never comes: the installer had to end them
+  const post = body(helpers, "${UN}SkPostClose");
+  const check = at(post, '${AndIf} $1 != "Tao Thread Event Target"');
+  assert.ok(check > 0, "SkPostClose sends WM_CLOSE to tao's event-loop window too");
+  assert.equal(post[check - 3], "System::Call 'user32::GetClassNameW(p r0, w .r1, i ${NSIS_MAX_STRLEN})'");
+  assert.equal(post[check + 1], "Push $0"); // the windows to ask
+  assert.ok(at(post, "System::Call 'user32::PostMessageW(p r0, i 0x10, p 0, p 0)'") > check);
+});
+
 test("the new program is asked whether it can start before anything of the installed one is touched", () => {
   const install = body(installer, "Install");
   const check = at(install, "Call SkStartupCheck");

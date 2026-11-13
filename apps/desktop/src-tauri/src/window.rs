@@ -248,9 +248,113 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     Ok(window)
 }
 
+/// The class of tao's window for its event loop: a top-level window it shows (it needs WM_PAINT
+/// during resizes; layered, so nobody sees it).
+#[cfg(windows)]
+const EVENT_TARGET_CLASS: &str = "Tao Thread Event Target";
+
+/// Keep tao's event-loop window through a WM_CLOSE. Tools that close an app by sending WM_CLOSE to
+/// each of its visible top-level windows (taskkill, the installer closing a running SpaceKnife:
+/// spaceknife.nsh SkPostClose) reach that window too; tao leaves the message to DefWindowProc,
+/// which destroys it, and the window's own close, which goes through it, never comes: the app
+/// stayed open until the installer ended it after 5 s. Nothing of tao's sends it a WM_CLOSE, so
+/// it now ignores one. On the thread that made the window (setup, in the event loop).
+#[cfg(windows)]
+pub fn keep_event_target() {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        FindWindowExW, GetWindowThreadProcessId, WM_CLOSE,
+    };
+
+    unsafe extern "system" fn ignore_close(
+        window: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        _id: usize,
+        _data: usize,
+    ) -> LRESULT {
+        if msg == WM_CLOSE {
+            return 0;
+        }
+        unsafe { DefSubclassProc(window, msg, wparam, lparam) }
+    }
+
+    let class: Vec<u16> = EVENT_TARGET_CLASS.encode_utf16().chain([0]).collect();
+    let me = std::process::id();
+    let mut at: HWND = std::ptr::null_mut();
+    loop {
+        // SAFETY: plain Win32 calls on window handles of this process; the subclass procedure
+        // only reads its arguments
+        at = unsafe { FindWindowExW(std::ptr::null_mut(), at, class.as_ptr(), std::ptr::null()) };
+        if at.is_null() {
+            break;
+        }
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(at, &mut pid) };
+        if pid == me && unsafe { SetWindowSubclass(at, Some(ignore_close), 1, 0) } == 0 {
+            eprintln!("[window] could not keep the event-loop window through WM_CLOSE");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tao's event-loop window outlives a WM_CLOSE once kept (a window of its class made here as
+    /// tao makes it, on this thread); a plain window does not, as DefWindowProc closes it.
+    #[cfg(windows)]
+    #[test]
+    fn the_event_loop_window_outlives_a_wm_close() {
+        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DefWindowProcW, DestroyWindow, IsWindow, RegisterClassW, SendMessageW,
+            WM_CLOSE, WNDCLASSW, WS_POPUP,
+        };
+        let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+        let (target_class, plain_class) =
+            (wide(EVENT_TARGET_CLASS), wide("SpaceKnife test window"));
+        // SAFETY: windows of this test's own classes, made, sent to and destroyed on this thread
+        unsafe {
+            let instance = GetModuleHandleW(std::ptr::null());
+            let make = |class: &Vec<u16>| {
+                let wc = WNDCLASSW {
+                    lpfnWndProc: Some(DefWindowProcW),
+                    hInstance: instance,
+                    lpszClassName: class.as_ptr(),
+                    ..std::mem::zeroed()
+                };
+                RegisterClassW(&wc);
+                CreateWindowExW(
+                    0,
+                    class.as_ptr(),
+                    std::ptr::null(),
+                    WS_POPUP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    instance,
+                    std::ptr::null(),
+                )
+            };
+            let (target, plain) = (make(&target_class), make(&plain_class));
+            assert!(!target.is_null() && !plain.is_null());
+            keep_event_target();
+            SendMessageW(target, WM_CLOSE, 0, 0);
+            SendMessageW(plain, WM_CLOSE, 0, 0);
+            assert!(
+                IsWindow(target) != 0,
+                "a WM_CLOSE destroyed the event-loop window"
+            );
+            assert!(IsWindow(plain) == 0, "a plain window outlived a WM_CLOSE");
+            DestroyWindow(target);
+        }
+    }
 
     /// The process's explicit AppUserModelID, as the taskbar reads it (None when it has none).
     #[cfg(windows)]

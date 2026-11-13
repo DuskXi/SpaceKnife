@@ -99,6 +99,8 @@ pub fn run() {
             if let Err(err) = window::create(app.handle()) {
                 window_failed(&err.to_string());
             }
+            #[cfg(windows)]
+            window::keep_event_target();
             backend::start(app.handle());
             Ok(())
         })

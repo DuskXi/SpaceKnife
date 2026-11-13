@@ -14,7 +14,7 @@
 // to dark, light and back to 「跟随系统」 through the settings: the page hands each to the shell, whose
 // theme.json must follow (it is written once the window took the theme; a shell that hangs on the
 // way never writes it). Then it closes the app the way the system does
-// (WM_CLOSE / SIGTERM) and checks that it exits and its address closes. With --kind (implied by
+// (WM_CLOSE / SIGTERM) and checks that it exits by itself and its address closes. With --kind (implied by
 // --portable) the app must take itself for that kind of install (update.status). With --portable the data
 // folder must hold what the app wrote. The window itself is not looked at: the system WebView has
 // no DevTools port on Linux and macOS. On Linux run it under xvfb-run. Exit status 1 on failure.
@@ -24,7 +24,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { appProcessOf, fail, hello, pidAlive, portOpen, sleep, stop, until } from "./lib.mjs";
+import { appProcessOf, askToClose, fail, hello, pidAlive, portOpen, sleep, stop, until } from "./lib.mjs";
 
 const args = process.argv.slice(2);
 const portable = args.includes("--portable");
@@ -105,13 +105,22 @@ async function smoke(home) {
     // an AppImage started by its runtime: the program is the runtime's child, and SIGTERM to the
     // runtime would not reach it; the runtime exits with it
     const program = app.endsWith(".AppImage") ? appProcessOf(info.pid) : proc.pid;
-    stop(program);
-    await until("the app to exit", () => exited, 15_000).catch(() => {
+    // asked as the system asks (WM_CLOSE to its windows, as the installer closing a running
+    // SpaceKnife sends it, spaceknife.nsh SkPostClose; SIGTERM): it must go by itself. On Windows
+    // 0.3.5 and 0.3.6 did not, as the WM_CLOSE reached tao's event-loop window too (window.rs
+    // keep_event_target), and this test, which asked with taskkill, ended them without a word
+    console.log(`asked to close (${askToClose(program)} window(s) or a signal)`);
+    const closed = await until("the app to exit", () => exited, 15_000).then(
+      () => true,
+      () => false,
+    );
+    if (!closed) {
       console.log("the app did not close on request: ending it");
       stop(program, true);
       if (program !== proc.pid) stop(proc.pid, true);
-      return until("the app to exit", () => exited, 15_000);
-    });
+      await until("the app to exit", () => exited, 15_000);
+      throw new Error("the app did not close on request (WM_CLOSE / SIGTERM): it had to be ended");
+    }
     console.log(`app exited: ${JSON.stringify(exited)}`);
     await until("the backend's address to close", async () => !(await portOpen(port)) && !pidAlive(info.pid), 15_000);
     console.log("the backend stopped with the app");

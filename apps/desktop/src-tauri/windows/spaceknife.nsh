@@ -645,7 +645,10 @@ FunctionEnd
 
 ; Ask the processes in $SkProcPids to close, as taskkill without /F does: WM_CLOSE to their visible
 ; top-level windows that no other window owns (the app's own, not its dialogs; never the hidden
-; ones its toolkit keeps). $R4 = how many were asked. Registers are kept.
+; ones its toolkit keeps). Not tao's event-loop window ("Tao Thread Event Target", shown but
+; layered): 0.3.5 and 0.3.6 lose it to a WM_CLOSE, and then their window's own close never comes
+; and the app has to be ended (window.rs keep_event_target). $R4 = how many were asked. Registers
+; are kept.
 Function ${UN}SkPostClose
   Push $0
   Push $1
@@ -670,8 +673,10 @@ Function ${UN}SkPostClose
       System::Call 'user32::IsWindowVisible(p r0) i .r2'
       ; GW_OWNER
       System::Call 'user32::GetWindow(p r0, i 4) p .r3'
+      System::Call 'user32::GetClassNameW(p r0, w .r1, i ${NSIS_MAX_STRLEN})'
       ${If} $2 <> 0
       ${AndIf} $3 P= 0
+      ${AndIf} $1 != "Tao Thread Event Target"
         Push $0
       ${EndIf}
     ${EndIf}

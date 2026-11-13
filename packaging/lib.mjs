@@ -86,6 +86,37 @@ export function stop(pid, force = false) {
   }
 }
 
+/** Ask a program to close as Windows' installers and the system do (spaceknife.nsh SkPostClose):
+ *  WM_CLOSE to each visible top-level window of the process that no other window owns. Not
+ *  taskkill without /F, which picks one window by its own guess (the input method's indicator,
+ *  where one is open) and may never reach the app's. Elsewhere SIGTERM. How many were asked. */
+export function askToClose(pid) {
+  if (!WIN) {
+    stop(pid);
+    return 1;
+  }
+  const script = `Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices;
+public static class SkAskToClose {
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+  public static int Ask(uint pid) {
+    var found = new List<IntPtr>();
+    EnumWindows((h, l) => { uint p; GetWindowThreadProcessId(h, out p); if (p == pid && IsWindowVisible(h) && GetWindow(h, 4) == IntPtr.Zero) found.Add(h); return true; }, IntPtr.Zero);
+    foreach (var h in found) PostMessage(h, 0x10, IntPtr.Zero, IntPtr.Zero);
+    return found.Count;
+  }
+}
+'@
+[SkAskToClose]::Ask(${Number(pid)})`;
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
+  return Number(r.stdout?.trim()) || 0;
+}
+
 /** A JSON-RPC session with the backend: `call(method, params)`, `events` (notifications seen). */
 export async function connect(url, { origin, timeout = 30_000 } = {}) {
   const ws = new WebSocket(url, origin ? { protocols: ["spaceknife.v1"], headers: { Origin: origin } } : ["spaceknife.v1"]);
