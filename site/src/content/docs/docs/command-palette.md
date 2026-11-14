@@ -77,6 +77,7 @@ The gray text after a command name is its current status, worked out when the pa
 | Rescan everything | How the current scan reads the disk, "MFT quick scan" or "Full scan"; once the scan is done, with the time it took, like "MFT quick scan · about 5 s" |
 | Cycle coloring, Cycle visualization | "Current: File classes", "Current: Treemap" |
 | Show/hide free space, Show/hide unknown space, Show/hide the Recycle Bin, Show/hide the folders listed in settings | "Current: shown" or "Current: hidden" (for the listed folders: whether they are drawn) |
+| Hide this folder from the picture, Stop hiding this folder | The selected folder's name |
 | Open delete basket | The number of items in the delete basket, or "Empty" |
 | Compare with snapshot… | How many snapshots this scan target has, like "3 snapshots" |
 | Export report… | "CSV · JSON · HTML" |
@@ -97,6 +98,8 @@ A command that can't run now is grayed out, its reason replaces the status, and 
 | Nothing to go back to, Nothing to go forward to, Already at the root | You are at the end of the navigation |
 | No snapshots | No snapshot has been saved for this place yet |
 | This scan has no Recycle Bin, This scan has none of the folders listed in settings | Nothing for the switch to hide (see [The Recycle Bin](../visualizations/#the-recycle-bin) and [Hidden folders](../visualizations/#hidden-folders)) |
+| This folder is listed in settings already, This folder isn't listed in settings | The selected folder is hidden already (use Stop hiding this folder), or isn't hidden at all |
+| The scan's root can't be hidden, Only folders can be hidden | Only a folder of the scan can be hidden, not its root; nor the MFT quick scan's pseudo folders or anything in a snapshot comparison, each with its own reason |
 | This window can't show this visualization | The window, or a snapshot comparison, can't show that visualization |
 | No update available | Show update is available only after a newer version was found |
 

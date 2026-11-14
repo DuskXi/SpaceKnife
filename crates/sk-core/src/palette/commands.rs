@@ -21,6 +21,7 @@ use sk_protocol::palette::PaletteTab;
 
 use super::fuzzy::{Scored, runs, score};
 use crate::i18n::{self, Arg, plural, t, tr_with};
+use crate::view::FolderHide;
 
 /// Colour mode -> its name (message id).
 pub const COLOR_NAMES: [(&str, &str); 4] = [
@@ -68,6 +69,10 @@ pub struct ViewFacts {
     pub hide_folders: bool,
     /// how many of them the scan holds
     pub hidden_folders: u32,
+    /// 「在画面中隐藏这个文件夹」 for the selection (None: nothing selected)
+    pub selected_hide: Option<FolderHide>,
+    /// the selection's name (the status of the hide / show commands)
+    pub selected_name: String,
 }
 
 /// Where the palette was opened.
@@ -206,6 +211,27 @@ fn need_hidden_folders_view(c: &Context) -> Option<String> {
         Some(v) if v.hidden_folders > 0 => None,
         Some(_) => reason("这次扫描里没有设置里列出的文件夹"),
     }
+}
+fn selected_hide(c: &Context) -> Option<&FolderHide> {
+    c.view.as_ref().and_then(|v| v.selected_hide.as_ref())
+}
+/// 「在画面中隐藏这个文件夹」: a folder of the scan the list doesn't name yet (UI-W5-52).
+fn need_hide_folder(c: &Context) -> Option<String> {
+    need_selection(c).or_else(|| match selected_hide(c) {
+        Some(FolderHide::Hide(_)) => None,
+        Some(FolderHide::Listed(_)) => reason("设置里已经列出了这个文件夹"),
+        Some(FolderHide::No(why)) => Some(why.clone()),
+        None => reason("没有选中项"),
+    })
+}
+/// 「不再隐藏这个文件夹」: a folder the list names.
+fn need_unhide_folder(c: &Context) -> Option<String> {
+    need_selection(c).or_else(|| match selected_hide(c) {
+        Some(FolderHide::Listed(_)) => None,
+        Some(FolderHide::Hide(_)) => reason("设置里没有列出这个文件夹"),
+        Some(FolderHide::No(why)) => Some(why.clone()),
+        None => reason("没有选中项"),
+    })
 }
 /// A view of the scan itself: a comparison's view shows changes, its folders are not the scan's.
 fn need_scan_view(c: &Context) -> Option<String> {
@@ -398,6 +424,11 @@ fn status_hidden_folders(c: &Context) -> String {
     c.view
         .as_ref()
         .map_or_else(String::new, |v| shown_hidden(!v.hide_folders))
+}
+fn status_selected_name(c: &Context) -> String {
+    c.view
+        .as_ref()
+        .map_or_else(String::new, |v| v.selected_name.clone())
 }
 fn status_basket(c: &Context) -> String {
     if c.basket == 0 {
@@ -1084,6 +1115,31 @@ const DEFS: &[Def] = &[
         ],
         needs: &[need_hidden_folders_view],
         status: Some(status_hidden_folders),
+        ..D
+    },
+    // the selected folder in or out of 「要隐藏的文件夹」 (UI-W5-52; after the others, as above)
+    Def {
+        id: "item.hide_folder",
+        name: "在画面中隐藏这个文件夹",
+        icon: "eyeOff",
+        aliases: &[
+            "hide folder",
+            "hide this folder",
+            "exclude folder",
+            "ignore folder",
+            "隐藏文件夹",
+        ],
+        needs: &[need_hide_folder],
+        status: Some(status_selected_name),
+        ..D
+    },
+    Def {
+        id: "item.unhide_folder",
+        name: "不再隐藏这个文件夹",
+        icon: "eye",
+        aliases: &["unhide folder", "show folder again", "取消隐藏"],
+        needs: &[need_unhide_folder],
+        status: Some(status_selected_name),
         ..D
     },
 ];

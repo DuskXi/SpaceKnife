@@ -1850,6 +1850,88 @@ fn hidden_folders_are_taken_out_of_the_picture() {
     assert_eq!(v.hidden_folder_count(), 0);
 }
 
+#[test]
+fn a_folder_of_the_picture_goes_in_and_out_of_the_hidden_list() {
+    use sk_core::view::FolderHide;
+    let _g = sk_core::i18n::TEST_LOCK.lock();
+    let s = dir([
+        (
+            "Users",
+            dir([(
+                "lenny",
+                dir([
+                    ("Music", dir([("a.flac", S::F(600 * MB))])),
+                    ("notes.txt", S::F(MB)),
+                ]),
+            )]),
+        ),
+        ("$NTFS 元数据", dir([("$MFT", S::F(50 * MB))])),
+    ]);
+    let v = volume_view(1300 * MB, &s, None);
+    let music = node(&v, "Users/lenny/Music");
+    let none: Vec<String> = Vec::new();
+    // not listed: hiding it adds its path, and that path finds it again (what the list needs)
+    let FolderHide::Hide(path) = v.folder_hide(music, &none) else {
+        panic!("Music can be hidden")
+    };
+    assert_eq!(path, path_of(&v, "Users/lenny/Music"));
+    let mut w = volume_view(1300 * MB, &s, None);
+    assert!(w.set_hidden_folders(vec![path.clone()]));
+    assert_eq!(w.hidden_folder_count(), 1);
+    // listed: the entries that name it, as written, also in another case where the system
+    // ignores it; others stay out
+    let other = format!("{}-elsewhere", path_of(&v, "Users"));
+    let list = vec![other.clone(), path.clone()];
+    assert_eq!(
+        v.folder_hide(music, &list),
+        FolderHide::Listed(vec![path.clone()])
+    );
+    if cfg!(any(windows, target_os = "macos")) {
+        let upper = path.to_uppercase();
+        assert_eq!(
+            v.folder_hide(music, &[upper.clone(), path.clone()]),
+            FolderHide::Listed(vec![upper, path.clone()])
+        );
+    }
+    // a folder inside a listed one is not listed itself: it can be hidden on its own
+    let lenny = node(&v, "Users/lenny");
+    assert!(matches!(
+        v.folder_hide(music, &[path_of(&v, "Users/lenny")]),
+        FolderHide::Hide(_)
+    ));
+    assert_eq!(
+        v.folder_hide(lenny, &[path_of(&v, "Users/lenny")]),
+        FolderHide::Listed(vec![path_of(&v, "Users/lenny")])
+    );
+    // never the scan's root (nor the top of the store), a file, or a pseudo folder of the MFT scan
+    let no = |n: NodeId| match v.folder_hide(n, &none) {
+        FolderHide::No(why) => why,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(no(1), "扫描的根不能隐藏");
+    assert_eq!(no(0), "扫描的根不能隐藏");
+    assert_eq!(no(node(&v, "Users/lenny/notes.txt")), "只有文件夹可以隐藏");
+    let meta = node(&v, "$NTFS 元数据");
+    v.store().write().mark(meta, Flags::VIRTUAL);
+    assert!(no(meta).contains("MFT"));
+    assert_eq!(
+        no(v.store().len() as NodeId),
+        "这个块已经不在视图里了，请再试一次"
+    );
+    // nothing in a comparison: its folders are the comparison's
+    let mut cmp = volume_view(1300 * MB, &s, None);
+    let n = cmp.store().len();
+    cmp.compare = Some(Arc::new(ArrayChanges::new(
+        vec![0; n],
+        vec![0; n],
+        move |_, _| vec![0; n],
+    )));
+    assert_eq!(
+        cmp.folder_hide(music, std::slice::from_ref(&path)),
+        FolderHide::No("对比时不可用，先退出对比".into())
+    );
+}
+
 // --------------------------------------------------------------------------- the wire
 
 #[test]

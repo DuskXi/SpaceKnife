@@ -287,5 +287,12 @@
  "多种类别混合，没有一类达到一半": "Mixed classes, none at half",
  "还有 {n} 个分支": "{n} more branches",
  "右键打开「{page}」设置": "Right-click: {page} settings",
- "切换配色": "Next coloring"
+ "切换配色": "Next coloring",
+ "在画面中隐藏这个文件夹": "Hide this folder from the picture",
+ "不再隐藏这个文件夹": "Stop hiding this folder",
+ "扫描的根不能隐藏": "The scan's root can't be hidden",
+ "这个设置现在不能修改": "This setting can't be changed right now",
+ "已隐藏「{name}」：工具栏的「隐藏文件夹」（H）可以让它回来": "{name} is hidden: Hide folders (H) in the toolbar brings it back",
+ "已隐藏「{name}」：放大在它里面时照常显示，回到外面就不占画面了": "{name} is hidden: zoomed into it, it shows as usual; outside it takes no room",
+ "「{name}」不再隐藏": "{name} is no longer hidden"
 }

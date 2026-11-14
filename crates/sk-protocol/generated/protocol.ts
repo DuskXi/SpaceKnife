@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "8d474495f35a20bf";
+export const SCHEMA_HASH = "b0c8ff42e6c0fbed";
 
 export interface AgeCond {
   end: number;
@@ -761,6 +761,19 @@ export interface HelloResult {
   schema_hash: string;
   server: ServerInfo;
   session_id: string;
+}
+
+/**
+ * Whether a folder is in the setting treemap.hidden_folders (「不再隐藏这个文件夹」), can be
+ * added (「在画面中隐藏这个文件夹」), or why neither (UI-W5-52).
+ */
+export interface HiddenFolderInfo {
+  /** The entries of the list that name this folder, as written; any: it is listed */
+  listed: string[];
+  /** What hiding it adds to the list (its path); "" when it is listed or can't be hidden */
+  path: string;
+  /** Why it can't be hidden (interface language); "" when it can or is listed */
+  reason: string;
 }
 
 /** Disk-load state of one physical disk (W2 curve, status bar UI-MAIN-50). */
@@ -1772,6 +1785,14 @@ export interface ViewFrameEvent {
   frame: FrameInfo;
 }
 
+export interface ViewHideFolderParams {
+  /** True adds it to treemap.hidden_folders; false takes out the entries that name it */
+  hide: boolean;
+  /** A folder of the view's scan */
+  node: number;
+  view_id: string;
+}
+
 export interface ViewIdParams {
   view_id: string;
 }
@@ -1782,6 +1803,12 @@ export interface ViewListParams {
 
 export interface ViewListResult {
   views: ViewState[];
+}
+
+export interface ViewNodeParams {
+  /** A node of the view's scan (not an aggregate block's key) */
+  node: number;
+  view_id: string;
 }
 
 export interface ViewOpenParams {
@@ -2171,6 +2198,10 @@ export interface Methods {
   "view.filter": { params: ViewFilterParams; result: ViewUpdate };
   /** Forward again. */
   "view.forward": { params: ViewIdParams; result: ViewUpdate };
+  /** Whether a folder of the view's scan is listed in treemap.hidden_folders, can be added, or why not (UI-W5-52). */
+  "view.hidden_folder": { params: ViewNodeParams; result: HiddenFolderInfo };
+  /** Add a folder of the view's scan to treemap.hidden_folders, or take out the entries that name it; open views follow at once (UI-W5-52). */
+  "view.hide_folder": { params: ViewHideFolderParams; result: SettingsState };
   /** Back to the whole scan / volume. */
   "view.home": { params: ViewIdParams; result: ViewUpdate };
   /** Views of this session (optionally of one scan). */

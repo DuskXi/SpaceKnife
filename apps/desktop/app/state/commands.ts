@@ -30,6 +30,7 @@ import {
 } from "./actions";
 import { cycleDirection, enterCompare, refreshCompareSources } from "./compare";
 import { openHelp } from "./help";
+import { hideFolder } from "./hiddenFolders";
 import { type AppState, activeTab, basketCount, focusedViewId, get, set, toast, toggleLog } from "./store";
 import { type ColorModeName, nextColor, nextVisual, offered } from "./visuals";
 
@@ -229,6 +230,12 @@ export async function runCommand(id: string): Promise<void> {
     case "basket.add": {
       const sel = selectedNode();
       if (sel) basketAdd(sel.scanId, sel.node, sel.generation);
+      return;
+    }
+    case "item.hide_folder":
+    case "item.unhide_folder": {
+      const sel = selectedNode();
+      if (sel) await hideFolder(sel.viewId, sel.node, id === "item.hide_folder");
       return;
     }
     case "item.copy_path": {

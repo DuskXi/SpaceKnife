@@ -790,3 +790,127 @@ async fn new_views_take_the_settings_and_follow_live_geometry() {
     let _ = Arc::strong_count(&srv.server);
     srv.shutdown();
 }
+
+/// 「在画面中隐藏这个文件夹」 / 「不再隐藏这个文件夹」 (UI-W5-52): the menu's question, the change
+/// to treemap.hidden_folders, the view following it, and the palette's commands.
+#[tokio::test]
+async fn a_folder_is_hidden_and_shown_again_from_the_view() {
+    let _g = SERIAL.lock().await;
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let (scan_id, facts) = scanned(&c, tmp.path()).await;
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)}),
+    )
+    .await;
+    let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
+    let find = async |rel: &str| {
+        let r = c
+            .ok(
+                "tree.find",
+                json!({"scan_id": scan_id, "path": facts.root.join(rel).to_string_lossy()}),
+            )
+            .await;
+        r["node"]["id"].as_u64().unwrap()
+    };
+    let (a, file) = (find("a").await, find("c.txt").await);
+    let root = c
+        .ok(
+            "tree.find",
+            json!({"scan_id": scan_id, "path": facts.root.to_string_lossy()}),
+        )
+        .await["node"]["id"]
+        .as_u64()
+        .unwrap();
+    let ask = async |node: u64| {
+        c.ok(
+            "view.hidden_folder",
+            json!({"view_id": view_id, "node": node}),
+        )
+        .await
+    };
+    // a folder not listed: hiding it adds its path
+    let info = ask(a).await;
+    let path = facts.root.join("a").to_string_lossy().into_owned();
+    assert_eq!(info, json!({"listed": [], "path": path, "reason": ""}));
+    // the root and a file: not, and why
+    assert_eq!(ask(root).await["reason"], "扫描的根不能隐藏");
+    assert_eq!(ask(file).await["reason"], "只有文件夹可以隐藏");
+    let e = c
+        .err(
+            "view.hide_folder",
+            json!({"view_id": view_id, "node": root, "hide": true}),
+        )
+        .await;
+    assert_eq!(e.code, code(ErrorCode::InvalidParams));
+    assert_eq!(e.message, "扫描的根不能隐藏");
+
+    // hide it: the setting has it, every client hears of it, the view redraws without it
+    c.drain_events().await;
+    let st = c
+        .ok(
+            "view.hide_folder",
+            json!({"view_id": view_id, "node": a, "hide": true}),
+        )
+        .await;
+    assert_eq!(st["values"]["treemap.hidden_folders"], path.as_str());
+    let ev = c.event("settings.changed", 5.0).await;
+    assert_eq!(
+        ev["state"]["values"]["treemap.hidden_folders"],
+        path.as_str()
+    );
+    let (info, frame) = pushed(&c).await;
+    assert_eq!(info["hidden_folders"], 1);
+    assert!(!frame.names.iter().any(|n| n == "a"), "{:?}", frame.names);
+    // asked again (the menu, a second click): listed, and hiding it again changes nothing
+    assert_eq!(
+        ask(a).await,
+        json!({"listed": [path], "path": "", "reason": ""})
+    );
+    let again = c
+        .ok(
+            "view.hide_folder",
+            json!({"view_id": view_id, "node": a, "hide": true}),
+        )
+        .await;
+    assert_eq!(again["values"]["treemap.hidden_folders"], path.as_str());
+
+    // the palette offers 「不再隐藏这个文件夹」 for it once it is selected
+    vok(&c, "view.select", json!({"view_id": view_id, "key": a})).await;
+    let on_scan = json!({"tab": "scan", "scan_id": scan_id, "view_id": view_id});
+    let check = async |id: &str| {
+        c.ok("palette.check", json!({"id": id, "context": on_scan}))
+            .await
+    };
+    let show = check("item.unhide_folder").await;
+    assert_eq!(
+        (&show["enabled"], &show["status"]),
+        (&json!(true), &json!("a"))
+    );
+    let hide = check("item.hide_folder").await;
+    assert_eq!(hide["enabled"], false);
+    assert_eq!(hide["status"], "设置里已经列出了这个文件夹");
+
+    // shown again: the entries naming it go, the others stay
+    let other = facts.root.join("deep").to_string_lossy().into_owned();
+    let both = format!("{path}\n{other}");
+    c.ok(
+        "settings.update",
+        json!({"values": {"treemap.hidden_folders": both}}),
+    )
+    .await;
+    let st = c
+        .ok(
+            "view.hide_folder",
+            json!({"view_id": view_id, "node": a, "hide": false}),
+        )
+        .await;
+    assert_eq!(st["values"]["treemap.hidden_folders"], other.as_str());
+    assert_eq!(ask(a).await["path"], path.as_str());
+    assert_eq!(check("item.hide_folder").await["enabled"], true);
+    c.ok("settings.reset", json!({})).await;
+    srv.shutdown();
+}

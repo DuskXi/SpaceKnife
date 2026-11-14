@@ -5,16 +5,21 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use sk_core::layout::registry;
+use sk_core::settings::{SettingsError, Values, folder_list};
 use sk_core::tr;
-use sk_core::view::{results_page, showable};
-use sk_protocol::EmptyResult;
+use sk_core::view::{FolderHide, results_page, showable};
 use sk_protocol::methods::*;
-use sk_protocol::view::{ViewListResult, VisualInfo, VisualListResult};
+use sk_protocol::settings::SettingValue;
+use sk_protocol::view::{HiddenFolderInfo, ViewListResult, VisualInfo, VisualListResult};
+use sk_protocol::{EmptyResult, ErrorCode};
 
 use crate::compute::Latest;
-use crate::rpc::Router;
+use crate::rpc::{Router, RpcError, RpcResult};
 use crate::topics::TopicRegistry;
 use crate::views::{apply_settings, settings_key};
+
+/// The setting 「要隐藏的文件夹」: its folders one per line.
+pub const HIDDEN_FOLDERS: &str = "treemap.hidden_folders";
 
 pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
     r.add::<ViewOpen, _, _>(|call, p| async move {
@@ -197,6 +202,60 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
             .collect();
         visuals.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.id.cmp(&b.id)));
         Ok(VisualListResult { visuals })
+    });
+
+    // 「在画面中隐藏这个文件夹」 / 「不再隐藏这个文件夹」 (UI-W5-52): the setting as it is now
+    r.add::<ViewHiddenFolder, _, _>(|call, p| async move {
+        let host = call.server.views.get(&call.session, &p.view_id)?;
+        let st = call.server.settings.clone();
+        crate::compute::blocking(move || {
+            let list = folder_list(&st.get_str(HIDDEN_FOLDERS));
+            let mut info = HiddenFolderInfo::default();
+            match host.view.lock().folder_hide(p.node, &list) {
+                FolderHide::Hide(path) => info.path = path,
+                FolderHide::Listed(entries) => info.listed = entries,
+                FolderHide::No(why) => info.reason = why,
+            }
+            info
+        })
+        .await
+    });
+
+    r.add::<ViewHideFolder, _, _>(|call, p| async move {
+        let host = call.server.views.get(&call.session, &p.view_id)?;
+        let st = call.server.settings.clone();
+        // the views follow the change as for settings.update (their listeners)
+        let res: RpcResult<()> = crate::compute::blocking(move || {
+            // read, change, write; changed by someone else in between: again on top of that
+            for _ in 0..3 {
+                let version = st.version();
+                let list = folder_list(&st.get_str(HIDDEN_FOLDERS));
+                let choice = host.view.lock().folder_hide(p.node, &list);
+                let next: Vec<String> = match (p.hide, choice) {
+                    (_, FolderHide::No(why)) => return Err(RpcError::invalid_params(why)),
+                    (true, FolderHide::Hide(path)) => list.into_iter().chain([path]).collect(),
+                    (false, FolderHide::Listed(entries)) => {
+                        list.into_iter().filter(|e| !entries.contains(e)).collect()
+                    }
+                    _ => return Ok(()), // as asked already
+                };
+                let patch = Values::from([(
+                    HIDDEN_FOLDERS.to_owned(),
+                    SettingValue::Str(next.join("\n")),
+                )]);
+                match st.update(&patch, Some(version)) {
+                    Err(SettingsError::Conflict(_)) => continue,
+                    done => return done.map(|_| ()).map_err(super::settings::mapped),
+                }
+            }
+            Err(RpcError::new(
+                ErrorCode::SettingsConflict,
+                "the settings kept changing; try again",
+            ))
+        })
+        .await?;
+        res?;
+        Ok(call.server.settings.state())
     });
 
     let latest: Arc<Latest<(String, u32, u32)>> = Arc::new(Latest::new());

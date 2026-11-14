@@ -209,12 +209,16 @@ To leave the bin out of the picture, press <kbd>R</kbd> or click the **Recycle B
 
 ## Hidden folders
 
-Some folders are big and you already know why: your music, your movies, a game library. List them in **Settings › Visualization › Hidden folders** and they take no room in the picture, so the other blocks grow to fill it. Nothing is listed by default: type a folder's full path and press <kbd>Enter</kbd> (or click **Add**), or click **Browse…** in the app.
+Some folders are big and you already know why: your music, your movies, a game library. List them in **Settings › Visualization › Hidden folders** and they take no room in the picture, so the other blocks grow to fill it. Nothing is listed by default.
+
+The quickest way: right-click the folder's block (or bar, or sector) and choose **Hide this folder from the picture**. Its path goes on the list at once and the folder leaves the picture; if **Hide folders** was off in that view, it comes on. In the settings you can also type a folder's full path and press <kbd>Enter</kbd> (or click **Add**), or click **Browse…** in the app.
+
+To bring one folder back for good, right-click it where it is drawn (with **Hide folders** off, or while zoomed into it) and choose **Stop hiding this folder**, or take it off the list in the settings. The command palette has both commands for the selected folder: **Hide this folder from the picture** and **Stop hiding this folder**, with the folder's name as their status. Neither is there for files and small items blocks; for the scan's root, the MFT quick scan's `$NTFS metadata` and `$Orphaned files` (they have no place on disk) and in a snapshot comparison they are grayed out, and hovering them says why. In headless mode the browser can use them too: the list belongs to the computer the files are on.
 
 - When a scan holds a folder of the list, **Hide folders** appears among the switch chips in the toolbar, also while the scan runs. Its tooltip says how many of the listed folders the scan holds. Click it, press <kbd>H</kbd> or run **Show/hide the folders listed in settings** in the command palette to bring the folders back; do it again to hide them.
 - A new view opens with them hidden. A new split pane takes the switch from the focused pane, as it does the Recycle Bin's.
 - Zoomed into a hidden folder, or into a folder inside one, it shows as usual; folders listed inside it stay hidden. Locating a hidden folder from a list (the results list, or **Show in treemap** in the log panel) zooms into it.
-- The root of a scan is never hidden.
+- The root of a scan is never hidden, and can't be added from the menu.
 - Only the picture changes: the scan, the details panel, exports and the lists still count everything. The hover card of a block that is partly in a hidden folder says how much of it is in hidden folders and not drawn.
 - It has no effect in a snapshot comparison.
 - On Windows and macOS the case of a path doesn't matter; on Linux it does.

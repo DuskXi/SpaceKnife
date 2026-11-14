@@ -222,7 +222,7 @@
  "改回自动识别": "Back to automatic",
  "隐藏文件夹": "Hide folders",
  "隐藏设置里列出的 {n} 个文件夹（H）": "Hide the {n} folders listed in settings (H)",
- "还没有文件夹。扫描到列表里的文件夹时，工具栏会出现「隐藏文件夹」。": "No folders yet. When a scan holds a folder of the list, Hide folders appears in the toolbar.",
+ "还没有文件夹。在扫描视图里右键单击文件夹，选「在画面中隐藏这个文件夹」，或在下面输入路径。扫描到列表里的文件夹时，工具栏会出现「隐藏文件夹」。": "No folders yet. Right-click a folder in a scan view and choose Hide this folder from the picture, or type its path below. When a scan holds a folder of the list, Hide folders appears in the toolbar.",
  "移出列表：{path}": "Remove from the list: {path}",
  "移出列表": "Remove from the list",
  "添加文件夹的完整路径": "Full path of a folder to add",

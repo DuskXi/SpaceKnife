@@ -75,10 +75,16 @@ fn view_of(server: &Server, session: &Session, view_id: Option<&str>) -> Option<
     (host.session_id == session.id).then(|| host.view.clone())
 }
 
-fn facts(v: &View) -> ViewFacts {
+/// `hidden`: the folders of treemap.hidden_folders as they are now (the hide / show commands).
+fn facts(v: &View, hidden: &[String]) -> ViewFacts {
     let len = v.store().len() as u32;
+    let selected = v.selected.filter(|&s| s > 0 && s < len);
     ViewFacts {
-        selected: v.selected.filter(|&s| s > 0 && s < len),
+        selected,
+        selected_hide: selected.map(|s| v.folder_hide(s, hidden)),
+        selected_name: selected.map_or_else(String::new, |s| {
+            sk_store::names::printable(v.store().read().name_bytes(s)).into_owned()
+        }),
         has_trash: v.has_trash(),
         compare: v.compare.is_some(),
         back: !v.back.is_empty(),
@@ -136,7 +142,9 @@ fn context_of(
         .map_or(ScanSource::Scan, |h| h.source)
         .as_str()
         .to_owned();
-    ctx.view = view.as_ref().map(|v| facts(&v.lock()));
+    let hidden =
+        sk_core::settings::folder_list(&server.settings.get_str(super::view::HIDDEN_FOLDERS));
+    ctx.view = view.as_ref().map(|v| facts(&v.lock(), &hidden));
     ctx.snapshots = snapshot_count(target_of(handle.as_deref()).as_deref());
     ctx.basket = c.basket;
     ctx.visuals = registry::all_visuals()

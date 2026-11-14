@@ -2865,6 +2865,32 @@
       ],
       "type": "object"
     },
+    "HiddenFolderInfo": {
+      "description": "Whether a folder is in the setting treemap.hidden_folders (「不再隐藏这个文件夹」), can be\nadded (「在画面中隐藏这个文件夹」), or why neither (UI-W5-52).",
+      "properties": {
+        "listed": {
+          "description": "The entries of the list that name this folder, as written; any: it is listed",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "description": "What hiding it adds to the list (its path); \"\" when it is listed or can't be hidden",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why it can't be hidden (interface language); \"\" when it can or is listed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "listed",
+        "path",
+        "reason"
+      ],
+      "type": "object"
+    },
     "IoStatus": {
       "description": "Disk-load state of one physical disk (W2 curve, status bar UI-MAIN-50).",
       "properties": {
@@ -6783,6 +6809,30 @@
       ],
       "type": "object"
     },
+    "ViewHideFolderParams": {
+      "additionalProperties": false,
+      "properties": {
+        "hide": {
+          "description": "True adds it to treemap.hidden_folders; false takes out the entries that name it",
+          "type": "boolean"
+        },
+        "node": {
+          "description": "A folder of the view's scan",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "view_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "node",
+        "hide"
+      ],
+      "type": "object"
+    },
     "ViewIdParams": {
       "additionalProperties": false,
       "properties": {
@@ -6819,6 +6869,25 @@
       },
       "required": [
         "views"
+      ],
+      "type": "object"
+    },
+    "ViewNodeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "A node of the view's scan (not an aggregate block's key)",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "view_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "node"
       ],
       "type": "object"
     },
@@ -8275,6 +8344,18 @@
       "params": "#/$defs/ViewIdParams",
       "requiresSession": true,
       "result": "#/$defs/ViewUpdate"
+    },
+    "view.hidden_folder": {
+      "doc": "Whether a folder of the view's scan is listed in treemap.hidden_folders, can be added, or why not (UI-W5-52).",
+      "params": "#/$defs/ViewNodeParams",
+      "requiresSession": true,
+      "result": "#/$defs/HiddenFolderInfo"
+    },
+    "view.hide_folder": {
+      "doc": "Add a folder of the view's scan to treemap.hidden_folders, or take out the entries that name it; open views follow at once (UI-W5-52).",
+      "params": "#/$defs/ViewHideFolderParams",
+      "requiresSession": true,
+      "result": "#/$defs/SettingsState"
     },
     "view.home": {
       "doc": "Back to the whole scan / volume.",

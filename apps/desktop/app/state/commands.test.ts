@@ -9,9 +9,11 @@ import type { SkApi } from "@/shared/api";
 
 import { call, rescanFolder, startScan } from "./actions";
 import { runCommand, runShortcut, shortcutCommand } from "./commands";
+import { hideFolder } from "./hiddenFolders";
 import { get, set } from "./store";
 
 vi.mock(import("./actions"), async (original) => ({ ...(await original()), call: vi.fn(), rescanFolder: vi.fn(), startScan: vi.fn() }));
+vi.mock(import("./hiddenFolders"), async (original) => ({ ...(await original()), hideFolder: vi.fn() }));
 
 const key = (k: string, mods: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {}) => ({
   key: k,
@@ -132,5 +134,29 @@ describe("the selection handed to the system", () => {
     expect(shell.openTerminal).toHaveBeenCalledWith("C:\\x");
     await runCommand("item.copy_path");
     expect(shell.copyText).toHaveBeenCalledWith("C:\\x\\a\\udc80b");
+  });
+});
+
+describe("the selected folder in or out of 「要隐藏的文件夹」", () => {
+  beforeEach(() =>
+    set({
+      tabs: [{ id: "t1", kind: "scan", scanId: "s1", viewIds: ["v1"], focusedPane: 0, title: "C:" }],
+      active: "t1",
+      views: { v1: { state: { scan_id: "s1" }, frame: { info: { selected_row: 0, generation: 1 }, kind: [0], node: [7] } } } as never,
+    }),
+  );
+  afterEach(() => vi.clearAllMocks());
+
+  it("hides or shows the selected folder, as the context menu does", async () => {
+    await runCommand("item.hide_folder");
+    expect(hideFolder).toHaveBeenLastCalledWith("v1", 7, true);
+    await runCommand("item.unhide_folder");
+    expect(hideFolder).toHaveBeenLastCalledWith("v1", 7, false);
+  });
+
+  it("does nothing for an aggregate block or without a selection", async () => {
+    set({ views: { v1: { state: { scan_id: "s1" }, frame: { info: { selected_row: null }, kind: [0], node: [7] } } } as never });
+    await runCommand("item.hide_folder");
+    expect(hideFolder).not.toHaveBeenCalled();
   });
 });

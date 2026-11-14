@@ -97,7 +97,7 @@ Right-click a block, or press <kbd>Shift</kbd>+<kbd>F10</kbd>. The focus moves i
 | <kbd>←</kbd> | Back from the submenu |
 | <kbd>Esc</kbd> | Close the submenu, or the menu when no submenu is open |
 
-The items are: Open, Show in Explorer, Open terminal here, Copy path ▸, Add tag ▸, Show only this (zoom in), Classify ▸ (folders only), Rescan this folder, Add to delete basket, and System menu… (not wired up yet). The Copy path submenu has four forms, each previewed: As is (what <kbd>Ctrl</kbd>+<kbd>C</kbd> copies), Quoted, POSIX path and `file://` URI. A click outside the menu, resizing the window or switching to another window closes it.
+The items are: Open, Show in Explorer, Open terminal here, Copy path ▸, Add tag ▸, Show only this (zoom in), Classify ▸ (folders only), Hide this folder from the picture (folders only; Stop hiding this folder for one on the list), Rescan this folder, Add to delete basket, and System menu… (not wired up yet). The Copy path submenu has four forms, each previewed: As is (what <kbd>Ctrl</kbd>+<kbd>C</kbd> copies), Quoted, POSIX path and `file://` URI. A click outside the menu, resizing the window or switching to another window closes it.
 
 ## Matches list
 
@@ -279,6 +279,8 @@ Every other command shows up when you type its name or one of the words below:
 | Show/hide unknown space | <kbd>U</kbd> | `unknown space` | — |
 | Show/hide the Recycle Bin | <kbd>R</kbd> | `trash` · `recycle bin` | — |
 | Show/hide the folders listed in settings | <kbd>H</kbd> | `hidden folders` · `hide folders` · `exclude` · `ignore` · `隐藏文件夹` · `忽略` | — |
+| Hide this folder from the picture | — | `hide folder` · `hide this folder` · `exclude folder` · `ignore folder` · `隐藏文件夹` | — |
+| Stop hiding this folder | — | `unhide folder` · `show folder again` · `取消隐藏` | — |
 | Split view | — | `split` · `side by side` | — |
 | Pause scan | — | `pause` | — |
 | Resume scan | — | `resume` · `continue` | — |

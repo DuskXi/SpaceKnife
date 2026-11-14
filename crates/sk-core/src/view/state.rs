@@ -28,6 +28,7 @@ use super::tags::{TagStore, tag_index};
 use super::trash::{TrashCache, WithoutBins};
 use crate::filter::vocab::platform_vocab;
 use crate::filter::{FilterContext, FilterResult, NameIndex, evaluate, unix_now};
+use crate::i18n::t;
 use crate::layout::api::{ArraySizes, LayoutParams, OptValue, RootSpec, SizeSource, StoreSizes};
 use crate::layout::registry;
 use crate::layout::rows::{DrawList, KEY_MORE, KEY_NODE_MASK, KEY_SMALL, KEY_TAG_BITS, kind};
@@ -1076,15 +1077,7 @@ impl View {
         let mut ids: Vec<NodeId> = self
             .hidden_paths
             .iter()
-            .filter_map(|p| {
-                let p = std::path::Path::new(p);
-                // macOS ignores case by default: a folder typed in another case is still it
-                if cfg!(target_os = "macos") {
-                    nodes.find_caseless(p)
-                } else {
-                    nodes.find_shown(p)
-                }
-            })
+            .filter_map(|p| find_listed(nodes, p))
             .filter(|&id| id != 0 && !roots.contains(&id))
             .collect();
         ids.sort_unstable();
@@ -1106,6 +1099,50 @@ impl View {
         self.hidden_paths = paths;
         *self.hidden_found.get_mut() = None;
         true
+    }
+
+    /// What 「在画面中隐藏这个文件夹」 can do with `node` (UI-W5-52), with `list` the folders of
+    /// treemap.hidden_folders as they are now: show it again when the list names it, else hide
+    /// it, or say why neither. Not the scan's root (it is never hidden), a file, a folder of the
+    /// MFT scan's pseudo folders (no place on disk), nor anything of a comparison.
+    pub fn folder_hide(&self, node: NodeId, list: &[String]) -> FolderHide {
+        if self.compare.is_some() {
+            return FolderHide::No(t("对比时不可用，先退出对比").to_owned());
+        }
+        let nodes = self.ctx.store.read();
+        if node as usize >= nodes.len() {
+            return FolderHide::No(t("这个块已经不在视图里了，请再试一次").to_owned());
+        }
+        if node == 0 || nodes.roots().contains(&node) {
+            return FolderHide::No(t("扫描的根不能隐藏").to_owned());
+        }
+        let listed: Vec<String> = list
+            .iter()
+            .filter(|p| find_listed(&nodes, p) == Some(node))
+            .cloned()
+            .collect();
+        if !listed.is_empty() {
+            return FolderHide::Listed(listed);
+        }
+        if !nodes.is_dir(node) {
+            return FolderHide::No(t("只有文件夹可以隐藏").to_owned());
+        }
+        let pseudo = std::iter::once(node)
+            .chain(nodes.ancestors(node))
+            .any(|n| n > 0 && nodes.flags(n).intersects(Flags::VIRTUAL));
+        if pseudo {
+            return FolderHide::No(
+                t("NTFS 元数据与孤立文件只在 MFT 快速扫描里可见，没有对应的位置").to_owned(),
+            );
+        }
+        // the path as the protocol shows it: what the list holds must find this folder again
+        let path = nodes.path_printable(node);
+        if find_listed(&nodes, &path) != Some(node) {
+            return FolderHide::No(
+                t("这个文件夹的路径写成文字会指向别处，不能加进列表").to_owned(),
+            );
+        }
+        FolderHide::Hide(path)
     }
 
     fn in_bin(&self, nodes: &Nodes, bins: &[NodeId]) -> bool {
@@ -1608,6 +1645,29 @@ impl View {
         self.last = None;
         self.spare = None;
         self.refilter(None);
+    }
+}
+
+/// What 「在画面中隐藏这个文件夹」 / 「不再隐藏这个文件夹」 can do with a node
+/// ([`View::folder_hide`], UI-W5-52).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FolderHide {
+    /// Not listed, and it can be: the path the list gets (as the protocol shows it).
+    Hide(String),
+    /// The list names it: those entries, as written (taking them out shows it again).
+    Listed(Vec<String>),
+    /// Neither: why, in the interface language.
+    No(String),
+}
+
+/// The node a folder of treemap.hidden_folders names in the scan, if it holds it.
+fn find_listed(nodes: &Nodes, path: &str) -> Option<NodeId> {
+    let p = std::path::Path::new(path);
+    // macOS ignores case by default: a folder typed in another case is still it
+    if cfg!(target_os = "macos") {
+        nodes.find_caseless(p)
+    } else {
+        nodes.find_shown(p)
     }
 }
 

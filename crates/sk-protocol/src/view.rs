@@ -349,6 +349,48 @@ impl Validate for ViewRevealParams {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ViewNodeParams {
+    pub view_id: String,
+    /// A node of the view's scan (not an aggregate block's key)
+    pub node: u32,
+}
+
+impl Validate for ViewNodeParams {
+    fn validate(&self) -> ValidationResult {
+        check_view_id(&self.view_id)
+    }
+}
+
+/// Whether a folder is in the setting treemap.hidden_folders (「不再隐藏这个文件夹」), can be
+/// added (「在画面中隐藏这个文件夹」), or why neither (UI-W5-52).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct HiddenFolderInfo {
+    /// The entries of the list that name this folder, as written; any: it is listed
+    pub listed: Vec<String>,
+    /// What hiding it adds to the list (its path); "" when it is listed or can't be hidden
+    pub path: String,
+    /// Why it can't be hidden (interface language); "" when it can or is listed
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ViewHideFolderParams {
+    pub view_id: String,
+    /// A folder of the view's scan
+    pub node: u32,
+    /// True adds it to treemap.hidden_folders; false takes out the entries that name it
+    pub hide: bool,
+}
+
+impl Validate for ViewHideFolderParams {
+    fn validate(&self) -> ValidationResult {
+        check_view_id(&self.view_id)
+    }
+}
+
 fn default_results_limit() -> u32 {
     100
 }
