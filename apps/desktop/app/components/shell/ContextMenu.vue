@@ -1,6 +1,6 @@
 <!-- The unified context menu (UI-W5-01…24): an object header, open / show / terminal, copy path ▸,
-     tags ▸, zoom, rescan, the delete basket and the system menu, the same in every front end. It
-     lives in the store as `menu` (state/menu.ts closes it). -->
+     tags ▸, zoom, classify ▸ and hide (folders), rescan, the delete basket and the system menu, the
+     same in every front end. It lives in the store as `menu` (state/menu.ts closes it). -->
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from "vue";
 
@@ -13,8 +13,9 @@ import { t } from "@/lib/i18n";
 import type { IconName } from "@/lib/icons";
 import { folderOf, handOff, handable, notOpenable, revealLabel, textNamesIt } from "@/lib/reveal";
 import { tagLabel } from "@/lib/tags";
-import type { PathForms } from "@/protocol/generated";
+import type { HiddenFolderInfo, PathForms } from "@/protocol/generated";
 import { basketAdd, basketAddBlock, call, rescanFolder, viewCall } from "@/state/actions";
+import { hideFolder, hideRow, settingLocked } from "@/state/hiddenFolders";
 import { closeMenu } from "@/state/menu";
 import { toast, useApp } from "@/state/store";
 import { Kind } from "@/visual/frame";
@@ -59,6 +60,7 @@ const menu = useApp((s) => s.menu);
 const view = useApp((s) => (s.menu ? s.views[s.menu.viewId] : undefined));
 const vocab = useApp((s) => s.vocab);
 const settings = useApp((s) => s.settings); // tag display names (W7 标签)
+const conn = useApp((s) => s.conn);
 const scanning = useApp((s) => {
   const st = s.menu ? s.scans[s.menu.scanId] : undefined;
   return st?.state === "scanning" || st?.state === "queued";
@@ -68,6 +70,8 @@ const pos = ref<{ left: number; top: number } | null>(null);
 const forms = shallowRef<PathForms | null>(null);
 // a file whose own name path.forms writes escaped: its folder's forms, where a terminal opens
 const folderForms = shallowRef<PathForms | null>(null);
+// a folder and 「要隐藏的文件夹」 (view.hidden_folder), once read
+const hidden = shallowRef<HiddenFolderInfo | null>(null);
 const active = ref(0);
 const sub = ref<Sub | null>(null);
 const choice = ref<string | null | undefined>(undefined); // the folder's class choice, once read
@@ -107,6 +111,23 @@ watch(
         const pf = await call("path.forms", { scan_id: m.scanId, node: r.node.parent });
         if (live) folderForms.value = pf;
       })
+      .catch(() => undefined);
+    onCleanup(() => (live = false));
+  },
+  { immediate: true },
+);
+
+// a folder (the zoom root too): listed in 「要隐藏的文件夹」, or can it be (UI-W5-52)
+watch(
+  [menu, node, folder],
+  (_, __, onCleanup) => {
+    hidden.value = null;
+    const m = menu.value;
+    const n = node.value;
+    if (!m || n == null || n <= 0 || !folder.value) return;
+    let live = true;
+    void call("view.hidden_folder", { view_id: m.viewId, node: n })
+      .then((info) => live && (hidden.value = info))
       .catch(() => undefined);
     onCleanup(() => (live = false));
   },
@@ -176,6 +197,9 @@ const items = computed<Item[]>(() => {
   const parentRow = r >= 0 ? f.parent[r]! : -1;
   const n = node.value;
   const folderNode = folder.value ? n : parentRow >= 0 ? f.node[parentRow]! : null;
+  // the top of a scan of several roots has no node of its own (the menu's node is null)
+  const hide = n == null ? { hide: true, disabled: t("扫描的根不能隐藏") } : hideRow(hidden.value, settingLocked({ conn: conn.value, settings: settings.value }));
+  const title = head.value?.title;
   const all: Item[] = [
     { id: "open", icon: folder.value ? "folder" : "file", label: t("打开"), disabled: noOpen, run: () => path != null && void window.sk.shell.openPath(path) },
     { id: "reveal", icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: noOpen, run: () => path != null && window.sk.shell.showItemInFolder(path) },
@@ -191,6 +215,17 @@ const items = computed<Item[]>(() => {
     { id: "tag", icon: "tag", label: t("加标签"), sub: "tag", disabled: group.value ? t("小项聚合块不能加标签") : undefined },
     { id: "zoom", icon: "layers", label: t("只看这里（放大）"), keys: "Enter", run: () => void viewCall(m.viewId, "view.zoom", { key: m.key }) },
     ...(folder.value ? [{ id: "classify", icon: "palette" as IconName, label: t("归类"), sub: "classify" as const, disabled: gone }] : []),
+    ...(folder.value
+      ? [
+          {
+            id: "hide",
+            icon: (hide.hide ? "eyeOff" : "eye") as IconName,
+            label: hide.hide ? t("在画面中隐藏这个文件夹") : t("不再隐藏这个文件夹"),
+            disabled: hide.disabled,
+            run: () => n != null && void hideFolder(m.viewId, n, hide.hide, title),
+          },
+        ]
+      : []),
     {
       id: "rescan",
       icon: "refresh",

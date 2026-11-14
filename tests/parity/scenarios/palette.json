@@ -3,8 +3,9 @@
   "description": "The command palette over a scan: commands, queries (empty, a command name, a path, a filter, pinyin), command checks, the path group, filter previews, recents remembered and cleared, path forms, and the tags of the start page after a restart.",
   "fixtures": {"tree": "standard"},
   "known_diffs": [
-    {"path": "steps/0/result/commands/#len", "why": "0.3.6 by design (issue #26): one command more, view.toggle_hidden_folders (H); it is the last, so every other command keeps its index"},
-    {"path": "steps/7/result/commands/**", "why": "0.3.6 by design (issue #26): the new command 「显示/隐藏设置里列出的文件夹」 (Show/hide the folders listed in settings) matches \"fd\" (folders) and ranks third, so every result after it moves down one"}
+    {"path": "steps/0/result/commands/#len", "why": "0.3.6 by design (issue #26): one command more, view.toggle_hidden_folders (H); 0.3.7 two more, item.hide_folder and item.unhide_folder (the selected folder in or out of the list, UI-W5-52). They are the last, so every other command keeps its index"},
+    {"path": "steps/7/result/commands/**", "why": "0.3.6 by design (issue #26): the new command 「显示/隐藏设置里列出的文件夹」 (Show/hide the folders listed in settings) matches \"fd\" (folders) and ranks third, so every result after it moves down one; 0.3.7's Hide this folder from the picture and Stop hiding this folder match it too (folder)"},
+    {"path": "steps/11/result/commands/#len", "why": "0.3.7 by design (issue #26, UI-W5-52): the new command Hide this folder from the picture matches \"theme\" (t-h in this, e in folder, m in from, e in picture) and is listed after Cycle coloring, which keeps its place"}
   ],
   "steps": [
     {"call": "palette.commands", "params": {}},

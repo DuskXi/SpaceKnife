@@ -376,5 +376,13 @@
  "扫描视图里这些文件夹整个不占画面，其余的块放大填满；工具栏的「隐藏文件夹」（H）随时可以让它们回来。默认一个也没有": "In scan views these folders take no room in the picture and the other blocks grow to fill it; Hide folders (H) in the toolbar brings them back at any time. None by default",
  "只影响画面：扫描到的数据、详情面板和各个列表都不变": "Only the picture changes: what was scanned, the details panel and the lists stay the same",
  "显示/隐藏设置里列出的文件夹": "Show/hide the folders listed in settings",
- "这次扫描里没有设置里列出的文件夹": "This scan has none of the folders listed in settings"
+ "这次扫描里没有设置里列出的文件夹": "This scan has none of the folders listed in settings",
+ "在画面中隐藏这个文件夹": "Hide this folder from the picture",
+ "不再隐藏这个文件夹": "Stop hiding this folder",
+ "设置里已经列出了这个文件夹": "This folder is listed in settings already",
+ "设置里没有列出这个文件夹": "This folder isn't listed in settings",
+ "扫描的根不能隐藏": "The scan's root can't be hidden",
+ "只有文件夹可以隐藏": "Only folders can be hidden",
+ "NTFS 元数据与孤立文件只在 MFT 快速扫描里可见，没有对应的位置": "NTFS metadata and orphaned files exist only in an MFT quick scan and have no location on disk",
+ "这个文件夹的路径写成文字会指向别处，不能加进列表": "Written as text, this folder's path would point somewhere else, so it can't go on the list"
 }

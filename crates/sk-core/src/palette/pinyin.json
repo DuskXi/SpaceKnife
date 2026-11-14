@@ -1,5 +1,6 @@
 {
  "上一级": ["shang", "yi", "ji"],
+ "不再隐藏这个文件夹": ["bu", "zai", "yin", "cang", "zhe", "ge", "wen", "jian", "jia"],
  "与快照对比…": ["yu", "kuai", "zhao", "dui", "bi", "…"],
  "保存快照": ["bao", "cun", "kuai", "zhao"],
  "停止扫描": ["ting", "zhi", "sao", "miao"],
@@ -17,6 +18,7 @@
  "后退": ["hou", "tui"],
  "在文件管理器中显示": ["zai", "wen", "jian", "guan", "li", "qi", "zhong", "xian", "shi"],
  "在此打开终端": ["zai", "ci", "da", "kai", "zhong", "duan"],
+ "在画面中隐藏这个文件夹": ["zai", "hua", "mian", "zhong", "yin", "cang", "zhe", "ge", "wen", "jian", "jia"],
  "在访达中显示": ["zai", "fang", "da", "zhong", "xian", "shi"],
  "在资源管理器中显示": ["zai", "zi", "yuan", "guan", "li", "qi", "zhong", "xian", "shi"],
  "复制路径": ["fu", "zhi", "lu", "jing"],

@@ -311,6 +311,48 @@ fn availability_and_status() {
     assert_eq!(evaluate(cmd("snapshot.save"), &comparing), s(true, ""));
 }
 
+#[test]
+fn hiding_the_selected_folder() {
+    use sk_core::view::FolderHide;
+    let _g = i18n::TEST_LOCK.lock();
+    let ctx = |hide: Option<FolderHide>| Context {
+        view: Some(ViewFacts {
+            selected: hide.as_ref().map(|_| 3),
+            selected_hide: hide,
+            selected_name: "Music".into(),
+            ..view()
+        }),
+        ..scan_ctx(view())
+    };
+    let (hide, show) = (cmd("item.hide_folder"), cmd("item.unhide_folder"));
+    assert_eq!((hide.icon, show.icon), ("eyeOff", "eye"));
+    assert!(hide.keys.is_empty() && show.keys.is_empty() && !hide.typed_only);
+    // a folder not listed yet: hide it, with its name as the status
+    let free = ctx(Some(FolderHide::Hide("/home/lenny/Music".into())));
+    assert_eq!(evaluate(hide, &free), s(true, "Music"));
+    assert_eq!(evaluate(show, &free), s(false, "设置里没有列出这个文件夹"));
+    // a listed one: show it again
+    let listed = ctx(Some(FolderHide::Listed(vec!["/home/lenny/Music".into()])));
+    assert_eq!(
+        evaluate(hide, &listed),
+        s(false, "设置里已经列出了这个文件夹")
+    );
+    assert_eq!(evaluate(show, &listed), s(true, "Music"));
+    // neither (the scan's root, a file, …): the view's reason for both
+    let root = ctx(Some(FolderHide::No("扫描的根不能隐藏".into())));
+    assert_eq!(evaluate(hide, &root), s(false, "扫描的根不能隐藏"));
+    assert_eq!(evaluate(show, &root), s(false, "扫描的根不能隐藏"));
+    // nothing selected, or no scan
+    assert_eq!(evaluate(hide, &ctx(None)), s(false, "没有选中项"));
+    assert_eq!(
+        evaluate(show, &Context::new(PaletteTab::Start)),
+        s(false, "需要先完成扫描")
+    );
+    // found by English words too
+    assert!(match_command(hide, "hide folder").is_some());
+    assert!(match_command(show, "unhide").is_some());
+}
+
 fn visual(id: &str, title: &str) -> ShownVisual {
     ShownVisual {
         id: id.into(),

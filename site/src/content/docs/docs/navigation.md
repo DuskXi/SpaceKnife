@@ -139,6 +139,7 @@ The menu starts with a header (name, size, type, parent folder) and then:
 | **Add tag** ▸ | | **Red tag**, **Yellow tag**, **Green tag**, **Blue tag** (<kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>4</kbd>), **Clear tag** (<kbd>Ctrl</kbd>+<kbd>0</kbd>) |
 | **Show only this (zoom in)** | <kbd>Enter</kbd> | Zooms in |
 | **Classify** ▸ (folders only) | | **Automatic**, **By extension only**, or **Count as** a class: every file in the folder counts as that class. See [Classes by folder](../tags-classes/#classes-by-folder) |
+| **Hide this folder from the picture** (folders only) | | Adds the folder to **Settings › Visualization › Hidden folders**: it takes no room in the picture. For a folder on that list: **Stop hiding this folder**. See [Hidden folders](../visualizations/#hidden-folders) |
 | **Rescan this folder** | | Reads the folder again with everything below it (for a file: its folder) |
 | **Add to delete basket** | <kbd>Delete</kbd> | Puts it in the delete basket |
 | **System menu…** | | Listed, not available yet |

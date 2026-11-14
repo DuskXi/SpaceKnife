@@ -6,7 +6,7 @@ What is already done for the next version, **0.3.7**, and not in a release yet. 
 
 ### What's new
 
-(nothing yet)
+- **Hide a folder right from the picture** ([#26](https://github.com/DuskXi/SpaceKnife/issues/26)). Right-click a folder's block, bar or sector and choose **Hide this folder from the picture**: it goes on the list in Settings › Visualization › Hidden folders and leaves the picture at once, with no path to type. For a folder on the list the item reads **Stop hiding this folder** (it is drawn while Hide folders is off, or while you are zoomed into it). The command palette has both for the selected folder. They aren't offered for the scan's root, the MFT quick scan's `$NTFS metadata` and `$Orphaned files`, or in snapshot comparisons: the item is grayed out and says why.
 
 ### Fixes
 
@@ -20,7 +20,7 @@ What is already done for the next version, **0.3.7**, and not in a release yet. 
 
 ### 新功能
 
-（暂无）
+- **在画面里直接隐藏文件夹**（[#26](https://github.com/DuskXi/SpaceKnife/issues/26)）。右键单击文件夹的块、条或扇区，选「在画面中隐藏这个文件夹」：它加进「设置 › 可视化 › 隐藏的文件夹」，立即离开画面，不用再输入路径。已经在列表里的文件夹，这一项是「不再隐藏这个文件夹」（「隐藏文件夹」关着时，或放大在它里面时，画面里能看到它）。命令面板对选中的文件夹也有这两条命令。扫描的根、MFT 快速扫描的 `$NTFS 元数据` 和 `$孤立文件`、快照对比里不能用：这一项是灰色的，并说明原因。
 
 ### 修复
 

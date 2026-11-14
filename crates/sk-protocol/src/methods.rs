@@ -251,6 +251,10 @@ methods! {
         "Select a block and navigate until it is drawn (W3 click).";
     VIEW_RESULTS / ViewResultsMethod = "view.results"(ViewResultsParams) -> ViewResults;
         "A page of the filter result list, grouped by visible block.";
+    VIEW_HIDDEN_FOLDER / ViewHiddenFolder = "view.hidden_folder"(ViewNodeParams) -> HiddenFolderInfo;
+        "Whether a folder of the view's scan is listed in treemap.hidden_folders, can be added, or why not (UI-W5-52).";
+    VIEW_HIDE_FOLDER / ViewHideFolder = "view.hide_folder"(ViewHideFolderParams) -> SettingsState;
+        "Add a folder of the view's scan to treemap.hidden_folders, or take out the entries that name it; open views follow at once (UI-W5-52).";
     VISUAL_LIST / VisualList = "visual.list"(Empty) -> VisualListResult;
         "Visualizations this server offers and whether this session can show each.";
     SETTINGS_GET / SettingsGet = "settings.get"(Empty) -> SettingsState;
@@ -396,7 +400,7 @@ mod tests {
     fn names_are_unique() {
         let names: HashSet<_> = METHODS.iter().map(|m| m.name).collect();
         assert_eq!(names.len(), METHODS.len());
-        assert_eq!(METHODS.len(), 91);
+        assert_eq!(METHODS.len(), 93);
         let events: HashSet<_> = EVENTS.iter().map(|e| e.name).collect();
         assert_eq!(events.len(), EVENTS.len());
         assert_eq!(EVENTS.len(), 11);

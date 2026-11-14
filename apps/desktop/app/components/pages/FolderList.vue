@@ -77,7 +77,7 @@ function onKey(e: KeyboardEvent): void {
         </button>
       </li>
     </ul>
-    <div v-else class="fl-empty muted">{{ t("还没有文件夹。扫描到列表里的文件夹时，工具栏会出现「隐藏文件夹」。") }}</div>
+    <div v-else class="fl-empty muted">{{ t("还没有文件夹。在扫描视图里右键单击文件夹，选「在画面中隐藏这个文件夹」，或在下面输入路径。扫描到列表里的文件夹时，工具栏会出现「隐藏文件夹」。") }}</div>
     <div class="fl-add">
       <span :class="['fl-input', { invalid: error }]">
         <input

@@ -21,6 +21,7 @@ pub use compare::{ArrayChanges, CompareSource};
 pub use frame::{encode_frame, encode_frame_into, filter_info, frame_info, view_state};
 pub use results::{ResultEntry, ResultsCache, results_page, sorted_rows};
 pub use state::{
-    FilterState, Frame, RootInfo, RootRow, View, ViewContext, ViewSettings, Zoom, flag, showable,
+    FilterState, FolderHide, Frame, RootInfo, RootRow, View, ViewContext, ViewSettings, Zoom, flag,
+    showable,
 };
 pub use tags::TagStore;

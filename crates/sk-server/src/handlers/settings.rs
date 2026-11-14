@@ -12,7 +12,7 @@ use crate::app::Server;
 use crate::rpc::{Router, RpcError, RpcResult};
 use crate::topics::TopicRegistry;
 
-fn mapped(e: SettingsError) -> RpcError {
+pub(crate) fn mapped(e: SettingsError) -> RpcError {
     match e {
         SettingsError::Conflict(m) => RpcError::new(ErrorCode::SettingsConflict, m),
         SettingsError::Invalid(m) | SettingsError::Io(m) => RpcError::invalid_params(m),
